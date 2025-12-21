@@ -1,0 +1,116 @@
+# Generated with protoc-gen-openapi
+# https://github.com/google/gnostic/tree/master/cmd/protoc-gen-openapi
+
+openapi: 3.0.3
+info:
+    title: Auth API
+    version: 0.0.1
+paths:
+    /auth/get-register-mail:
+        get:
+            tags:
+                - Auth
+            operationId: Auth_GetRegisterMail
+            parameters:
+                - name: username
+                  in: query
+                  schema:
+                    type: string
+                - name: email
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/auth_center.v1.auth.GetVerifyCodeReply'
+    /auth/login:
+        post:
+            tags:
+                - Auth
+            operationId: Auth_PasswordLogin
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/auth_center.v1.auth.LoginRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/auth_center.v1.auth.LoginReply'
+    /auth/register:
+        post:
+            tags:
+                - Auth
+            operationId: Auth_Register
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/auth_center.v1.auth.RegisterRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/auth_center.v1.auth.RegisterReply'
+components:
+    schemas:
+        auth_center.v1.auth.GetVerifyCodeReply:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                data:
+                    $ref: '#/components/schemas/auth_center.v1.auth.GetVerifyCodeReply_GetVerifyCodeReplyData'
+        auth_center.v1.auth.GetVerifyCodeReply_GetVerifyCodeReplyData:
+            type: object
+            properties:
+                userId:
+                    type: string
+                username:
+                    type: string
+        auth_center.v1.auth.LoginReply:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                data:
+                    $ref: '#/components/schemas/auth_center.v1.auth.LoginReply_LoginReplyData'
+        auth_center.v1.auth.LoginReply_LoginReplyData:
+            type: object
+            properties:
+                accessToken:
+                    type: string
+                refreshToken:
+                    type: string
+        auth_center.v1.auth.LoginRequest:
+            type: object
+            properties:
+                email:
+                    type: string
+                password:
+                    type: string
+        auth_center.v1.auth.RegisterReply:
+            type: object
+            properties: {}
+        auth_center.v1.auth.RegisterRequest:
+            type: object
+            properties: {}
+tags:
+    - name: Auth

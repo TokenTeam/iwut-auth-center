@@ -1,0 +1,62 @@
+syntax = "proto3";
+package kratos.api;
+
+option go_package = "iwut-auth_center/internal/conf;conf";
+
+import "google/protobuf/duration.proto";
+
+message Bootstrap {
+  Server server = 1;
+  Data data = 2;
+  Jwt jwt = 3;
+}
+
+message Server {
+  message HTTP {
+    string network = 1;
+    string addr = 2;
+    google.protobuf.Duration timeout = 3;
+  }
+  message GRPC {
+    string network = 1;
+    string addr = 2;
+    google.protobuf.Duration timeout = 3;
+  }
+  HTTP http = 1;
+  GRPC grpc = 2;
+}
+
+message Data {
+  message Database {
+    string driver = 1;
+    string source = 2;
+  }
+  message Redis {
+    string network = 1;
+    string addr = 2;
+    google.protobuf.Duration read_timeout = 3;
+    google.protobuf.Duration write_timeout = 4;
+  }
+  message MongoDB {
+    string uri = 1;
+    string username = 2;
+    string password = 3;
+    string auth_source = 4;
+    string database = 5;
+    google.protobuf.Duration connect_timeout = 6;
+  }
+  Database database = 1;
+  Redis redis = 2;
+  MongoDB mongodb = 3;
+}
+
+message Jwt {
+  message Key {
+    string public_key = 1;
+    string private_key = 2;
+  }
+  Key key = 1;
+  int32 access_token_life_span = 2;
+  int32 refresh_token_life_span = 3;
+  string issuer = 4;
+}
