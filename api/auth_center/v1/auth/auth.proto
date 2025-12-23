@@ -68,5 +68,9 @@ message RegisterRequest {
 }
 
 message RegisterReply {
-
+    message RegisterReplyData {
+    }
+    int32 code = 1;
+    string message = 2;
+    optional RegisterReplyData data = 3;
 }

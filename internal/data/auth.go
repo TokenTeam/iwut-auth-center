@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"iwut-auth-center/internal/biz"
 	"iwut-auth-center/internal/conf"
+	"iwut-auth-center/internal/util"
 	"time"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -17,15 +18,17 @@ type authRepo struct {
 	data           *Data
 	log            *log.Helper
 	userCollection *mongo.Collection
+	sha256Util     *util.Sha256Util
 }
 
-func NewAuthRepo(data *Data, c *conf.Data, logger log.Logger) biz.AuthRepo {
+func NewAuthRepo(data *Data, c *conf.Data, logger log.Logger, sha256Util *util.Sha256Util) biz.AuthRepo {
 	dbName := c.GetMongodb().GetDatabase()
-	usersCollection := data.mongo.Database(dbName).Collection("users")
+	usersCollection := data.mongo.Database(dbName).Collection("user")
 	return &authRepo{
 		data:           data,
 		log:            log.NewHelper(logger),
 		userCollection: usersCollection,
+		sha256Util:     sha256Util,
 	}
 }
 
@@ -45,6 +48,7 @@ func RequestIDFrom(ctx context.Context) string {
 }
 
 func (r *authRepo) CheckPasswordAndGetUserBaseInfo(ctx context.Context, email string, password string) (string, error) {
+	password = r.sha256Util.HashPassword(password)
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 

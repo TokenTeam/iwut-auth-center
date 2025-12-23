@@ -10,6 +10,7 @@ import (
 	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/log"
 	"iwut-auth-center/internal/biz"
+	"iwut-auth-center/internal/biz/mail"
 	"iwut-auth-center/internal/conf"
 	"iwut-auth-center/internal/data"
 	"iwut-auth-center/internal/server"
@@ -24,15 +25,17 @@ import (
 // Injectors from wire.go:
 
 // wireApp init kratos application.
-func wireApp(confServer *conf.Server, confData *conf.Data, jwt *conf.Jwt, logger log.Logger) (*kratos.App, func(), error) {
+func wireApp(confServer *conf.Server, confData *conf.Data, jwt *conf.Jwt, confMail *conf.Mail, logger log.Logger) (*kratos.App, func(), error) {
 	dataData, cleanup, err := data.NewData(confData)
 	if err != nil {
 		return nil, nil, err
 	}
-	authRepo := data.NewAuthRepo(dataData, confData, logger)
+	sha256Util := util.NewSha256Util(jwt)
+	authRepo := data.NewAuthRepo(dataData, confData, logger, sha256Util)
 	authUsecase := biz.NewAuthUsecase(authRepo)
+	usecase := mail.NewMailUsecase(confMail)
 	jwtUtil := util.NewJwtUtil(jwt)
-	authService := auth.NewAuthService(authUsecase, jwtUtil, jwt)
+	authService := auth.NewAuthService(authUsecase, usecase, jwtUtil, jwt)
 	grpcServer := server.NewGRPCServer(confServer, authService, logger)
 	httpServer := server.NewHTTPServer(confServer, authService, logger)
 	app := newApp(logger, grpcServer, httpServer)

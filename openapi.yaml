@@ -108,6 +108,16 @@ components:
                     type: string
         auth_center.v1.auth.RegisterReply:
             type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                data:
+                    $ref: '#/components/schemas/auth_center.v1.auth.RegisterReply_RegisterReplyData'
+        auth_center.v1.auth.RegisterReply_RegisterReplyData:
+            type: object
             properties: {}
         auth_center.v1.auth.RegisterRequest:
             type: object

@@ -1,44 +1,29 @@
-# Kratos Project Template
-
-## Install Kratos
-```
-go install github.com/go-kratos/kratos/cmd/kratos/v2@latest
-```
-## Create a service
-```
-# Create a template project
-kratos new server
-
-cd server
-# Add a proto template
-kratos proto add api/server/server.proto
-# Generate the proto code
-kratos proto client api/server/server.proto
-# Generate the source code of service by proto file
-kratos proto server api/server/server.proto -t internal/service
-
-go generate ./...
-go build -o ./bin/ ./...
-./bin/server -conf ./configs
-```
-## Generate other auxiliary files by Makefile
-```
-# Download and update dependencies
+# 吾理经纬 用户中心
+## 项目开发
+```bash
 make init
-# Generate API files (include: pb.go, http, grpc, validate, swagger) by proto file
-make api
-# Generate all files
-make all
+make pre-gen
 ```
-## Automated Initialization (wire)
+这两行命令实际上完成了：依赖拉取、proto 代码生成、wire 依赖注入代码生成等工作。
+你可以到 `Makefile` 中查看具体实现。
+## 环境变量
+想要了解有哪些可以配置的环境变量，你应当检查 `configs/config.yaml` 文件。
+其中，以mongoDB URI为例：其格式如下：
+```yaml
+uri: "${mongoUrl:mongodb://localhost:27017/}"
 ```
-# install wire
-go get github.com/google/wire/cmd/wire
+为了使用环境变量覆盖该值，对应环境变量的键是`AuthCenter_mongoUrl`。即使用`AuthCenter_`作为前缀，后接配置文件中的变量名。
 
-# generate wire
-cd cmd/server
-wire
+需要注意的是，在生产环境中部署时，你需要替换`jwt.key.private_key`和`jwt.key.public_key`的值。
+生成私钥和公钥的命令如下：
+```bash
+# 生成私钥
+openssl genrsa -out rsa-private-key.pem 2048
+# 生成公钥
+openssl rsa -in rsa-private-key.pem -pubout -out rsa-public-key.pem
 ```
+这会在你当前文件夹下生成`rsa-private-key.pem`和`rsa-public-key.pem`两个文件。
+尽管程序支持且自动识别值是否经过BASE64编码，但在生产环境中，建议你使用BASE64编码后的值作为环境变量传入。
 
 ## Docker
 ```bash

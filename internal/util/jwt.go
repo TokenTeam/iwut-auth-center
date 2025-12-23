@@ -43,7 +43,7 @@ func (j *JwtUtil) DecodeJWT(tokenStr string) (map[string]interface{}, error) {
 
 // EncodeJWTWithRS256 creates a signed JWT using RS256 (RSA private key).
 func (j *JwtUtil) EncodeJWTWithRS256(claims map[string]interface{}, ttl time.Duration) (string, error) {
-	privateKey := j.privateKeyPEM
+	privateKey := j.privateKey
 	if privateKey == nil {
 		return "", errors.New("nil private key")
 	}
@@ -120,8 +120,15 @@ type JwtUtilFuncs interface {
 type JwtUtil struct {
 	privateKeyPEM []byte
 	publicKeyPEM  []byte
+	privateKey    *rsa.PrivateKey
+	publicKey     *rsa.PublicKey
 	issuer        string
 }
+
+var (
+	// ErrUserNotFound is user not found.
+	JwtUtilInstance *JwtUtil
+)
 
 // decodeBase64OrRaw tries to base64-decode the input; if decoding fails, returns the raw bytes (assumed PEM).
 func decodeBase64OrRaw(s string) []byte {
@@ -142,20 +149,29 @@ func decodeBase64OrRaw(s string) []byte {
 // Inputs may be raw PEM text or base64-encoded PEM. If both are empty, returns an error.
 // This function performs light validation by attempting to parse keys using helper parsers; parsing errors are returned.
 func NewJwtUtil(c *conf.Jwt) *JwtUtil {
+	if JwtUtilInstance != nil {
+		return JwtUtilInstance
+	}
 	var privPEM, pubPEM []byte
 	privateStr := c.GetKey().GetPrivateKey()
 	publicStr := c.GetKey().GetPublicKey()
 	issuer := c.GetIssuer()
+	var privKey *rsa.PrivateKey
+	var pubKey *rsa.PublicKey
 	if privateStr != "" {
 		privPEM = decodeBase64OrRaw(privateStr)
-		if _, err := ParseRSAPrivateKeyFromPEM(privPEM); err != nil {
+		if parsed, err := ParseRSAPrivateKeyFromPEM(privPEM); err != nil {
 			panic("invalid private key: " + err.Error())
+		} else {
+			privKey = parsed
 		}
 	}
 	if publicStr != "" {
 		pubPEM = decodeBase64OrRaw(publicStr)
-		if _, err := ParseRSAPublicKeyFromPEM(pubPEM); err != nil {
+		if parsed, err := ParseRSAPublicKeyFromPEM(pubPEM); err != nil {
 			panic("invalid public key: " + err.Error())
+		} else {
+			pubKey = parsed
 		}
 	}
 	if len(privPEM) == 0 || len(pubPEM) == 0 {
@@ -164,7 +180,14 @@ func NewJwtUtil(c *conf.Jwt) *JwtUtil {
 	if issuer == "" {
 		panic("empty issuer")
 	}
-	return &JwtUtil{privateKeyPEM: privPEM, publicKeyPEM: pubPEM, issuer: issuer}
+	JwtUtilInstance = &JwtUtil{
+		privateKeyPEM: privPEM,
+		publicKeyPEM:  pubPEM,
+		privateKey:    privKey,
+		publicKey:     pubKey,
+		issuer:        issuer,
+	}
+	return JwtUtilInstance
 }
 
 func (j *JwtUtil) PrivateKeyPEM() []byte { return j.privateKeyPEM }
