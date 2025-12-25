@@ -2,19 +2,16 @@ package biz
 
 import (
 	"context"
-	"iwut-auth-center/api/auth_center/v1/auth"
-
-	"github.com/go-kratos/kratos/v2/errors"
-)
-
-var (
-	// ErrUserNotFound is user not found.
-	ErrUserNotFound = errors.NotFound(auth.ErrorReason_USER_NOT_FOUND.String(), "user not found")
+	"time"
 )
 
 type AuthRepo interface {
-	GetPasswordByEmail(context context.Context, email string) (string, error)
-	CheckPasswordAndGetUserBaseInfo(ctx context.Context, email, password string) (string, error)
+	CheckPasswordWithEmailAndGetUserIdAndVersion(ctx context.Context, email, password string) (string, int, error)
+	TryInsertRegisterCaptcha(ctx context.Context, email string, captcha string, ttl time.Duration) error
+	CheckCaptchaUsable(ctx context.Context, email string, captcha string, ttl time.Duration) error
+	RegisterUser(ctx context.Context, email string, password string) (string, error)
+	AddOrUpdateUserVersion(ctx context.Context, userId string, version int, ttl time.Duration) error
+	GetUserVersion(ctx context.Context, userId string, ttl time.Duration) (int, error)
 }
 
 type AuthUsecase struct {

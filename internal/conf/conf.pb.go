@@ -536,10 +536,10 @@ func (x *Data_Database) GetSource() string {
 
 type Data_Redis struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Network       string                 `protobuf:"bytes,1,opt,name=network,proto3" json:"network,omitempty"`
-	Addr          string                 `protobuf:"bytes,2,opt,name=addr,proto3" json:"addr,omitempty"`
-	ReadTimeout   *durationpb.Duration   `protobuf:"bytes,3,opt,name=read_timeout,json=readTimeout,proto3" json:"read_timeout,omitempty"`
-	WriteTimeout  *durationpb.Duration   `protobuf:"bytes,4,opt,name=write_timeout,json=writeTimeout,proto3" json:"write_timeout,omitempty"`
+	Addr          string                 `protobuf:"bytes,1,opt,name=addr,proto3" json:"addr,omitempty"`
+	Password      string                 `protobuf:"bytes,2,opt,name=password,proto3" json:"password,omitempty"`
+	Db            int32                  `protobuf:"varint,3,opt,name=db,proto3" json:"db,omitempty"`
+	PrefixKey     string                 `protobuf:"bytes,4,opt,name=prefix_key,json=prefixKey,proto3" json:"prefix_key,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -574,13 +574,6 @@ func (*Data_Redis) Descriptor() ([]byte, []int) {
 	return file_conf_conf_proto_rawDescGZIP(), []int{2, 1}
 }
 
-func (x *Data_Redis) GetNetwork() string {
-	if x != nil {
-		return x.Network
-	}
-	return ""
-}
-
 func (x *Data_Redis) GetAddr() string {
 	if x != nil {
 		return x.Addr
@@ -588,18 +581,25 @@ func (x *Data_Redis) GetAddr() string {
 	return ""
 }
 
-func (x *Data_Redis) GetReadTimeout() *durationpb.Duration {
+func (x *Data_Redis) GetPassword() string {
 	if x != nil {
-		return x.ReadTimeout
+		return x.Password
 	}
-	return nil
+	return ""
 }
 
-func (x *Data_Redis) GetWriteTimeout() *durationpb.Duration {
+func (x *Data_Redis) GetDb() int32 {
 	if x != nil {
-		return x.WriteTimeout
+		return x.Db
 	}
-	return nil
+	return 0
+}
+
+func (x *Data_Redis) GetPrefixKey() string {
+	if x != nil {
+		return x.PrefixKey
+	}
+	return ""
 }
 
 type Data_MongoDB struct {
@@ -759,19 +759,20 @@ const file_conf_conf_proto_rawDesc = "" +
 	"\x04GRPC\x12\x18\n" +
 	"\anetwork\x18\x01 \x01(\tR\anetwork\x12\x12\n" +
 	"\x04addr\x18\x02 \x01(\tR\x04addr\x123\n" +
-	"\atimeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\atimeout\"\xe8\x04\n" +
+	"\atimeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\atimeout\"\x9a\x04\n" +
 	"\x04Data\x125\n" +
 	"\bdatabase\x18\x01 \x01(\v2\x19.kratos.api.Data.DatabaseR\bdatabase\x12,\n" +
 	"\x05redis\x18\x02 \x01(\v2\x16.kratos.api.Data.RedisR\x05redis\x122\n" +
 	"\amongodb\x18\x03 \x01(\v2\x18.kratos.api.Data.MongoDBR\amongodb\x1a:\n" +
 	"\bDatabase\x12\x16\n" +
 	"\x06driver\x18\x01 \x01(\tR\x06driver\x12\x16\n" +
-	"\x06source\x18\x02 \x01(\tR\x06source\x1a\xb3\x01\n" +
-	"\x05Redis\x12\x18\n" +
-	"\anetwork\x18\x01 \x01(\tR\anetwork\x12\x12\n" +
-	"\x04addr\x18\x02 \x01(\tR\x04addr\x12<\n" +
-	"\fread_timeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\vreadTimeout\x12>\n" +
-	"\rwrite_timeout\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\fwriteTimeout\x1a\xd4\x01\n" +
+	"\x06source\x18\x02 \x01(\tR\x06source\x1af\n" +
+	"\x05Redis\x12\x12\n" +
+	"\x04addr\x18\x01 \x01(\tR\x04addr\x12\x1a\n" +
+	"\bpassword\x18\x02 \x01(\tR\bpassword\x12\x0e\n" +
+	"\x02db\x18\x03 \x01(\x05R\x02db\x12\x1d\n" +
+	"\n" +
+	"prefix_key\x18\x04 \x01(\tR\tprefixKey\x1a\xd4\x01\n" +
 	"\aMongoDB\x12\x10\n" +
 	"\x03uri\x18\x01 \x01(\tR\x03uri\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\x12\x1a\n" +
@@ -839,14 +840,12 @@ var file_conf_conf_proto_depIdxs = []int32{
 	10, // 9: kratos.api.Jwt.key:type_name -> kratos.api.Jwt.Key
 	11, // 10: kratos.api.Server.HTTP.timeout:type_name -> google.protobuf.Duration
 	11, // 11: kratos.api.Server.GRPC.timeout:type_name -> google.protobuf.Duration
-	11, // 12: kratos.api.Data.Redis.read_timeout:type_name -> google.protobuf.Duration
-	11, // 13: kratos.api.Data.Redis.write_timeout:type_name -> google.protobuf.Duration
-	11, // 14: kratos.api.Data.MongoDB.connect_timeout:type_name -> google.protobuf.Duration
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	11, // 12: kratos.api.Data.MongoDB.connect_timeout:type_name -> google.protobuf.Duration
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_conf_conf_proto_init() }

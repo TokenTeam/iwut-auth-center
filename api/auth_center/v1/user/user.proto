@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package auth_center.v1.user;
+
+import "google/api/annotations.proto";
+
+option go_package = "iwut-auth_center/api/auth_center/v1/user;user";
+
+service User {
+  rpc updatePassword (UpdatePasswordRequest) returns (UpdatePasswordReply) {
+    option (google.api.http) = {
+      post: "/user/update-password"
+      body: "*"
+    };
+  }
+}
+
+message UpdatePasswordRequest {
+  string oldPassword = 1;
+  string newPassword = 2;
+}
+
+message UpdatePasswordReply {
+  int32 code = 1;
+  string message = 2;
+  optional string traceId = 3;
+}

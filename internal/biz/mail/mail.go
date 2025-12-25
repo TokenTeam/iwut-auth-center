@@ -1,40 +1,48 @@
 package mail
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"iwut-auth-center/internal/conf"
+	"iwut-auth-center/internal/util"
 	"net/smtp"
 	"strings"
+
+	"github.com/go-kratos/kratos/v2/log"
 )
 
 type Usecase struct {
 	loginAuth *LoginAuth
 	hostname  string
+	logger    *log.Helper
 }
 
-func NewMailUsecase(c *conf.Mail) *Usecase {
+func NewMailUsecase(c *conf.Mail, logger log.Logger) *Usecase {
 	return &Usecase{
 		loginAuth: &LoginAuth{
 			username: c.GetUsername(),
 			password: c.GetPassword(),
 		},
 		hostname: fmt.Sprintf("%s:%d", c.GetHost(), c.GetPort()),
+		logger:   log.NewHelper(logger),
 	}
 }
 
-func (m *Usecase) SendVerifyCodeMail(expireTime int32, captcha string, to []string) error {
+func (m *Usecase) SendVerifyCodeMail(ctx context.Context, expireTime int32, captcha string, to []string) error {
 	if len(to) == 0 {
+		reqId := util.RequestIDFrom(ctx)
+		m.logger.Errorf("trying to send a mail without recipients. reqId: %s", reqId)
 		return fmt.Errorf("no recipients")
 	}
 	body := verifyCodeTemplate
 	body = strings.ReplaceAll(body, "{{ExpireTime}}", string(expireTime))
 	body = strings.ReplaceAll(body, "{{Captcha}}", captcha)
 	subject := "掌上吾理--用户验证 " + captcha
-	return m.SendEmail(subject, to, body)
+	return m.SendEmail(ctx, subject, to, body)
 }
 
-func (m *Usecase) SendEmail(subject string, recipients []string, body string) error {
+func (m *Usecase) SendEmail(ctx context.Context, subject string, recipients []string, body string) error {
 	hostname := m.hostname
 	authentication := m.loginAuth
 	sender := m.loginAuth.username
@@ -66,6 +74,7 @@ func (m *Usecase) SendEmail(subject string, recipients []string, body string) er
 	)
 
 	if err != nil {
+		m.logger.Errorf("send email fail. reqId:%s, err: %v", util.RequestIDFrom(ctx), err)
 		return err
 	}
 	return nil

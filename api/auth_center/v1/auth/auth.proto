@@ -6,10 +6,6 @@ import "google/api/annotations.proto";
 
 option go_package = "iwut-auth_center/api/auth_center/v1/auth;auth";
 
-enum ErrorReason {
-  USER_NOT_FOUND = 0;
-}
-
 service Auth {
 
   rpc passwordLogin (LoginRequest) returns (LoginReply) {
@@ -46,31 +42,31 @@ message LoginReply {
   int32 code = 1;
   string message = 2;
   optional LoginReplyData data = 3;
+  optional string traceId = 4;
 }
 
 message GetVerifyCodeRequest {
-  string username = 1;
-  string email = 2;
+  string email = 1;
 }
 
 message GetVerifyCodeReply {
-  message GetVerifyCodeReplyData {
-    string userId = 1;
-    string username = 2;
-  }
   int32 code = 1;
   string message = 2;
-  optional GetVerifyCodeReplyData data = 3;
+  optional string traceId = 3;
 }
 
 message RegisterRequest {
-  
+  string email = 1;
+  string verifyCode = 2;
+  string password = 3;
 }
 
 message RegisterReply {
-    message RegisterReplyData {
-    }
-    int32 code = 1;
-    string message = 2;
-    optional RegisterReplyData data = 3;
+  message RegisterReplyData {
+    string userId = 1;
+  }
+  int32 code = 1;
+  string message = 2;
+  optional RegisterReplyData data = 3;
+  optional string traceId = 4;
 }

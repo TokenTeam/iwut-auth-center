@@ -13,8 +13,10 @@ import (
 	"iwut-auth-center/internal/biz/mail"
 	"iwut-auth-center/internal/conf"
 	"iwut-auth-center/internal/data"
+	"iwut-auth-center/internal/middleware"
 	"iwut-auth-center/internal/server"
 	"iwut-auth-center/internal/service/auth"
+	"iwut-auth-center/internal/service/user"
 	"iwut-auth-center/internal/util"
 )
 
@@ -33,11 +35,19 @@ func wireApp(confServer *conf.Server, confData *conf.Data, jwt *conf.Jwt, confMa
 	sha256Util := util.NewSha256Util(jwt)
 	authRepo := data.NewAuthRepo(dataData, confData, logger, sha256Util)
 	authUsecase := biz.NewAuthUsecase(authRepo)
-	usecase := mail.NewMailUsecase(confMail)
+	usecase := mail.NewMailUsecase(confMail, logger)
 	jwtUtil := util.NewJwtUtil(jwt)
-	authService := auth.NewAuthService(authUsecase, usecase, jwtUtil, jwt)
-	grpcServer := server.NewGRPCServer(confServer, authService, logger)
-	httpServer := server.NewHTTPServer(confServer, authService, logger)
+	service := auth.NewAuthService(authUsecase, usecase, jwtUtil, jwt)
+	userRepo := data.NewUserRepo(dataData, confData, logger, sha256Util)
+	userUsecase := biz.NewUserUsecase(userRepo)
+	userService, err := user.NewUserService(userUsecase, jwtUtil, jwt)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	grpcServer := server.NewGRPCServer(confServer, service, userService)
+	jwtCheckMiddleware := middleware.NewJwtCheckMiddleware(authUsecase, jwtUtil)
+	httpServer := server.NewHTTPServer(confServer, service, userService, jwtCheckMiddleware)
 	app := newApp(logger, grpcServer, httpServer)
 	return app, func() {
 		cleanup()

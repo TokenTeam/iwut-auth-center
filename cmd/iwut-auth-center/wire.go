@@ -9,6 +9,7 @@ import (
 	"iwut-auth-center/internal/biz"
 	"iwut-auth-center/internal/conf"
 	"iwut-auth-center/internal/data"
+	"iwut-auth-center/internal/middleware"
 	"iwut-auth-center/internal/server"
 	"iwut-auth-center/internal/service"
 	"iwut-auth-center/internal/util"
@@ -20,5 +21,13 @@ import (
 
 // wireApp init kratos application.
 func wireApp(*conf.Server, *conf.Data, *conf.Jwt, *conf.Mail, log.Logger) (*kratos.App, func(), error) {
-	panic(wire.Build(server.ProviderSet, data.ProviderSet, biz.ProviderSet, service.ProviderSet, util.ProviderSet, newApp))
+	panic(
+		wire.Build(
+			server.ProviderSet,
+			data.ProviderSet,
+			biz.ProviderSet,
+			service.ProviderSet,
+			util.ProviderSet,
+			middleware.ProviderSet,
+			newApp))
 }

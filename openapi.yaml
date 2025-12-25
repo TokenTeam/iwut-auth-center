@@ -3,7 +3,7 @@
 
 openapi: 3.0.3
 info:
-    title: Auth API
+    title: ""
     version: 0.0.1
 paths:
     /auth/get-register-mail:
@@ -12,10 +12,6 @@ paths:
                 - Auth
             operationId: Auth_GetRegisterMail
             parameters:
-                - name: username
-                  in: query
-                  schema:
-                    type: string
                 - name: email
                   in: query
                   schema:
@@ -63,6 +59,24 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/auth_center.v1.auth.RegisterReply'
+    /user/update-password:
+        post:
+            tags:
+                - User
+            operationId: User_UpdatePassword
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/auth_center.v1.user.UpdatePasswordRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/auth_center.v1.user.UpdatePasswordReply'
 components:
     schemas:
         auth_center.v1.auth.GetVerifyCodeReply:
@@ -73,14 +87,7 @@ components:
                     format: int32
                 message:
                     type: string
-                data:
-                    $ref: '#/components/schemas/auth_center.v1.auth.GetVerifyCodeReply_GetVerifyCodeReplyData'
-        auth_center.v1.auth.GetVerifyCodeReply_GetVerifyCodeReplyData:
-            type: object
-            properties:
-                userId:
-                    type: string
-                username:
+                traceId:
                     type: string
         auth_center.v1.auth.LoginReply:
             type: object
@@ -92,6 +99,8 @@ components:
                     type: string
                 data:
                     $ref: '#/components/schemas/auth_center.v1.auth.LoginReply_LoginReplyData'
+                traceId:
+                    type: string
         auth_center.v1.auth.LoginReply_LoginReplyData:
             type: object
             properties:
@@ -116,11 +125,39 @@ components:
                     type: string
                 data:
                     $ref: '#/components/schemas/auth_center.v1.auth.RegisterReply_RegisterReplyData'
+                traceId:
+                    type: string
         auth_center.v1.auth.RegisterReply_RegisterReplyData:
             type: object
-            properties: {}
+            properties:
+                userId:
+                    type: string
         auth_center.v1.auth.RegisterRequest:
             type: object
-            properties: {}
+            properties:
+                email:
+                    type: string
+                verifyCode:
+                    type: string
+                password:
+                    type: string
+        auth_center.v1.user.UpdatePasswordReply:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                traceId:
+                    type: string
+        auth_center.v1.user.UpdatePasswordRequest:
+            type: object
+            properties:
+                oldPassword:
+                    type: string
+                newPassword:
+                    type: string
 tags:
     - name: Auth
+    - name: User

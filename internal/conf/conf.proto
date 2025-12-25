@@ -33,10 +33,10 @@ message Data {
     string source = 2;
   }
   message Redis {
-    string network = 1;
-    string addr = 2;
-    google.protobuf.Duration read_timeout = 3;
-    google.protobuf.Duration write_timeout = 4;
+    string addr = 1;
+    string password = 2;
+    int32 db = 3;
+    string prefix_key = 4;
   }
   message MongoDB {
     string uri = 1;
