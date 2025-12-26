@@ -41,13 +41,27 @@ func CreatedErrorEncoder(w http.ResponseWriter, r *http.Request, err error) {
 	w.WriteHeader(200)
 	se := errors.FromError(err)
 	codec, _ := CodecForRequest(r, "Accept")
-	body, err := codec.Marshal(struct {
-		Code    int32  `json:"code"`
-		Message string `json:"message"`
+	returnErr := struct {
+		Code    int32   `json:"code"`
+		Message string  `json:"message"`
+		TraceId *string `json:"traceId,omitempty"`
 	}{
 		Code:    se.Code,
 		Message: se.Message,
-	})
+	}
+	// 检查se有没有 GetMetadata 方法，如果有则调用它
+	if mdGetter, ok := interface{}(se).(interface {
+		GetMetadata() map[string]string
+	}); ok {
+		for k, v := range mdGetter.GetMetadata() {
+			if k == "traceId" {
+				returnErr.TraceId = &v
+			}
+		}
+	}
+
+	body, err := codec.Marshal(returnErr)
+
 	w.Header().Set("Content-Type", "application"+"/"+codec.Name())
 	_, _ = w.Write(body)
 }

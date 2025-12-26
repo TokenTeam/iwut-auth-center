@@ -41,6 +41,24 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/auth_center.v1.auth.LoginReply'
+    /auth/refresh-token:
+        post:
+            tags:
+                - Auth
+            operationId: Auth_RefreshToken
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/auth_center.v1.auth.RefreshTokenRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/auth_center.v1.auth.RefreshTokenReply'
     /auth/register:
         post:
             tags:
@@ -59,6 +77,63 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/auth_center.v1.auth.RegisterReply'
+    /oauth2/authorize:
+        get:
+            tags:
+                - OAuth2
+            operationId: OAuth2_Authorize
+            parameters:
+                - name: responseType
+                  in: query
+                  schema:
+                    type: string
+                - name: clientId
+                  in: query
+                  schema:
+                    type: string
+                - name: redirectUri
+                  in: query
+                  schema:
+                    type: string
+                - name: scope
+                  in: query
+                  schema:
+                    type: string
+                - name: state
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/auth_center.v1.oauth2.AuthorizeReply'
+    /user/delete-account:
+        get:
+            tags:
+                - User
+            operationId: User_DeleteAccount
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/auth_center.v1.user.DeleteAccountReply'
+    /user/profile:
+        get:
+            tags:
+                - User
+            operationId: User_GetProfile
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/auth_center.v1.user.GetProfileReply'
     /user/update-password:
         post:
             tags:
@@ -77,6 +152,24 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/auth_center.v1.user.UpdatePasswordReply'
+    /user/update-profile:
+        post:
+            tags:
+                - User
+            operationId: User_UpdateProfile
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/auth_center.v1.user.UpdateProfileReply'
 components:
     schemas:
         auth_center.v1.auth.GetVerifyCodeReply:
@@ -115,6 +208,30 @@ components:
                     type: string
                 password:
                     type: string
+        auth_center.v1.auth.RefreshTokenReply:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                data:
+                    $ref: '#/components/schemas/auth_center.v1.auth.RefreshTokenReply_RefreshTokenReplyData'
+                traceId:
+                    type: string
+        auth_center.v1.auth.RefreshTokenReply_RefreshTokenReplyData:
+            type: object
+            properties:
+                accessToken:
+                    type: string
+                refreshToken:
+                    type: string
+        auth_center.v1.auth.RefreshTokenRequest:
+            type: object
+            properties:
+                refreshToken:
+                    type: string
         auth_center.v1.auth.RegisterReply:
             type: object
             properties:
@@ -141,6 +258,64 @@ components:
                     type: string
                 password:
                     type: string
+        auth_center.v1.oauth2.AuthorizeReply:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                data:
+                    $ref: '#/components/schemas/auth_center.v1.oauth2.AuthorizeReply_AuthorizeReplyData'
+                traceId:
+                    type: string
+        auth_center.v1.oauth2.AuthorizeReply_AuthorizeReplyData:
+            type: object
+            properties:
+                authorizationCode:
+                    type: string
+                redirectUri:
+                    type: string
+                state:
+                    type: string
+        auth_center.v1.user.DeleteAccountReply:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                traceId:
+                    type: string
+        auth_center.v1.user.GetProfileReply:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                data:
+                    $ref: '#/components/schemas/auth_center.v1.user.GetProfileReply_GetProfileReplyData'
+                traceId:
+                    type: string
+        auth_center.v1.user.GetProfileReply_GetProfileReplyData:
+            type: object
+            properties:
+                userId:
+                    type: string
+                email:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+                attrs:
+                    type: object
+                    additionalProperties:
+                        type: string
         auth_center.v1.user.UpdatePasswordReply:
             type: object
             properties:
@@ -158,6 +333,29 @@ components:
                     type: string
                 newPassword:
                     type: string
+        auth_center.v1.user.UpdateProfileReply:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                traceId:
+                    type: string
+            description: |-
+                string nick = 1;
+                  string realName = 2;
+                  string studentNumber = 3;
+                  string avatarUrl = 4;
+                  string gender = 5;
+                  string whutEmail = 6;
+                  string region = 7; // 校区
+                  string school = 8; // 院系
+                  string birthday = 9;
+                  string qq = 10;
+                  string phone = 11;
 tags:
     - name: Auth
+    - name: OAuth2
     - name: User

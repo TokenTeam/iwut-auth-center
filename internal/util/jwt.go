@@ -30,7 +30,7 @@ type JwtUtilFunctions interface {
 	DecodeJWT(tokenStr string) (map[string]interface{}, error)
 	WithTokenValue(ctx context.Context, value *TokenValue) context.Context
 	TokenValueFrom(ctx context.Context) TokenValue
-	ToNormalTypeClaims(claims map[string]interface{}) (*BaseAuthClaims, error)
+	ToBaseAuthClaims(claims map[string]interface{}) (*BaseAuthClaims, error)
 }
 
 // JwtUtil stores PEM key material and implements JwtUtilFunctions.
@@ -214,17 +214,17 @@ func (j *JwtUtil) DecodeJWTWithRS256(tokenStr string) (map[string]interface{}, e
 	}
 	if claims, ok := tok.Claims.(jwt.MapClaims); ok {
 		// Explicitly validate time-based claims (exp, nbf).
-		// Check exp
+		// Check
 		if expRaw, found := claims["exp"]; found {
 			if expSec, ok := toInt64Seconds(expRaw); ok {
 				if time.Unix(expSec, 0).Before(time.Now()) {
 					return nil, errors.New("token is expired")
 				}
 			} else {
-				return nil, errors.New("invalid exp claim type")
+				return nil, errors.New("invalid  claim type")
 			}
 		} else {
-			return nil, errors.New("token missing exp claim")
+			return nil, errors.New("token missing  claim")
 		}
 
 		if issuer, found := claims["iss"]; found {
@@ -318,15 +318,21 @@ func ParseRSAPublicKeyFromPEM(pemBytes []byte) (*rsa.PublicKey, error) {
 type TokenKey struct{}
 
 type TokenValue struct {
-	Token  string
-	Claims map[string]interface{}
+	Token          string
+	BaseAuthClaims *BaseAuthClaims
+	OAuthClaims    *OAuthClaims
 }
 type BaseAuthClaims struct {
-	uid     string
-	iat     int64
-	exp     int64
-	iss     string
-	version int32
+	Uid     string
+	Iat     int64
+	Exp     int64
+	Iss     string
+	Version int
+	Type    string
+}
+type OAuthClaims struct {
+	ClientId string
+	UserId   string
 }
 
 func (j *JwtUtil) WithTokenValue(ctx context.Context, value *TokenValue) context.Context {
@@ -334,44 +340,67 @@ func (j *JwtUtil) WithTokenValue(ctx context.Context, value *TokenValue) context
 }
 func (j *JwtUtil) TokenValueFrom(ctx context.Context) TokenValue {
 	if v := ctx.Value(TokenKey{}); v != nil {
-		if s, ok := v.(TokenValue); ok {
+		switch s := v.(type) {
+		case TokenValue:
 			return s
+		case *TokenValue:
+			return *s
 		}
 	}
 	return TokenValue{}
 }
-func (j *JwtUtil) ToNormalTypeClaims(claims map[string]interface{}) (*BaseAuthClaims, error) {
+func (j *JwtUtil) GetBaseAuthClaims(ctx context.Context) (*BaseAuthClaims, error) {
+	value := j.TokenValueFrom(ctx)
+	if value.BaseAuthClaims != nil {
+		return value.BaseAuthClaims, nil
+	}
+	if value.OAuthClaims != nil {
+		return nil, errors.New("token is OAuth type, no BaseAuthClaims")
+	}
+	return nil, errors.New("no token claims found in context")
+}
+func (j *JwtUtil) GetOAuthClaims(ctx context.Context) (*OAuthClaims, error) {
+	value := j.TokenValueFrom(ctx)
+	if value.OAuthClaims != nil {
+		return value.OAuthClaims, nil
+	}
+	if value.BaseAuthClaims != nil {
+		return nil, errors.New("token is BaseAuth type, no OAuthClaims")
+	}
+	return nil, errors.New("no token claims found in context")
+}
+func (j *JwtUtil) ToBaseAuthClaims(claims map[string]interface{}) (*BaseAuthClaims, error) {
 	baseAuthClaims := &BaseAuthClaims{
-		uid:     "",
-		iat:     0,
-		exp:     0,
-		iss:     "",
-		version: -1,
+		Uid:     "",
+		Iat:     0,
+		Exp:     0,
+		Iss:     "",
+		Version: -1,
 	}
 	if uidRaw, found := claims["uid"]; found {
 		if uidStr, ok := uidRaw.(string); ok {
-			baseAuthClaims.uid = uidStr
+			baseAuthClaims.Uid = uidStr
 		}
 	}
-	if baseAuthClaims.uid == "" {
+	if baseAuthClaims.Uid == "" {
 		return nil, errors.New("token missing uid claim")
 	}
 
 	if iatRaw, found := claims["iat"]; found {
 		if iatSec, ok := toInt64Seconds(iatRaw); ok {
-			baseAuthClaims.iat = iatSec
+			baseAuthClaims.Iat = iatSec
 		}
 	}
-	if baseAuthClaims.iat == 0 {
-		return nil, errors.New("token missing exp claim")
+	if baseAuthClaims.Iat == 0 {
+		return nil, errors.New("token missing iat claim")
 	}
 
 	if expRaw, found := claims["exp"]; found {
 		if expSec, ok := toInt64Seconds(expRaw); ok {
-			baseAuthClaims.exp = expSec
+			baseAuthClaims.Exp = expSec
 		}
 	}
-	if baseAuthClaims.exp == 0 {
+	if baseAuthClaims.Exp == 0 {
 		return nil, errors.New("token missing exp claim")
 	}
 
@@ -380,19 +409,49 @@ func (j *JwtUtil) ToNormalTypeClaims(claims map[string]interface{}) (*BaseAuthCl
 			if issStr != j.issuer {
 				return nil, errors.New("invalid token issuer")
 			}
-			baseAuthClaims.iss = issStr
+			baseAuthClaims.Iss = issStr
 		}
 	}
-	if baseAuthClaims.iss == "" {
+	if baseAuthClaims.Iss == "" {
 		return nil, errors.New("token missing iss")
 	}
 
 	if versionRaw, found := claims["version"]; found {
-		baseAuthClaims.version = versionRaw.(int32)
+		baseAuthClaims.Version = int(versionRaw.(float64))
 	}
-	if baseAuthClaims.version == -1 {
-		return nil, errors.New("token missing version claim")
+	if baseAuthClaims.Version == -1 {
+		return nil, errors.New("token missing Version claim")
+	}
+
+	if typeRaw, found := claims["type"]; found {
+		if typeStr, ok := typeRaw.(string); ok {
+			baseAuthClaims.Type = typeStr
+		}
+	}
+	if baseAuthClaims.Type == "" {
+		return nil, errors.New("token missing type claim")
 	}
 
 	return baseAuthClaims, nil
+}
+
+type JwtType int
+
+const (
+	OfficialJwt JwtType = iota
+	OAuthJwt
+)
+
+func (j *JwtUtil) GetJwtTypeFromClaims(claims map[string]interface{}) JwtType {
+	if _, found := claims["version"]; found {
+		return OfficialJwt
+	}
+	return OAuthJwt
+}
+
+func (j *JwtUtil) IsAccessToken(claims BaseAuthClaims) bool {
+	return claims.Type == "access"
+}
+func (j *JwtUtil) IsRefreshToken(claims BaseAuthClaims) bool {
+	return claims.Type == "refresh"
 }

@@ -10,6 +10,8 @@ import (
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
+	structpb "google.golang.org/protobuf/types/known/structpb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -134,11 +136,286 @@ func (x *UpdatePasswordReply) GetTraceId() string {
 	return ""
 }
 
+type DeleteAccountReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int32                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	TraceId       *string                `protobuf:"bytes,3,opt,name=traceId,proto3,oneof" json:"traceId,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteAccountReply) Reset() {
+	*x = DeleteAccountReply{}
+	mi := &file_auth_center_v1_user_user_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteAccountReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteAccountReply) ProtoMessage() {}
+
+func (x *DeleteAccountReply) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_center_v1_user_user_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteAccountReply.ProtoReflect.Descriptor instead.
+func (*DeleteAccountReply) Descriptor() ([]byte, []int) {
+	return file_auth_center_v1_user_user_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *DeleteAccountReply) GetCode() int32 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *DeleteAccountReply) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *DeleteAccountReply) GetTraceId() string {
+	if x != nil && x.TraceId != nil {
+		return *x.TraceId
+	}
+	return ""
+}
+
+type GetProfileReply struct {
+	state         protoimpl.MessageState               `protogen:"open.v1"`
+	Code          int32                                `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                               `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Data          *GetProfileReply_GetProfileReplyData `protobuf:"bytes,3,opt,name=data,proto3,oneof" json:"data,omitempty"`
+	TraceId       *string                              `protobuf:"bytes,4,opt,name=traceId,proto3,oneof" json:"traceId,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetProfileReply) Reset() {
+	*x = GetProfileReply{}
+	mi := &file_auth_center_v1_user_user_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetProfileReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetProfileReply) ProtoMessage() {}
+
+func (x *GetProfileReply) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_center_v1_user_user_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetProfileReply.ProtoReflect.Descriptor instead.
+func (*GetProfileReply) Descriptor() ([]byte, []int) {
+	return file_auth_center_v1_user_user_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *GetProfileReply) GetCode() int32 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *GetProfileReply) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *GetProfileReply) GetData() *GetProfileReply_GetProfileReplyData {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *GetProfileReply) GetTraceId() string {
+	if x != nil && x.TraceId != nil {
+		return *x.TraceId
+	}
+	return ""
+}
+
+// string nick = 1;
+// string realName = 2;
+// string studentNumber = 3;
+// string avatarUrl = 4;
+// string gender = 5;
+// string whutEmail = 6;
+// string region = 7; // 校区
+// string school = 8; // 院系
+// string birthday = 9;
+// string qq = 10;
+// string phone = 11;
+type UpdateProfileReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int32                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	TraceId       *string                `protobuf:"bytes,3,opt,name=traceId,proto3,oneof" json:"traceId,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateProfileReply) Reset() {
+	*x = UpdateProfileReply{}
+	mi := &file_auth_center_v1_user_user_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateProfileReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateProfileReply) ProtoMessage() {}
+
+func (x *UpdateProfileReply) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_center_v1_user_user_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateProfileReply.ProtoReflect.Descriptor instead.
+func (*UpdateProfileReply) Descriptor() ([]byte, []int) {
+	return file_auth_center_v1_user_user_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *UpdateProfileReply) GetCode() int32 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *UpdateProfileReply) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *UpdateProfileReply) GetTraceId() string {
+	if x != nil && x.TraceId != nil {
+		return *x.TraceId
+	}
+	return ""
+}
+
+type GetProfileReply_GetProfileReplyData struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=userId,proto3" json:"userId,omitempty"`
+	Email         string                 `protobuf:"bytes,2,opt,name=email,proto3" json:"email,omitempty"`
+	CreatedAt     int64                  `protobuf:"varint,3,opt,name=createdAt,proto3" json:"createdAt,omitempty"`
+	UpdatedAt     int64                  `protobuf:"varint,4,opt,name=updatedAt,proto3" json:"updatedAt,omitempty"`
+	Attrs         map[string]string      `protobuf:"bytes,5,rep,name=attrs,proto3" json:"attrs,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetProfileReply_GetProfileReplyData) Reset() {
+	*x = GetProfileReply_GetProfileReplyData{}
+	mi := &file_auth_center_v1_user_user_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetProfileReply_GetProfileReplyData) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetProfileReply_GetProfileReplyData) ProtoMessage() {}
+
+func (x *GetProfileReply_GetProfileReplyData) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_center_v1_user_user_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetProfileReply_GetProfileReplyData.ProtoReflect.Descriptor instead.
+func (*GetProfileReply_GetProfileReplyData) Descriptor() ([]byte, []int) {
+	return file_auth_center_v1_user_user_proto_rawDescGZIP(), []int{3, 0}
+}
+
+func (x *GetProfileReply_GetProfileReplyData) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *GetProfileReply_GetProfileReplyData) GetEmail() string {
+	if x != nil {
+		return x.Email
+	}
+	return ""
+}
+
+func (x *GetProfileReply_GetProfileReplyData) GetCreatedAt() int64 {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return 0
+}
+
+func (x *GetProfileReply_GetProfileReplyData) GetUpdatedAt() int64 {
+	if x != nil {
+		return x.UpdatedAt
+	}
+	return 0
+}
+
+func (x *GetProfileReply_GetProfileReplyData) GetAttrs() map[string]string {
+	if x != nil {
+		return x.Attrs
+	}
+	return nil
+}
+
 var File_auth_center_v1_user_user_proto protoreflect.FileDescriptor
 
 const file_auth_center_v1_user_user_proto_rawDesc = "" +
 	"\n" +
-	"\x1eauth_center/v1/user/user.proto\x12\x13auth_center.v1.user\x1a\x1cgoogle/api/annotations.proto\"[\n" +
+	"\x1eauth_center/v1/user/user.proto\x12\x13auth_center.v1.user\x1a\x1cgoogle/api/annotations.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1bgoogle/protobuf/empty.proto\"[\n" +
 	"\x15UpdatePasswordRequest\x12 \n" +
 	"\voldPassword\x18\x01 \x01(\tR\voldPassword\x12 \n" +
 	"\vnewPassword\x18\x02 \x01(\tR\vnewPassword\"n\n" +
@@ -147,9 +424,43 @@ const file_auth_center_v1_user_user_proto_rawDesc = "" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
 	"\atraceId\x18\x03 \x01(\tH\x00R\atraceId\x88\x01\x01B\n" +
 	"\n" +
-	"\b_traceId2\x91\x01\n" +
+	"\b_traceId\"m\n" +
+	"\x12DeleteAccountReply\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
+	"\atraceId\x18\x03 \x01(\tH\x00R\atraceId\x88\x01\x01B\n" +
+	"\n" +
+	"\b_traceId\"\xdd\x03\n" +
+	"\x0fGetProfileReply\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12Q\n" +
+	"\x04data\x18\x03 \x01(\v28.auth_center.v1.user.GetProfileReply.GetProfileReplyDataH\x00R\x04data\x88\x01\x01\x12\x1d\n" +
+	"\atraceId\x18\x04 \x01(\tH\x01R\atraceId\x88\x01\x01\x1a\x94\x02\n" +
+	"\x13GetProfileReplyData\x12\x16\n" +
+	"\x06userId\x18\x01 \x01(\tR\x06userId\x12\x14\n" +
+	"\x05email\x18\x02 \x01(\tR\x05email\x12\x1c\n" +
+	"\tcreatedAt\x18\x03 \x01(\x03R\tcreatedAt\x12\x1c\n" +
+	"\tupdatedAt\x18\x04 \x01(\x03R\tupdatedAt\x12Y\n" +
+	"\x05attrs\x18\x05 \x03(\v2C.auth_center.v1.user.GetProfileReply.GetProfileReplyData.AttrsEntryR\x05attrs\x1a8\n" +
+	"\n" +
+	"AttrsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\a\n" +
+	"\x05_dataB\n" +
+	"\n" +
+	"\b_traceId\"m\n" +
+	"\x12UpdateProfileReply\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
+	"\atraceId\x18\x03 \x01(\tH\x00R\atraceId\x88\x01\x01B\n" +
+	"\n" +
+	"\b_traceId2\xd8\x03\n" +
 	"\x04User\x12\x88\x01\n" +
-	"\x0eupdatePassword\x12*.auth_center.v1.user.UpdatePasswordRequest\x1a(.auth_center.v1.user.UpdatePasswordReply\" \x82\xd3\xe4\x93\x02\x1a:\x01*\"\x15/user/update-passwordB/Z-iwut-auth_center/api/auth_center/v1/user;userb\x06proto3"
+	"\x0eupdatePassword\x12*.auth_center.v1.user.UpdatePasswordRequest\x1a(.auth_center.v1.user.UpdatePasswordReply\" \x82\xd3\xe4\x93\x02\x1a:\x01*\"\x15/user/update-password\x12n\n" +
+	"\rdeleteAccount\x12\x16.google.protobuf.Empty\x1a'.auth_center.v1.user.DeleteAccountReply\"\x1c\x82\xd3\xe4\x93\x02\x16\x12\x14/user/delete-account\x12a\n" +
+	"\n" +
+	"getProfile\x12\x16.google.protobuf.Empty\x1a$.auth_center.v1.user.GetProfileReply\"\x15\x82\xd3\xe4\x93\x02\x0f\x12\r/user/profile\x12r\n" +
+	"\rupdateProfile\x12\x17.google.protobuf.Struct\x1a'.auth_center.v1.user.UpdateProfileReply\"\x1f\x82\xd3\xe4\x93\x02\x19:\x01*\"\x14/user/update-profileB/Z-iwut-auth_center/api/auth_center/v1/user;userb\x06proto3"
 
 var (
 	file_auth_center_v1_user_user_proto_rawDescOnce sync.Once
@@ -163,19 +474,34 @@ func file_auth_center_v1_user_user_proto_rawDescGZIP() []byte {
 	return file_auth_center_v1_user_user_proto_rawDescData
 }
 
-var file_auth_center_v1_user_user_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_auth_center_v1_user_user_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_auth_center_v1_user_user_proto_goTypes = []any{
-	(*UpdatePasswordRequest)(nil), // 0: auth_center.v1.user.UpdatePasswordRequest
-	(*UpdatePasswordReply)(nil),   // 1: auth_center.v1.user.UpdatePasswordReply
+	(*UpdatePasswordRequest)(nil),               // 0: auth_center.v1.user.UpdatePasswordRequest
+	(*UpdatePasswordReply)(nil),                 // 1: auth_center.v1.user.UpdatePasswordReply
+	(*DeleteAccountReply)(nil),                  // 2: auth_center.v1.user.DeleteAccountReply
+	(*GetProfileReply)(nil),                     // 3: auth_center.v1.user.GetProfileReply
+	(*UpdateProfileReply)(nil),                  // 4: auth_center.v1.user.UpdateProfileReply
+	(*GetProfileReply_GetProfileReplyData)(nil), // 5: auth_center.v1.user.GetProfileReply.GetProfileReplyData
+	nil,                     // 6: auth_center.v1.user.GetProfileReply.GetProfileReplyData.AttrsEntry
+	(*emptypb.Empty)(nil),   // 7: google.protobuf.Empty
+	(*structpb.Struct)(nil), // 8: google.protobuf.Struct
 }
 var file_auth_center_v1_user_user_proto_depIdxs = []int32{
-	0, // 0: auth_center.v1.user.User.updatePassword:input_type -> auth_center.v1.user.UpdatePasswordRequest
-	1, // 1: auth_center.v1.user.User.updatePassword:output_type -> auth_center.v1.user.UpdatePasswordReply
-	1, // [1:2] is the sub-list for method output_type
-	0, // [0:1] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	5, // 0: auth_center.v1.user.GetProfileReply.data:type_name -> auth_center.v1.user.GetProfileReply.GetProfileReplyData
+	6, // 1: auth_center.v1.user.GetProfileReply.GetProfileReplyData.attrs:type_name -> auth_center.v1.user.GetProfileReply.GetProfileReplyData.AttrsEntry
+	0, // 2: auth_center.v1.user.User.updatePassword:input_type -> auth_center.v1.user.UpdatePasswordRequest
+	7, // 3: auth_center.v1.user.User.deleteAccount:input_type -> google.protobuf.Empty
+	7, // 4: auth_center.v1.user.User.getProfile:input_type -> google.protobuf.Empty
+	8, // 5: auth_center.v1.user.User.updateProfile:input_type -> google.protobuf.Struct
+	1, // 6: auth_center.v1.user.User.updatePassword:output_type -> auth_center.v1.user.UpdatePasswordReply
+	2, // 7: auth_center.v1.user.User.deleteAccount:output_type -> auth_center.v1.user.DeleteAccountReply
+	3, // 8: auth_center.v1.user.User.getProfile:output_type -> auth_center.v1.user.GetProfileReply
+	4, // 9: auth_center.v1.user.User.updateProfile:output_type -> auth_center.v1.user.UpdateProfileReply
+	6, // [6:10] is the sub-list for method output_type
+	2, // [2:6] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_auth_center_v1_user_user_proto_init() }
@@ -184,13 +510,16 @@ func file_auth_center_v1_user_user_proto_init() {
 		return
 	}
 	file_auth_center_v1_user_user_proto_msgTypes[1].OneofWrappers = []any{}
+	file_auth_center_v1_user_user_proto_msgTypes[2].OneofWrappers = []any{}
+	file_auth_center_v1_user_user_proto_msgTypes[3].OneofWrappers = []any{}
+	file_auth_center_v1_user_user_proto_msgTypes[4].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_auth_center_v1_user_user_proto_rawDesc), len(file_auth_center_v1_user_user_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

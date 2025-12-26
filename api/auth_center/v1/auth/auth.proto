@@ -27,6 +27,13 @@ service Auth {
       body: "*"
     };
   }
+
+  rpc refreshToken (RefreshTokenRequest) returns (RefreshTokenReply) {
+    option (google.api.http) = {
+      post: "/auth/refresh-token"
+      body: "*"
+    };
+  }
 }
 
 message LoginRequest {
@@ -68,5 +75,20 @@ message RegisterReply {
   int32 code = 1;
   string message = 2;
   optional RegisterReplyData data = 3;
+  optional string traceId = 4;
+}
+
+message RefreshTokenRequest {
+  string refreshToken = 1;
+}
+
+message RefreshTokenReply {
+  message RefreshTokenReplyData {
+    string accessToken = 1;
+    string refreshToken = 2;
+  }
+  int32 code = 1;
+  string message = 2;
+  optional RefreshTokenReplyData data = 3;
   optional string traceId = 4;
 }

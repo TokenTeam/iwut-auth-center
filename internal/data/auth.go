@@ -47,21 +47,38 @@ func (r *authRepo) CheckPasswordWithEmailAndGetUserIdAndVersion(ctx context.Cont
 	filter := bson.M{"email": email, "password": password}
 
 	var result struct {
-		userId    primitive.ObjectID `bson:"_id"`
-		version   int                `bson:"version"`
-		deletedAt *time.Time         `bson:"deleted_at"`
+		UserId    primitive.ObjectID `bson:"_id"`
+		Version   int                `bson:"Version"`
+		DeletedAt *time.Time         `bson:"deleted_at"`
 	}
 	err := collection.FindOne(ctx, filter).Decode(&result)
+
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return "", -1, biz.UserNotFoundError
 		}
 		r.log.Errorf("failed to find user: %v, traceId: %s", err, reqId)
 		return "", -1, fmt.Errorf("failed to find user: %w, traceId: %s", err, reqId)
-	} else if result.deletedAt != nil {
-		return "", -1, biz.UserHasBeenDeletedError
+	} else if result.DeletedAt != nil {
+		// 30 天内可以恢复
+		if time.Since(*result.DeletedAt) < 30*24*time.Hour {
+			update := bson.M{
+				"$set": bson.M{
+					"deleted_at": nil,
+					"updated_at": time.Now(),
+				},
+			}
+			_, err = collection.UpdateOne(ctx, filter, update)
+			if err != nil {
+				r.log.Errorf("failed to restore deleted user: %v, traceId: %s", err, reqId)
+				return "", -1, fmt.Errorf("failed to restore deleted user: %w, traceId: %s", err, reqId)
+			}
+		} else {
+			return "", -1, biz.UserHasBeenDeletedError
+		}
 	}
-	return result.userId.Hex(), result.version, nil
+
+	return result.UserId.Hex(), result.Version, nil
 }
 
 func (r *authRepo) TryInsertRegisterCaptcha(ctx context.Context, email string, captcha string, ttl time.Duration) error {
@@ -162,7 +179,7 @@ func (r *authRepo) RegisterUser(ctx context.Context, email string, password stri
 		"password":   password,
 		"created_at": time.Now(),
 		"updated_at": time.Now(),
-		"version":    0,
+		"Version":    0,
 	})
 	if err != nil {
 		r.log.Errorf("InsertOne error req=%s err=%v", reqID, err)
@@ -186,8 +203,8 @@ func (r *authRepo) AddOrUpdateUserVersion(ctx context.Context, userId string, ve
 	key := GetRedisKey("user_version", userId)
 	err := r.data.redis.Set(ctx, key, version, ttl).Err()
 	if err != nil {
-		r.log.Errorf("Set user version error req=%s err=%v", reqId, err)
-		return fmt.Errorf("failed to set user version: %w", err)
+		r.log.Errorf("Set user Version error req=%s err=%v", reqId, err)
+		return fmt.Errorf("failed to set user Version: %w", err)
 	}
 	return nil
 }
@@ -199,14 +216,14 @@ func (r *authRepo) GetUserVersion(ctx context.Context, userId string, ttl time.D
 	val, err := r.data.redis.Get(ctx, key).Result()
 	if errors.Is(err, redis.Nil) {
 		// 该情况可能是服务器重启后缓存丢失导致的，理论上不应该发生
-		r.log.Errorf("Get user version not found req=%s, which shouldn't be possible.", reqId)
+		r.log.Errorf("Get user Version not found req=%s, which shouldn't be possible.", reqId)
 
 		collection := r.userCollection
 		filter := bson.M{"_id": userId}
 
 		var result struct {
-			version   int        `bson:"version"`
-			deletedAt *time.Time `bson:"deleted_at"`
+			Version   int        `bson:"version"`
+			DeletedAt *time.Time `bson:"deleted_at"`
 		}
 		err := collection.FindOne(ctx, filter).Decode(&result)
 		if err != nil {
@@ -215,22 +232,22 @@ func (r *authRepo) GetUserVersion(ctx context.Context, userId string, ttl time.D
 			}
 			r.log.Errorf("failed to find user: %v, traceId: %s", err, reqId)
 			return 1<<31 - 1, fmt.Errorf("failed to find user: %w, traceId: %s", err, reqId)
-		} else if result.deletedAt != nil {
+		} else if result.DeletedAt != nil {
 			return 1<<31 - 1, biz.UserHasBeenDeletedError
 		}
-		err = r.AddOrUpdateUserVersion(ctx, userId, result.version, ttl)
+		err = r.AddOrUpdateUserVersion(ctx, userId, result.Version, ttl)
 		if err != nil {
 			r.log.Errorf("AddOrUpdateUserVersion error req=%s err=%v", reqId, err)
 		}
-		return result.version, nil
+		return result.Version, nil
 	} else if err != nil {
-		r.log.Errorf("Get user version error req=%s err=%v", reqId, err)
-		return 0, fmt.Errorf("failed to get user version: %w", err)
+		r.log.Errorf("Get user Version error req=%s err=%v", reqId, err)
+		return 0, fmt.Errorf("failed to get user Version: %w", err)
 	}
 	version, err := strconv.Atoi(val)
 	if err != nil {
-		r.log.Errorf("Atoi user version error req=%s err=%v", reqId, err)
-		return 0, fmt.Errorf("failed to parse user version: %w", err)
+		r.log.Errorf("Atoi user Version error req=%s err=%v", reqId, err)
+		return 0, fmt.Errorf("failed to parse user Version: %w", err)
 	}
 	return version, nil
 }

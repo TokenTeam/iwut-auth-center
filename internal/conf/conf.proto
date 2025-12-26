@@ -39,12 +39,20 @@ message Data {
     string prefix_key = 4;
   }
   message MongoDB {
+    message Limitations {
+      message User {
+        int64 official_mem_limit = 1;
+        int64 oauth2_mem_limit = 2;
+      }
+      User user = 1;
+    }
     string uri = 1;
     string username = 2;
     string password = 3;
     string auth_source = 4;
     string database = 5;
     google.protobuf.Duration connect_timeout = 6;
+    Limitations limitations = 7;
   }
   Database database = 1;
   Redis redis = 2;

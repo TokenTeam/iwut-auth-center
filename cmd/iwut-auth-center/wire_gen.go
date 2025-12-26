@@ -40,7 +40,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, jwt *conf.Jwt, confMa
 	service := auth.NewAuthService(authUsecase, usecase, jwtUtil, jwt)
 	userRepo := data.NewUserRepo(dataData, confData, logger, sha256Util)
 	userUsecase := biz.NewUserUsecase(userRepo)
-	userService, err := user.NewUserService(userUsecase, jwtUtil, jwt)
+	userService, err := user.NewUserService(userUsecase, authUsecase, jwtUtil, jwt)
 	if err != nil {
 		cleanup()
 		return nil, nil, err

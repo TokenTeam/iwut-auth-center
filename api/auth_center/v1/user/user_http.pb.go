@@ -10,6 +10,8 @@ import (
 	context "context"
 	http "github.com/go-kratos/kratos/v2/transport/http"
 	binding "github.com/go-kratos/kratos/v2/transport/http/binding"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
+	structpb "google.golang.org/protobuf/types/known/structpb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -19,15 +21,24 @@ var _ = binding.EncodeURL
 
 const _ = http.SupportPackageIsVersion1
 
+const OperationUserdeleteAccount = "/auth_center.v1.user.User/deleteAccount"
+const OperationUsergetProfile = "/auth_center.v1.user.User/getProfile"
 const OperationUserupdatePassword = "/auth_center.v1.user.User/updatePassword"
+const OperationUserupdateProfile = "/auth_center.v1.user.User/updateProfile"
 
 type UserHTTPServer interface {
+	DeleteAccount(context.Context, *emptypb.Empty) (*DeleteAccountReply, error)
+	GetProfile(context.Context, *emptypb.Empty) (*GetProfileReply, error)
 	UpdatePassword(context.Context, *UpdatePasswordRequest) (*UpdatePasswordReply, error)
+	UpdateProfile(context.Context, *structpb.Struct) (*UpdateProfileReply, error)
 }
 
 func RegisterUserHTTPServer(s *http.Server, srv UserHTTPServer) {
 	r := s.Route("/")
 	r.POST("/user/update-password", _User_UpdatePassword0_HTTP_Handler(srv))
+	r.GET("/user/delete-account", _User_DeleteAccount0_HTTP_Handler(srv))
+	r.GET("/user/profile", _User_GetProfile0_HTTP_Handler(srv))
+	r.POST("/user/update-profile", _User_UpdateProfile0_HTTP_Handler(srv))
 }
 
 func _User_UpdatePassword0_HTTP_Handler(srv UserHTTPServer) func(ctx http.Context) error {
@@ -52,8 +63,71 @@ func _User_UpdatePassword0_HTTP_Handler(srv UserHTTPServer) func(ctx http.Contex
 	}
 }
 
+func _User_DeleteAccount0_HTTP_Handler(srv UserHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in emptypb.Empty
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationUserdeleteAccount)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.DeleteAccount(ctx, req.(*emptypb.Empty))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*DeleteAccountReply)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _User_GetProfile0_HTTP_Handler(srv UserHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in emptypb.Empty
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationUsergetProfile)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.GetProfile(ctx, req.(*emptypb.Empty))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*GetProfileReply)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _User_UpdateProfile0_HTTP_Handler(srv UserHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in structpb.Struct
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationUserupdateProfile)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.UpdateProfile(ctx, req.(*structpb.Struct))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*UpdateProfileReply)
+		return ctx.Result(200, reply)
+	}
+}
+
 type UserHTTPClient interface {
+	DeleteAccount(ctx context.Context, req *emptypb.Empty, opts ...http.CallOption) (rsp *DeleteAccountReply, err error)
+	GetProfile(ctx context.Context, req *emptypb.Empty, opts ...http.CallOption) (rsp *GetProfileReply, err error)
 	UpdatePassword(ctx context.Context, req *UpdatePasswordRequest, opts ...http.CallOption) (rsp *UpdatePasswordReply, err error)
+	UpdateProfile(ctx context.Context, req *structpb.Struct, opts ...http.CallOption) (rsp *UpdateProfileReply, err error)
 }
 
 type UserHTTPClientImpl struct {
@@ -64,11 +138,50 @@ func NewUserHTTPClient(client *http.Client) UserHTTPClient {
 	return &UserHTTPClientImpl{client}
 }
 
+func (c *UserHTTPClientImpl) DeleteAccount(ctx context.Context, in *emptypb.Empty, opts ...http.CallOption) (*DeleteAccountReply, error) {
+	var out DeleteAccountReply
+	pattern := "/user/delete-account"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationUserdeleteAccount))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *UserHTTPClientImpl) GetProfile(ctx context.Context, in *emptypb.Empty, opts ...http.CallOption) (*GetProfileReply, error) {
+	var out GetProfileReply
+	pattern := "/user/profile"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationUsergetProfile))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (c *UserHTTPClientImpl) UpdatePassword(ctx context.Context, in *UpdatePasswordRequest, opts ...http.CallOption) (*UpdatePasswordReply, error) {
 	var out UpdatePasswordReply
 	pattern := "/user/update-password"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationUserupdatePassword))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *UserHTTPClientImpl) UpdateProfile(ctx context.Context, in *structpb.Struct, opts ...http.CallOption) (*UpdateProfileReply, error) {
+	var out UpdateProfileReply
+	pattern := "/user/update-profile"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationUserupdateProfile))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {

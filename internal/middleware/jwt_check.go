@@ -5,6 +5,7 @@ import (
 	"iwut-auth-center/internal/biz"
 	"iwut-auth-center/internal/util"
 	"strings"
+	"time"
 
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/middleware"
@@ -22,12 +23,6 @@ func NewJwtCheckMiddleware(uc *biz.AuthUsecase, jwtUtil *util.JwtUtil) *JwtCheck
 		jwtUtil:     jwtUtil,
 	}
 }
-
-// tokenKey is an unexported context key type to avoid collisions
-
-//	func (e *JwtError) Error() string {
-//		return fmt.Sprintf("%d: %s", e.Code, e.Message)
-//	}
 
 func (c *JwtCheckMiddleware) GetCheckJwtMiddleware() middleware.Middleware {
 	return func(handler middleware.Handler) middleware.Handler {
@@ -71,18 +66,40 @@ func (c *JwtCheckMiddleware) GetCheckJwtMiddleware() middleware.Middleware {
 
 			// If no token present, return 401 Error immediately
 			if strings.TrimSpace(token) == "" {
-				return nil, errors.New(401, "", "Unauthorized")
+				return nil, errors.Unauthorized("", "Unauthorized")
 			}
 
-			// Verify and parse token
+			// Verify and parse token 检查 签名 过期时间(exp iat) 和 iss
 			result, err := c.jwtUtil.DecodeJWTWithRS256(token)
 			if err != nil {
-				return nil, errors.New(401, "", err.Error())
+				return nil, errors.Unauthorized("", err.Error())
 			}
-			ctx = c.jwtUtil.WithTokenValue(ctx, &util.TokenValue{
-				Token:  token,
-				Claims: result,
-			})
+
+			// 判断Token类型 一方还是Oauth
+			switch c.jwtUtil.GetJwtTypeFromClaims(result) {
+			case util.OfficialJwt:
+				baseClaims, err := c.jwtUtil.ToBaseAuthClaims(result)
+				if err != nil {
+					return nil, errors.Unauthorized("", err.Error())
+				}
+				if baseClaims.Type != "access" {
+					return nil, errors.Unauthorized("", "Invalid token type")
+				}
+				version, err := c.authUsecase.Repo.GetUserVersion(ctx,
+					baseClaims.Uid,
+					time.Duration(baseClaims.Exp-time.Now().Unix())*time.Second)
+				if err != nil {
+					return nil, errors.Unauthorized("", err.Error())
+				}
+				if baseClaims.Version != version {
+					return nil, errors.Unauthorized("", "Token has been revoked")
+				}
+				ctx = c.jwtUtil.WithTokenValue(ctx, &util.TokenValue{
+					Token:          token,
+					BaseAuthClaims: baseClaims,
+				})
+			case util.OAuthJwt:
+			}
 
 			return handler(ctx, req)
 		}

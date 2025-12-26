@@ -374,6 +374,118 @@ func (x *RegisterReply) GetTraceId() string {
 	return ""
 }
 
+type RefreshTokenRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RefreshToken  string                 `protobuf:"bytes,1,opt,name=refreshToken,proto3" json:"refreshToken,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefreshTokenRequest) Reset() {
+	*x = RefreshTokenRequest{}
+	mi := &file_auth_center_v1_auth_auth_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefreshTokenRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefreshTokenRequest) ProtoMessage() {}
+
+func (x *RefreshTokenRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_center_v1_auth_auth_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefreshTokenRequest.ProtoReflect.Descriptor instead.
+func (*RefreshTokenRequest) Descriptor() ([]byte, []int) {
+	return file_auth_center_v1_auth_auth_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *RefreshTokenRequest) GetRefreshToken() string {
+	if x != nil {
+		return x.RefreshToken
+	}
+	return ""
+}
+
+type RefreshTokenReply struct {
+	state         protoimpl.MessageState                   `protogen:"open.v1"`
+	Code          int32                                    `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                                   `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Data          *RefreshTokenReply_RefreshTokenReplyData `protobuf:"bytes,3,opt,name=data,proto3,oneof" json:"data,omitempty"`
+	TraceId       *string                                  `protobuf:"bytes,4,opt,name=traceId,proto3,oneof" json:"traceId,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefreshTokenReply) Reset() {
+	*x = RefreshTokenReply{}
+	mi := &file_auth_center_v1_auth_auth_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefreshTokenReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefreshTokenReply) ProtoMessage() {}
+
+func (x *RefreshTokenReply) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_center_v1_auth_auth_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefreshTokenReply.ProtoReflect.Descriptor instead.
+func (*RefreshTokenReply) Descriptor() ([]byte, []int) {
+	return file_auth_center_v1_auth_auth_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *RefreshTokenReply) GetCode() int32 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *RefreshTokenReply) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *RefreshTokenReply) GetData() *RefreshTokenReply_RefreshTokenReplyData {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *RefreshTokenReply) GetTraceId() string {
+	if x != nil && x.TraceId != nil {
+		return *x.TraceId
+	}
+	return ""
+}
+
 type LoginReply_LoginReplyData struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AccessToken   string                 `protobuf:"bytes,1,opt,name=accessToken,proto3" json:"accessToken,omitempty"`
@@ -384,7 +496,7 @@ type LoginReply_LoginReplyData struct {
 
 func (x *LoginReply_LoginReplyData) Reset() {
 	*x = LoginReply_LoginReplyData{}
-	mi := &file_auth_center_v1_auth_auth_proto_msgTypes[6]
+	mi := &file_auth_center_v1_auth_auth_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -396,7 +508,7 @@ func (x *LoginReply_LoginReplyData) String() string {
 func (*LoginReply_LoginReplyData) ProtoMessage() {}
 
 func (x *LoginReply_LoginReplyData) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_center_v1_auth_auth_proto_msgTypes[6]
+	mi := &file_auth_center_v1_auth_auth_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -435,7 +547,7 @@ type RegisterReply_RegisterReplyData struct {
 
 func (x *RegisterReply_RegisterReplyData) Reset() {
 	*x = RegisterReply_RegisterReplyData{}
-	mi := &file_auth_center_v1_auth_auth_proto_msgTypes[7]
+	mi := &file_auth_center_v1_auth_auth_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -447,7 +559,7 @@ func (x *RegisterReply_RegisterReplyData) String() string {
 func (*RegisterReply_RegisterReplyData) ProtoMessage() {}
 
 func (x *RegisterReply_RegisterReplyData) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_center_v1_auth_auth_proto_msgTypes[7]
+	mi := &file_auth_center_v1_auth_auth_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -466,6 +578,58 @@ func (*RegisterReply_RegisterReplyData) Descriptor() ([]byte, []int) {
 func (x *RegisterReply_RegisterReplyData) GetUserId() string {
 	if x != nil {
 		return x.UserId
+	}
+	return ""
+}
+
+type RefreshTokenReply_RefreshTokenReplyData struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AccessToken   string                 `protobuf:"bytes,1,opt,name=accessToken,proto3" json:"accessToken,omitempty"`
+	RefreshToken  string                 `protobuf:"bytes,2,opt,name=refreshToken,proto3" json:"refreshToken,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefreshTokenReply_RefreshTokenReplyData) Reset() {
+	*x = RefreshTokenReply_RefreshTokenReplyData{}
+	mi := &file_auth_center_v1_auth_auth_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefreshTokenReply_RefreshTokenReplyData) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefreshTokenReply_RefreshTokenReplyData) ProtoMessage() {}
+
+func (x *RefreshTokenReply_RefreshTokenReplyData) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_center_v1_auth_auth_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefreshTokenReply_RefreshTokenReplyData.ProtoReflect.Descriptor instead.
+func (*RefreshTokenReply_RefreshTokenReplyData) Descriptor() ([]byte, []int) {
+	return file_auth_center_v1_auth_auth_proto_rawDescGZIP(), []int{7, 0}
+}
+
+func (x *RefreshTokenReply_RefreshTokenReplyData) GetAccessToken() string {
+	if x != nil {
+		return x.AccessToken
+	}
+	return ""
+}
+
+func (x *RefreshTokenReply_RefreshTokenReplyData) GetRefreshToken() string {
+	if x != nil {
+		return x.RefreshToken
 	}
 	return ""
 }
@@ -513,11 +677,25 @@ const file_auth_center_v1_auth_auth_proto_rawDesc = "" +
 	"\x06userId\x18\x01 \x01(\tR\x06userIdB\a\n" +
 	"\x05_dataB\n" +
 	"\n" +
-	"\b_traceId2\xed\x02\n" +
+	"\b_traceId\"9\n" +
+	"\x13RefreshTokenRequest\x12\"\n" +
+	"\frefreshToken\x18\x01 \x01(\tR\frefreshToken\"\xab\x02\n" +
+	"\x11RefreshTokenReply\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12U\n" +
+	"\x04data\x18\x03 \x01(\v2<.auth_center.v1.auth.RefreshTokenReply.RefreshTokenReplyDataH\x00R\x04data\x88\x01\x01\x12\x1d\n" +
+	"\atraceId\x18\x04 \x01(\tH\x01R\atraceId\x88\x01\x01\x1a]\n" +
+	"\x15RefreshTokenReplyData\x12 \n" +
+	"\vaccessToken\x18\x01 \x01(\tR\vaccessToken\x12\"\n" +
+	"\frefreshToken\x18\x02 \x01(\tR\frefreshTokenB\a\n" +
+	"\x05_dataB\n" +
+	"\n" +
+	"\b_traceId2\xf0\x03\n" +
 	"\x04Auth\x12k\n" +
 	"\rpasswordLogin\x12!.auth_center.v1.auth.LoginRequest\x1a\x1f.auth_center.v1.auth.LoginReply\"\x16\x82\xd3\xe4\x93\x02\x10:\x01*\"\v/auth/login\x12\x86\x01\n" +
 	"\x0fgetRegisterMail\x12).auth_center.v1.auth.GetVerifyCodeRequest\x1a'.auth_center.v1.auth.GetVerifyCodeReply\"\x1f\x82\xd3\xe4\x93\x02\x19\x12\x17/auth/get-register-mail\x12o\n" +
-	"\bregister\x12$.auth_center.v1.auth.RegisterRequest\x1a\".auth_center.v1.auth.RegisterReply\"\x19\x82\xd3\xe4\x93\x02\x13:\x01*\"\x0e/auth/registerB/Z-iwut-auth_center/api/auth_center/v1/auth;authb\x06proto3"
+	"\bregister\x12$.auth_center.v1.auth.RegisterRequest\x1a\".auth_center.v1.auth.RegisterReply\"\x19\x82\xd3\xe4\x93\x02\x13:\x01*\"\x0e/auth/register\x12\x80\x01\n" +
+	"\frefreshToken\x12(.auth_center.v1.auth.RefreshTokenRequest\x1a&.auth_center.v1.auth.RefreshTokenReply\"\x1e\x82\xd3\xe4\x93\x02\x18:\x01*\"\x13/auth/refresh-tokenB/Z-iwut-auth_center/api/auth_center/v1/auth;authb\x06proto3"
 
 var (
 	file_auth_center_v1_auth_auth_proto_rawDescOnce sync.Once
@@ -531,31 +709,37 @@ func file_auth_center_v1_auth_auth_proto_rawDescGZIP() []byte {
 	return file_auth_center_v1_auth_auth_proto_rawDescData
 }
 
-var file_auth_center_v1_auth_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_auth_center_v1_auth_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_auth_center_v1_auth_auth_proto_goTypes = []any{
-	(*LoginRequest)(nil),                    // 0: auth_center.v1.auth.LoginRequest
-	(*LoginReply)(nil),                      // 1: auth_center.v1.auth.LoginReply
-	(*GetVerifyCodeRequest)(nil),            // 2: auth_center.v1.auth.GetVerifyCodeRequest
-	(*GetVerifyCodeReply)(nil),              // 3: auth_center.v1.auth.GetVerifyCodeReply
-	(*RegisterRequest)(nil),                 // 4: auth_center.v1.auth.RegisterRequest
-	(*RegisterReply)(nil),                   // 5: auth_center.v1.auth.RegisterReply
-	(*LoginReply_LoginReplyData)(nil),       // 6: auth_center.v1.auth.LoginReply.LoginReplyData
-	(*RegisterReply_RegisterReplyData)(nil), // 7: auth_center.v1.auth.RegisterReply.RegisterReplyData
+	(*LoginRequest)(nil),                            // 0: auth_center.v1.auth.LoginRequest
+	(*LoginReply)(nil),                              // 1: auth_center.v1.auth.LoginReply
+	(*GetVerifyCodeRequest)(nil),                    // 2: auth_center.v1.auth.GetVerifyCodeRequest
+	(*GetVerifyCodeReply)(nil),                      // 3: auth_center.v1.auth.GetVerifyCodeReply
+	(*RegisterRequest)(nil),                         // 4: auth_center.v1.auth.RegisterRequest
+	(*RegisterReply)(nil),                           // 5: auth_center.v1.auth.RegisterReply
+	(*RefreshTokenRequest)(nil),                     // 6: auth_center.v1.auth.RefreshTokenRequest
+	(*RefreshTokenReply)(nil),                       // 7: auth_center.v1.auth.RefreshTokenReply
+	(*LoginReply_LoginReplyData)(nil),               // 8: auth_center.v1.auth.LoginReply.LoginReplyData
+	(*RegisterReply_RegisterReplyData)(nil),         // 9: auth_center.v1.auth.RegisterReply.RegisterReplyData
+	(*RefreshTokenReply_RefreshTokenReplyData)(nil), // 10: auth_center.v1.auth.RefreshTokenReply.RefreshTokenReplyData
 }
 var file_auth_center_v1_auth_auth_proto_depIdxs = []int32{
-	6, // 0: auth_center.v1.auth.LoginReply.data:type_name -> auth_center.v1.auth.LoginReply.LoginReplyData
-	7, // 1: auth_center.v1.auth.RegisterReply.data:type_name -> auth_center.v1.auth.RegisterReply.RegisterReplyData
-	0, // 2: auth_center.v1.auth.Auth.passwordLogin:input_type -> auth_center.v1.auth.LoginRequest
-	2, // 3: auth_center.v1.auth.Auth.getRegisterMail:input_type -> auth_center.v1.auth.GetVerifyCodeRequest
-	4, // 4: auth_center.v1.auth.Auth.register:input_type -> auth_center.v1.auth.RegisterRequest
-	1, // 5: auth_center.v1.auth.Auth.passwordLogin:output_type -> auth_center.v1.auth.LoginReply
-	3, // 6: auth_center.v1.auth.Auth.getRegisterMail:output_type -> auth_center.v1.auth.GetVerifyCodeReply
-	5, // 7: auth_center.v1.auth.Auth.register:output_type -> auth_center.v1.auth.RegisterReply
-	5, // [5:8] is the sub-list for method output_type
-	2, // [2:5] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	8,  // 0: auth_center.v1.auth.LoginReply.data:type_name -> auth_center.v1.auth.LoginReply.LoginReplyData
+	9,  // 1: auth_center.v1.auth.RegisterReply.data:type_name -> auth_center.v1.auth.RegisterReply.RegisterReplyData
+	10, // 2: auth_center.v1.auth.RefreshTokenReply.data:type_name -> auth_center.v1.auth.RefreshTokenReply.RefreshTokenReplyData
+	0,  // 3: auth_center.v1.auth.Auth.passwordLogin:input_type -> auth_center.v1.auth.LoginRequest
+	2,  // 4: auth_center.v1.auth.Auth.getRegisterMail:input_type -> auth_center.v1.auth.GetVerifyCodeRequest
+	4,  // 5: auth_center.v1.auth.Auth.register:input_type -> auth_center.v1.auth.RegisterRequest
+	6,  // 6: auth_center.v1.auth.Auth.refreshToken:input_type -> auth_center.v1.auth.RefreshTokenRequest
+	1,  // 7: auth_center.v1.auth.Auth.passwordLogin:output_type -> auth_center.v1.auth.LoginReply
+	3,  // 8: auth_center.v1.auth.Auth.getRegisterMail:output_type -> auth_center.v1.auth.GetVerifyCodeReply
+	5,  // 9: auth_center.v1.auth.Auth.register:output_type -> auth_center.v1.auth.RegisterReply
+	7,  // 10: auth_center.v1.auth.Auth.refreshToken:output_type -> auth_center.v1.auth.RefreshTokenReply
+	7,  // [7:11] is the sub-list for method output_type
+	3,  // [3:7] is the sub-list for method input_type
+	3,  // [3:3] is the sub-list for extension type_name
+	3,  // [3:3] is the sub-list for extension extendee
+	0,  // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_auth_center_v1_auth_auth_proto_init() }
@@ -566,13 +750,14 @@ func file_auth_center_v1_auth_auth_proto_init() {
 	file_auth_center_v1_auth_auth_proto_msgTypes[1].OneofWrappers = []any{}
 	file_auth_center_v1_auth_auth_proto_msgTypes[3].OneofWrappers = []any{}
 	file_auth_center_v1_auth_auth_proto_msgTypes[5].OneofWrappers = []any{}
+	file_auth_center_v1_auth_auth_proto_msgTypes[7].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_auth_center_v1_auth_auth_proto_rawDesc), len(file_auth_center_v1_auth_auth_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

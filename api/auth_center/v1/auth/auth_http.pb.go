@@ -21,11 +21,13 @@ const _ = http.SupportPackageIsVersion1
 
 const OperationAuthgetRegisterMail = "/auth_center.v1.auth.Auth/getRegisterMail"
 const OperationAuthpasswordLogin = "/auth_center.v1.auth.Auth/passwordLogin"
+const OperationAuthrefreshToken = "/auth_center.v1.auth.Auth/refreshToken"
 const OperationAuthregister = "/auth_center.v1.auth.Auth/register"
 
 type AuthHTTPServer interface {
 	GetRegisterMail(context.Context, *GetVerifyCodeRequest) (*GetVerifyCodeReply, error)
 	PasswordLogin(context.Context, *LoginRequest) (*LoginReply, error)
+	RefreshToken(context.Context, *RefreshTokenRequest) (*RefreshTokenReply, error)
 	Register(context.Context, *RegisterRequest) (*RegisterReply, error)
 }
 
@@ -34,6 +36,7 @@ func RegisterAuthHTTPServer(s *http.Server, srv AuthHTTPServer) {
 	r.POST("/auth/login", _Auth_PasswordLogin0_HTTP_Handler(srv))
 	r.GET("/auth/get-register-mail", _Auth_GetRegisterMail0_HTTP_Handler(srv))
 	r.POST("/auth/register", _Auth_Register0_HTTP_Handler(srv))
+	r.POST("/auth/refresh-token", _Auth_RefreshToken0_HTTP_Handler(srv))
 }
 
 func _Auth_PasswordLogin0_HTTP_Handler(srv AuthHTTPServer) func(ctx http.Context) error {
@@ -99,9 +102,32 @@ func _Auth_Register0_HTTP_Handler(srv AuthHTTPServer) func(ctx http.Context) err
 	}
 }
 
+func _Auth_RefreshToken0_HTTP_Handler(srv AuthHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in RefreshTokenRequest
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationAuthrefreshToken)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.RefreshToken(ctx, req.(*RefreshTokenRequest))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*RefreshTokenReply)
+		return ctx.Result(200, reply)
+	}
+}
+
 type AuthHTTPClient interface {
 	GetRegisterMail(ctx context.Context, req *GetVerifyCodeRequest, opts ...http.CallOption) (rsp *GetVerifyCodeReply, err error)
 	PasswordLogin(ctx context.Context, req *LoginRequest, opts ...http.CallOption) (rsp *LoginReply, err error)
+	RefreshToken(ctx context.Context, req *RefreshTokenRequest, opts ...http.CallOption) (rsp *RefreshTokenReply, err error)
 	Register(ctx context.Context, req *RegisterRequest, opts ...http.CallOption) (rsp *RegisterReply, err error)
 }
 
@@ -131,6 +157,19 @@ func (c *AuthHTTPClientImpl) PasswordLogin(ctx context.Context, in *LoginRequest
 	pattern := "/auth/login"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationAuthpasswordLogin))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *AuthHTTPClientImpl) RefreshToken(ctx context.Context, in *RefreshTokenRequest, opts ...http.CallOption) (*RefreshTokenReply, error) {
+	var out RefreshTokenReply
+	pattern := "/auth/refresh-token"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationAuthrefreshToken))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {

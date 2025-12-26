@@ -3,6 +3,8 @@ syntax = "proto3";
 package auth_center.v1.user;
 
 import "google/api/annotations.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/empty.proto";
 
 option go_package = "iwut-auth_center/api/auth_center/v1/user;user";
 
@@ -10,6 +12,23 @@ service User {
   rpc updatePassword (UpdatePasswordRequest) returns (UpdatePasswordReply) {
     option (google.api.http) = {
       post: "/user/update-password"
+      body: "*"
+    };
+  }
+  rpc deleteAccount (google.protobuf.Empty) returns (DeleteAccountReply) {
+    option (google.api.http) = {
+      get: "/user/delete-account"
+    };
+  }
+  rpc getProfile (google.protobuf.Empty) returns (GetProfileReply) {
+    option (google.api.http) = {
+      get: "/user/profile"
+    };
+  }
+
+  rpc updateProfile (google.protobuf.Struct) returns (UpdateProfileReply) {
+    option (google.api.http) = {
+      post: "/user/update-profile"
       body: "*"
     };
   }
@@ -21,6 +40,42 @@ message UpdatePasswordRequest {
 }
 
 message UpdatePasswordReply {
+  int32 code = 1;
+  string message = 2;
+  optional string traceId = 3;
+}
+
+message DeleteAccountReply {
+  int32 code = 1;
+  string message = 2;
+  optional string traceId = 3;
+}
+
+message GetProfileReply {
+  message GetProfileReplyData {
+    string userId = 1;
+    string email = 2;
+    int64 createdAt = 3;
+    int64 updatedAt = 4;
+    map<string, string> attrs = 5;
+  }
+  int32 code = 1;
+  string message = 2;
+  optional GetProfileReplyData data = 3;
+  optional string traceId = 4;
+}
+//  string nick = 1;
+//  string realName = 2;
+//  string studentNumber = 3;
+//  string avatarUrl = 4;
+//  string gender = 5;
+//  string whutEmail = 6;
+//  string region = 7; // 校区
+//  string school = 8; // 院系
+//  string birthday = 9;
+//  string qq = 10;
+//  string phone = 11;
+message UpdateProfileReply {
   int32 code = 1;
   string message = 2;
   optional string traceId = 3;
