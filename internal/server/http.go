@@ -2,16 +2,19 @@ package server
 
 import (
 	authpb "iwut-auth-center/api/auth_center/v1/auth"
+	oauth2pb "iwut-auth-center/api/auth_center/v1/oauth2"
 	userpb "iwut-auth-center/api/auth_center/v1/user"
 	"iwut-auth-center/internal/conf"
 	"iwut-auth-center/internal/middleware"
-	authsvc "iwut-auth-center/internal/service/auth"
-	usersvc "iwut-auth-center/internal/service/user"
+	"iwut-auth-center/internal/service"
 	"strings"
 
 	"github.com/go-kratos/kratos/v2/encoding"
 	"github.com/go-kratos/kratos/v2/errors"
+	"github.com/go-kratos/kratos/v2/log"
+	"github.com/go-kratos/kratos/v2/middleware/logging"
 	"github.com/go-kratos/kratos/v2/middleware/recovery"
+	"github.com/go-kratos/kratos/v2/middleware/tracing"
 	"github.com/go-kratos/kratos/v2/transport/http"
 )
 
@@ -67,11 +70,13 @@ func CreatedErrorEncoder(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 // NewHTTPServer new an HTTP server.
-func NewHTTPServer(c *conf.Server, authSvc *authsvc.Service, userSvc *usersvc.Service, jwtCheck *middleware.JwtCheckMiddleware) *http.Server {
+func NewHTTPServer(c *conf.Server, authSvc *service.AuthService, userSvc *service.UserService, oauth2Service *service.Oauth2Service, jwtCheck *middleware.JwtCheckMiddleware, logger log.Logger) *http.Server {
 	var opts = []http.ServerOption{
 		http.Middleware(
 			recovery.Recovery(),
-			middleware.GetTraceInjectionMiddleware(),
+			tracing.Server(),
+			logging.Server(logger),
+			middleware.GetAuditInfoCollectorMiddleware(),
 			jwtCheck.GetCheckJwtMiddleware(),
 		),
 		http.ErrorEncoder(CreatedErrorEncoder),
@@ -88,5 +93,6 @@ func NewHTTPServer(c *conf.Server, authSvc *authsvc.Service, userSvc *usersvc.Se
 	srv := http.NewServer(opts...)
 	authpb.RegisterAuthHTTPServer(srv, authSvc)
 	userpb.RegisterUserHTTPServer(srv, userSvc)
+	oauth2pb.RegisterOAuth2HTTPServer(srv, oauth2Service)
 	return srv
 }

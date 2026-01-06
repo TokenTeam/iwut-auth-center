@@ -79,7 +79,7 @@ type LoginReply struct {
 	Code          int32                      `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
 	Message       string                     `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	Data          *LoginReply_LoginReplyData `protobuf:"bytes,3,opt,name=data,proto3,oneof" json:"data,omitempty"`
-	TraceId       *string                    `protobuf:"bytes,4,opt,name=traceId,proto3,oneof" json:"traceId,omitempty"`
+	TraceId       string                     `protobuf:"bytes,4,opt,name=traceId,proto3" json:"traceId,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -136,8 +136,8 @@ func (x *LoginReply) GetData() *LoginReply_LoginReplyData {
 }
 
 func (x *LoginReply) GetTraceId() string {
-	if x != nil && x.TraceId != nil {
-		return *x.TraceId
+	if x != nil {
+		return x.TraceId
 	}
 	return ""
 }
@@ -190,7 +190,7 @@ type GetVerifyCodeReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Code          int32                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
 	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	TraceId       *string                `protobuf:"bytes,3,opt,name=traceId,proto3,oneof" json:"traceId,omitempty"`
+	TraceId       string                 `protobuf:"bytes,3,opt,name=traceId,proto3" json:"traceId,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -240,8 +240,8 @@ func (x *GetVerifyCodeReply) GetMessage() string {
 }
 
 func (x *GetVerifyCodeReply) GetTraceId() string {
-	if x != nil && x.TraceId != nil {
-		return *x.TraceId
+	if x != nil {
+		return x.TraceId
 	}
 	return ""
 }
@@ -311,7 +311,7 @@ type RegisterReply struct {
 	Code          int32                            `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
 	Message       string                           `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	Data          *RegisterReply_RegisterReplyData `protobuf:"bytes,3,opt,name=data,proto3,oneof" json:"data,omitempty"`
-	TraceId       *string                          `protobuf:"bytes,4,opt,name=traceId,proto3,oneof" json:"traceId,omitempty"`
+	TraceId       string                           `protobuf:"bytes,4,opt,name=traceId,proto3" json:"traceId,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -368,8 +368,8 @@ func (x *RegisterReply) GetData() *RegisterReply_RegisterReplyData {
 }
 
 func (x *RegisterReply) GetTraceId() string {
-	if x != nil && x.TraceId != nil {
-		return *x.TraceId
+	if x != nil {
+		return x.TraceId
 	}
 	return ""
 }
@@ -423,7 +423,7 @@ type RefreshTokenReply struct {
 	Code          int32                                    `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
 	Message       string                                   `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	Data          *RefreshTokenReply_RefreshTokenReplyData `protobuf:"bytes,3,opt,name=data,proto3,oneof" json:"data,omitempty"`
-	TraceId       *string                                  `protobuf:"bytes,4,opt,name=traceId,proto3,oneof" json:"traceId,omitempty"`
+	TraceId       string                                   `protobuf:"bytes,4,opt,name=traceId,proto3" json:"traceId,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -480,8 +480,8 @@ func (x *RefreshTokenReply) GetData() *RefreshTokenReply_RefreshTokenReplyData {
 }
 
 func (x *RefreshTokenReply) GetTraceId() string {
-	if x != nil && x.TraceId != nil {
-		return *x.TraceId
+	if x != nil {
+		return x.TraceId
 	}
 	return ""
 }
@@ -641,56 +641,48 @@ const file_auth_center_v1_auth_auth_proto_rawDesc = "" +
 	"\x1eauth_center/v1/auth/auth.proto\x12\x13auth_center.v1.auth\x1a\x1cgoogle/api/annotations.proto\"@\n" +
 	"\fLoginRequest\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x1a\n" +
-	"\bpassword\x18\x02 \x01(\tR\bpassword\"\x8f\x02\n" +
+	"\bpassword\x18\x02 \x01(\tR\bpassword\"\xfe\x01\n" +
 	"\n" +
 	"LoginReply\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12G\n" +
-	"\x04data\x18\x03 \x01(\v2..auth_center.v1.auth.LoginReply.LoginReplyDataH\x00R\x04data\x88\x01\x01\x12\x1d\n" +
-	"\atraceId\x18\x04 \x01(\tH\x01R\atraceId\x88\x01\x01\x1aV\n" +
+	"\x04data\x18\x03 \x01(\v2..auth_center.v1.auth.LoginReply.LoginReplyDataH\x00R\x04data\x88\x01\x01\x12\x18\n" +
+	"\atraceId\x18\x04 \x01(\tR\atraceId\x1aV\n" +
 	"\x0eLoginReplyData\x12 \n" +
 	"\vaccessToken\x18\x01 \x01(\tR\vaccessToken\x12\"\n" +
 	"\frefreshToken\x18\x02 \x01(\tR\frefreshTokenB\a\n" +
-	"\x05_dataB\n" +
-	"\n" +
-	"\b_traceId\",\n" +
+	"\x05_data\",\n" +
 	"\x14GetVerifyCodeRequest\x12\x14\n" +
-	"\x05email\x18\x01 \x01(\tR\x05email\"m\n" +
+	"\x05email\x18\x01 \x01(\tR\x05email\"\\\n" +
 	"\x12GetVerifyCodeReply\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
-	"\atraceId\x18\x03 \x01(\tH\x00R\atraceId\x88\x01\x01B\n" +
-	"\n" +
-	"\b_traceId\"c\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x18\n" +
+	"\atraceId\x18\x03 \x01(\tR\atraceId\"c\n" +
 	"\x0fRegisterRequest\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x1e\n" +
 	"\n" +
 	"verifyCode\x18\x02 \x01(\tR\n" +
 	"verifyCode\x12\x1a\n" +
-	"\bpassword\x18\x03 \x01(\tR\bpassword\"\xed\x01\n" +
+	"\bpassword\x18\x03 \x01(\tR\bpassword\"\xdc\x01\n" +
 	"\rRegisterReply\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12M\n" +
-	"\x04data\x18\x03 \x01(\v24.auth_center.v1.auth.RegisterReply.RegisterReplyDataH\x00R\x04data\x88\x01\x01\x12\x1d\n" +
-	"\atraceId\x18\x04 \x01(\tH\x01R\atraceId\x88\x01\x01\x1a+\n" +
+	"\x04data\x18\x03 \x01(\v24.auth_center.v1.auth.RegisterReply.RegisterReplyDataH\x00R\x04data\x88\x01\x01\x12\x18\n" +
+	"\atraceId\x18\x04 \x01(\tR\atraceId\x1a+\n" +
 	"\x11RegisterReplyData\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\tR\x06userIdB\a\n" +
-	"\x05_dataB\n" +
-	"\n" +
-	"\b_traceId\"9\n" +
+	"\x05_data\"9\n" +
 	"\x13RefreshTokenRequest\x12\"\n" +
-	"\frefreshToken\x18\x01 \x01(\tR\frefreshToken\"\xab\x02\n" +
+	"\frefreshToken\x18\x01 \x01(\tR\frefreshToken\"\x9a\x02\n" +
 	"\x11RefreshTokenReply\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12U\n" +
-	"\x04data\x18\x03 \x01(\v2<.auth_center.v1.auth.RefreshTokenReply.RefreshTokenReplyDataH\x00R\x04data\x88\x01\x01\x12\x1d\n" +
-	"\atraceId\x18\x04 \x01(\tH\x01R\atraceId\x88\x01\x01\x1a]\n" +
+	"\x04data\x18\x03 \x01(\v2<.auth_center.v1.auth.RefreshTokenReply.RefreshTokenReplyDataH\x00R\x04data\x88\x01\x01\x12\x18\n" +
+	"\atraceId\x18\x04 \x01(\tR\atraceId\x1a]\n" +
 	"\x15RefreshTokenReplyData\x12 \n" +
 	"\vaccessToken\x18\x01 \x01(\tR\vaccessToken\x12\"\n" +
 	"\frefreshToken\x18\x02 \x01(\tR\frefreshTokenB\a\n" +
-	"\x05_dataB\n" +
-	"\n" +
-	"\b_traceId2\xf0\x03\n" +
+	"\x05_data2\xf0\x03\n" +
 	"\x04Auth\x12k\n" +
 	"\rpasswordLogin\x12!.auth_center.v1.auth.LoginRequest\x1a\x1f.auth_center.v1.auth.LoginReply\"\x16\x82\xd3\xe4\x93\x02\x10:\x01*\"\v/auth/login\x12\x86\x01\n" +
 	"\x0fgetRegisterMail\x12).auth_center.v1.auth.GetVerifyCodeRequest\x1a'.auth_center.v1.auth.GetVerifyCodeReply\"\x1f\x82\xd3\xe4\x93\x02\x19\x12\x17/auth/get-register-mail\x12o\n" +
@@ -748,7 +740,6 @@ func file_auth_center_v1_auth_auth_proto_init() {
 		return
 	}
 	file_auth_center_v1_auth_auth_proto_msgTypes[1].OneofWrappers = []any{}
-	file_auth_center_v1_auth_auth_proto_msgTypes[3].OneofWrappers = []any{}
 	file_auth_center_v1_auth_auth_proto_msgTypes[5].OneofWrappers = []any{}
 	file_auth_center_v1_auth_auth_proto_msgTypes[7].OneofWrappers = []any{}
 	type x struct{}

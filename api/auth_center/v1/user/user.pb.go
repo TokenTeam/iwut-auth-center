@@ -80,7 +80,7 @@ type UpdatePasswordReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Code          int32                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
 	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	TraceId       *string                `protobuf:"bytes,3,opt,name=traceId,proto3,oneof" json:"traceId,omitempty"`
+	TraceId       string                 `protobuf:"bytes,3,opt,name=traceId,proto3" json:"traceId,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -130,8 +130,8 @@ func (x *UpdatePasswordReply) GetMessage() string {
 }
 
 func (x *UpdatePasswordReply) GetTraceId() string {
-	if x != nil && x.TraceId != nil {
-		return *x.TraceId
+	if x != nil {
+		return x.TraceId
 	}
 	return ""
 }
@@ -140,7 +140,7 @@ type DeleteAccountReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Code          int32                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
 	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	TraceId       *string                `protobuf:"bytes,3,opt,name=traceId,proto3,oneof" json:"traceId,omitempty"`
+	TraceId       string                 `protobuf:"bytes,3,opt,name=traceId,proto3" json:"traceId,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -190,8 +190,8 @@ func (x *DeleteAccountReply) GetMessage() string {
 }
 
 func (x *DeleteAccountReply) GetTraceId() string {
-	if x != nil && x.TraceId != nil {
-		return *x.TraceId
+	if x != nil {
+		return x.TraceId
 	}
 	return ""
 }
@@ -201,7 +201,7 @@ type GetProfileReply struct {
 	Code          int32                                `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
 	Message       string                               `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	Data          *GetProfileReply_GetProfileReplyData `protobuf:"bytes,3,opt,name=data,proto3,oneof" json:"data,omitempty"`
-	TraceId       *string                              `protobuf:"bytes,4,opt,name=traceId,proto3,oneof" json:"traceId,omitempty"`
+	TraceId       string                               `protobuf:"bytes,4,opt,name=traceId,proto3" json:"traceId,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -258,8 +258,8 @@ func (x *GetProfileReply) GetData() *GetProfileReply_GetProfileReplyData {
 }
 
 func (x *GetProfileReply) GetTraceId() string {
-	if x != nil && x.TraceId != nil {
-		return *x.TraceId
+	if x != nil {
+		return x.TraceId
 	}
 	return ""
 }
@@ -279,7 +279,7 @@ type UpdateProfileReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Code          int32                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
 	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	TraceId       *string                `protobuf:"bytes,3,opt,name=traceId,proto3,oneof" json:"traceId,omitempty"`
+	TraceId       string                 `protobuf:"bytes,3,opt,name=traceId,proto3" json:"traceId,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -329,8 +329,76 @@ func (x *UpdateProfileReply) GetMessage() string {
 }
 
 func (x *UpdateProfileReply) GetTraceId() string {
-	if x != nil && x.TraceId != nil {
-		return *x.TraceId
+	if x != nil {
+		return x.TraceId
+	}
+	return ""
+}
+
+type GetProfileKeysReply struct {
+	state         protoimpl.MessageState                       `protogen:"open.v1"`
+	Code          int32                                        `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                                       `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Data          *GetProfileKeysReply_GetProfileKeysReplyData `protobuf:"bytes,3,opt,name=data,proto3,oneof" json:"data,omitempty"`
+	TraceId       string                                       `protobuf:"bytes,4,opt,name=traceId,proto3" json:"traceId,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetProfileKeysReply) Reset() {
+	*x = GetProfileKeysReply{}
+	mi := &file_auth_center_v1_user_user_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetProfileKeysReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetProfileKeysReply) ProtoMessage() {}
+
+func (x *GetProfileKeysReply) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_center_v1_user_user_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetProfileKeysReply.ProtoReflect.Descriptor instead.
+func (*GetProfileKeysReply) Descriptor() ([]byte, []int) {
+	return file_auth_center_v1_user_user_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *GetProfileKeysReply) GetCode() int32 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *GetProfileKeysReply) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *GetProfileKeysReply) GetData() *GetProfileKeysReply_GetProfileKeysReplyData {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *GetProfileKeysReply) GetTraceId() string {
+	if x != nil {
+		return x.TraceId
 	}
 	return ""
 }
@@ -348,7 +416,7 @@ type GetProfileReply_GetProfileReplyData struct {
 
 func (x *GetProfileReply_GetProfileReplyData) Reset() {
 	*x = GetProfileReply_GetProfileReplyData{}
-	mi := &file_auth_center_v1_user_user_proto_msgTypes[5]
+	mi := &file_auth_center_v1_user_user_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -360,7 +428,7 @@ func (x *GetProfileReply_GetProfileReplyData) String() string {
 func (*GetProfileReply_GetProfileReplyData) ProtoMessage() {}
 
 func (x *GetProfileReply_GetProfileReplyData) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_center_v1_user_user_proto_msgTypes[5]
+	mi := &file_auth_center_v1_user_user_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -411,6 +479,58 @@ func (x *GetProfileReply_GetProfileReplyData) GetAttrs() map[string]string {
 	return nil
 }
 
+type GetProfileKeysReply_GetProfileKeysReplyData struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	BaseKeys         []string               `protobuf:"bytes,1,rep,name=baseKeys,proto3" json:"baseKeys,omitempty"`
+	ExtraProfileKeys []string               `protobuf:"bytes,2,rep,name=extraProfileKeys,proto3" json:"extraProfileKeys,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *GetProfileKeysReply_GetProfileKeysReplyData) Reset() {
+	*x = GetProfileKeysReply_GetProfileKeysReplyData{}
+	mi := &file_auth_center_v1_user_user_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetProfileKeysReply_GetProfileKeysReplyData) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetProfileKeysReply_GetProfileKeysReplyData) ProtoMessage() {}
+
+func (x *GetProfileKeysReply_GetProfileKeysReplyData) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_center_v1_user_user_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetProfileKeysReply_GetProfileKeysReplyData.ProtoReflect.Descriptor instead.
+func (*GetProfileKeysReply_GetProfileKeysReplyData) Descriptor() ([]byte, []int) {
+	return file_auth_center_v1_user_user_proto_rawDescGZIP(), []int{5, 0}
+}
+
+func (x *GetProfileKeysReply_GetProfileKeysReplyData) GetBaseKeys() []string {
+	if x != nil {
+		return x.BaseKeys
+	}
+	return nil
+}
+
+func (x *GetProfileKeysReply_GetProfileKeysReplyData) GetExtraProfileKeys() []string {
+	if x != nil {
+		return x.ExtraProfileKeys
+	}
+	return nil
+}
+
 var File_auth_center_v1_user_user_proto protoreflect.FileDescriptor
 
 const file_auth_center_v1_user_user_proto_rawDesc = "" +
@@ -418,24 +538,20 @@ const file_auth_center_v1_user_user_proto_rawDesc = "" +
 	"\x1eauth_center/v1/user/user.proto\x12\x13auth_center.v1.user\x1a\x1cgoogle/api/annotations.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1bgoogle/protobuf/empty.proto\"[\n" +
 	"\x15UpdatePasswordRequest\x12 \n" +
 	"\voldPassword\x18\x01 \x01(\tR\voldPassword\x12 \n" +
-	"\vnewPassword\x18\x02 \x01(\tR\vnewPassword\"n\n" +
+	"\vnewPassword\x18\x02 \x01(\tR\vnewPassword\"]\n" +
 	"\x13UpdatePasswordReply\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
-	"\atraceId\x18\x03 \x01(\tH\x00R\atraceId\x88\x01\x01B\n" +
-	"\n" +
-	"\b_traceId\"m\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x18\n" +
+	"\atraceId\x18\x03 \x01(\tR\atraceId\"\\\n" +
 	"\x12DeleteAccountReply\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
-	"\atraceId\x18\x03 \x01(\tH\x00R\atraceId\x88\x01\x01B\n" +
-	"\n" +
-	"\b_traceId\"\xdd\x03\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x18\n" +
+	"\atraceId\x18\x03 \x01(\tR\atraceId\"\xcc\x03\n" +
 	"\x0fGetProfileReply\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12Q\n" +
-	"\x04data\x18\x03 \x01(\v28.auth_center.v1.user.GetProfileReply.GetProfileReplyDataH\x00R\x04data\x88\x01\x01\x12\x1d\n" +
-	"\atraceId\x18\x04 \x01(\tH\x01R\atraceId\x88\x01\x01\x1a\x94\x02\n" +
+	"\x04data\x18\x03 \x01(\v28.auth_center.v1.user.GetProfileReply.GetProfileReplyDataH\x00R\x04data\x88\x01\x01\x12\x18\n" +
+	"\atraceId\x18\x04 \x01(\tR\atraceId\x1a\x94\x02\n" +
 	"\x13GetProfileReplyData\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\tR\x06userId\x12\x14\n" +
 	"\x05email\x18\x02 \x01(\tR\x05email\x12\x1c\n" +
@@ -446,21 +562,27 @@ const file_auth_center_v1_user_user_proto_rawDesc = "" +
 	"AttrsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\a\n" +
-	"\x05_dataB\n" +
-	"\n" +
-	"\b_traceId\"m\n" +
+	"\x05_data\"\\\n" +
 	"\x12UpdateProfileReply\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
-	"\atraceId\x18\x03 \x01(\tH\x00R\atraceId\x88\x01\x01B\n" +
-	"\n" +
-	"\b_traceId2\xd8\x03\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x18\n" +
+	"\atraceId\x18\x03 \x01(\tR\atraceId\"\xa4\x02\n" +
+	"\x13GetProfileKeysReply\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12Y\n" +
+	"\x04data\x18\x03 \x01(\v2@.auth_center.v1.user.GetProfileKeysReply.GetProfileKeysReplyDataH\x00R\x04data\x88\x01\x01\x12\x18\n" +
+	"\atraceId\x18\x04 \x01(\tR\atraceId\x1aa\n" +
+	"\x17GetProfileKeysReplyData\x12\x1a\n" +
+	"\bbaseKeys\x18\x01 \x03(\tR\bbaseKeys\x12*\n" +
+	"\x10extraProfileKeys\x18\x02 \x03(\tR\x10extraProfileKeysB\a\n" +
+	"\x05_data2\xc8\x04\n" +
 	"\x04User\x12\x88\x01\n" +
 	"\x0eupdatePassword\x12*.auth_center.v1.user.UpdatePasswordRequest\x1a(.auth_center.v1.user.UpdatePasswordReply\" \x82\xd3\xe4\x93\x02\x1a:\x01*\"\x15/user/update-password\x12n\n" +
 	"\rdeleteAccount\x12\x16.google.protobuf.Empty\x1a'.auth_center.v1.user.DeleteAccountReply\"\x1c\x82\xd3\xe4\x93\x02\x16\x12\x14/user/delete-account\x12a\n" +
 	"\n" +
 	"getProfile\x12\x16.google.protobuf.Empty\x1a$.auth_center.v1.user.GetProfileReply\"\x15\x82\xd3\xe4\x93\x02\x0f\x12\r/user/profile\x12r\n" +
-	"\rupdateProfile\x12\x17.google.protobuf.Struct\x1a'.auth_center.v1.user.UpdateProfileReply\"\x1f\x82\xd3\xe4\x93\x02\x19:\x01*\"\x14/user/update-profileB/Z-iwut-auth_center/api/auth_center/v1/user;userb\x06proto3"
+	"\rupdateProfile\x12\x17.google.protobuf.Struct\x1a'.auth_center.v1.user.UpdateProfileReply\"\x1f\x82\xd3\xe4\x93\x02\x19:\x01*\"\x14/user/update-profile\x12n\n" +
+	"\x0egetProfileKeys\x12\x16.google.protobuf.Empty\x1a(.auth_center.v1.user.GetProfileKeysReply\"\x1a\x82\xd3\xe4\x93\x02\x14\x12\x12/user/profile-keysB/Z-iwut-auth_center/api/auth_center/v1/user;userb\x06proto3"
 
 var (
 	file_auth_center_v1_user_user_proto_rawDescOnce sync.Once
@@ -474,34 +596,39 @@ func file_auth_center_v1_user_user_proto_rawDescGZIP() []byte {
 	return file_auth_center_v1_user_user_proto_rawDescData
 }
 
-var file_auth_center_v1_user_user_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_auth_center_v1_user_user_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_auth_center_v1_user_user_proto_goTypes = []any{
 	(*UpdatePasswordRequest)(nil),               // 0: auth_center.v1.user.UpdatePasswordRequest
 	(*UpdatePasswordReply)(nil),                 // 1: auth_center.v1.user.UpdatePasswordReply
 	(*DeleteAccountReply)(nil),                  // 2: auth_center.v1.user.DeleteAccountReply
 	(*GetProfileReply)(nil),                     // 3: auth_center.v1.user.GetProfileReply
 	(*UpdateProfileReply)(nil),                  // 4: auth_center.v1.user.UpdateProfileReply
-	(*GetProfileReply_GetProfileReplyData)(nil), // 5: auth_center.v1.user.GetProfileReply.GetProfileReplyData
-	nil,                     // 6: auth_center.v1.user.GetProfileReply.GetProfileReplyData.AttrsEntry
-	(*emptypb.Empty)(nil),   // 7: google.protobuf.Empty
-	(*structpb.Struct)(nil), // 8: google.protobuf.Struct
+	(*GetProfileKeysReply)(nil),                 // 5: auth_center.v1.user.GetProfileKeysReply
+	(*GetProfileReply_GetProfileReplyData)(nil), // 6: auth_center.v1.user.GetProfileReply.GetProfileReplyData
+	nil, // 7: auth_center.v1.user.GetProfileReply.GetProfileReplyData.AttrsEntry
+	(*GetProfileKeysReply_GetProfileKeysReplyData)(nil), // 8: auth_center.v1.user.GetProfileKeysReply.GetProfileKeysReplyData
+	(*emptypb.Empty)(nil),                               // 9: google.protobuf.Empty
+	(*structpb.Struct)(nil),                             // 10: google.protobuf.Struct
 }
 var file_auth_center_v1_user_user_proto_depIdxs = []int32{
-	5, // 0: auth_center.v1.user.GetProfileReply.data:type_name -> auth_center.v1.user.GetProfileReply.GetProfileReplyData
-	6, // 1: auth_center.v1.user.GetProfileReply.GetProfileReplyData.attrs:type_name -> auth_center.v1.user.GetProfileReply.GetProfileReplyData.AttrsEntry
-	0, // 2: auth_center.v1.user.User.updatePassword:input_type -> auth_center.v1.user.UpdatePasswordRequest
-	7, // 3: auth_center.v1.user.User.deleteAccount:input_type -> google.protobuf.Empty
-	7, // 4: auth_center.v1.user.User.getProfile:input_type -> google.protobuf.Empty
-	8, // 5: auth_center.v1.user.User.updateProfile:input_type -> google.protobuf.Struct
-	1, // 6: auth_center.v1.user.User.updatePassword:output_type -> auth_center.v1.user.UpdatePasswordReply
-	2, // 7: auth_center.v1.user.User.deleteAccount:output_type -> auth_center.v1.user.DeleteAccountReply
-	3, // 8: auth_center.v1.user.User.getProfile:output_type -> auth_center.v1.user.GetProfileReply
-	4, // 9: auth_center.v1.user.User.updateProfile:output_type -> auth_center.v1.user.UpdateProfileReply
-	6, // [6:10] is the sub-list for method output_type
-	2, // [2:6] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	6,  // 0: auth_center.v1.user.GetProfileReply.data:type_name -> auth_center.v1.user.GetProfileReply.GetProfileReplyData
+	8,  // 1: auth_center.v1.user.GetProfileKeysReply.data:type_name -> auth_center.v1.user.GetProfileKeysReply.GetProfileKeysReplyData
+	7,  // 2: auth_center.v1.user.GetProfileReply.GetProfileReplyData.attrs:type_name -> auth_center.v1.user.GetProfileReply.GetProfileReplyData.AttrsEntry
+	0,  // 3: auth_center.v1.user.User.updatePassword:input_type -> auth_center.v1.user.UpdatePasswordRequest
+	9,  // 4: auth_center.v1.user.User.deleteAccount:input_type -> google.protobuf.Empty
+	9,  // 5: auth_center.v1.user.User.getProfile:input_type -> google.protobuf.Empty
+	10, // 6: auth_center.v1.user.User.updateProfile:input_type -> google.protobuf.Struct
+	9,  // 7: auth_center.v1.user.User.getProfileKeys:input_type -> google.protobuf.Empty
+	1,  // 8: auth_center.v1.user.User.updatePassword:output_type -> auth_center.v1.user.UpdatePasswordReply
+	2,  // 9: auth_center.v1.user.User.deleteAccount:output_type -> auth_center.v1.user.DeleteAccountReply
+	3,  // 10: auth_center.v1.user.User.getProfile:output_type -> auth_center.v1.user.GetProfileReply
+	4,  // 11: auth_center.v1.user.User.updateProfile:output_type -> auth_center.v1.user.UpdateProfileReply
+	5,  // 12: auth_center.v1.user.User.getProfileKeys:output_type -> auth_center.v1.user.GetProfileKeysReply
+	8,  // [8:13] is the sub-list for method output_type
+	3,  // [3:8] is the sub-list for method input_type
+	3,  // [3:3] is the sub-list for extension type_name
+	3,  // [3:3] is the sub-list for extension extendee
+	0,  // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_auth_center_v1_user_user_proto_init() }
@@ -509,17 +636,15 @@ func file_auth_center_v1_user_user_proto_init() {
 	if File_auth_center_v1_user_user_proto != nil {
 		return
 	}
-	file_auth_center_v1_user_user_proto_msgTypes[1].OneofWrappers = []any{}
-	file_auth_center_v1_user_user_proto_msgTypes[2].OneofWrappers = []any{}
 	file_auth_center_v1_user_user_proto_msgTypes[3].OneofWrappers = []any{}
-	file_auth_center_v1_user_user_proto_msgTypes[4].OneofWrappers = []any{}
+	file_auth_center_v1_user_user_proto_msgTypes[5].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_auth_center_v1_user_user_proto_rawDesc), len(file_auth_center_v1_user_user_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

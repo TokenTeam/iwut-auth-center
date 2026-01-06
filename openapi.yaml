@@ -83,23 +83,35 @@ paths:
                 - OAuth2
             operationId: OAuth2_Authorize
             parameters:
-                - name: responseType
+                - name: ClientId
                   in: query
                   schema:
                     type: string
-                - name: clientId
+                - name: ResponseType
                   in: query
                   schema:
                     type: string
-                - name: redirectUri
+                - name: Scope
                   in: query
                   schema:
                     type: string
-                - name: scope
+                - name: State
                   in: query
                   schema:
                     type: string
-                - name: state
+                - name: RedirectUri
+                  in: query
+                  schema:
+                    type: string
+                - name: Nonce
+                  in: query
+                  schema:
+                    type: string
+                - name: CodeChallenge
+                  in: query
+                  schema:
+                    type: string
+                - name: CodeChallengeMethod
                   in: query
                   schema:
                     type: string
@@ -110,6 +122,78 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/auth_center.v1.oauth2.AuthorizeReply'
+    /oauth2/revoke_authorization:
+        post:
+            tags:
+                - OAuth2
+            operationId: OAuth2_RevokeAuthorization
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/auth_center.v1.oauth2.RevokeAuthorizationRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/auth_center.v1.oauth2.RevokeAuthorizationReply'
+    /oauth2/set_user_storage:
+        post:
+            tags:
+                - OAuth2
+            operationId: OAuth2_SetUserStorage
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/auth_center.v1.oauth2.SetUserStorageReply'
+    /oauth2/token:
+        post:
+            tags:
+                - OAuth2
+            operationId: OAuth2_GetToken
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/auth_center.v1.oauth2.GetTokenRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/auth_center.v1.oauth2.GetTokenReply'
+    /oauth2/user_profile:
+        post:
+            tags:
+                - OAuth2
+            operationId: OAuth2_GetUserProfile
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/auth_center.v1.oauth2.GetUserProfileRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/auth_center.v1.oauth2.GetUserProfileReply'
     /user/delete-account:
         get:
             tags:
@@ -134,6 +218,18 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/auth_center.v1.user.GetProfileReply'
+    /user/profile-keys:
+        get:
+            tags:
+                - User
+            operationId: User_GetProfileKeys
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/auth_center.v1.user.GetProfileKeysReply'
     /user/update-password:
         post:
             tags:
@@ -273,11 +369,97 @@ components:
         auth_center.v1.oauth2.AuthorizeReply_AuthorizeReplyData:
             type: object
             properties:
-                authorizationCode:
-                    type: string
                 redirectUri:
                     type: string
-                state:
+        auth_center.v1.oauth2.GetTokenReply:
+            type: object
+            properties:
+                accessToken:
+                    type: string
+                idToken:
+                    type: string
+                refreshToken:
+                    type: string
+                tokenType:
+                    type: string
+                expiresIn:
+                    type: integer
+                    format: int32
+                scope:
+                    type: string
+                error:
+                    type: string
+                errorDescription:
+                    type: string
+        auth_center.v1.oauth2.GetTokenRequest:
+            type: object
+            properties:
+                grantType:
+                    type: string
+                code:
+                    type: string
+                clientId:
+                    type: string
+                clientSecret:
+                    type: string
+                codeVerifier:
+                    type: string
+        auth_center.v1.oauth2.GetUserProfileReply:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                data:
+                    $ref: '#/components/schemas/auth_center.v1.oauth2.GetUserProfileReply_UserProfileData'
+                traceId:
+                    type: string
+        auth_center.v1.oauth2.GetUserProfileReply_UserProfileData:
+            type: object
+            properties:
+                scope:
+                    type: object
+                storage:
+                    type: object
+                    additionalProperties:
+                        $ref: '#/components/schemas/google.protobuf.Value'
+        auth_center.v1.oauth2.GetUserProfileRequest:
+            type: object
+            properties:
+                scopeKeys:
+                    type: array
+                    items:
+                        type: string
+                storageKeys:
+                    type: array
+                    items:
+                        type: string
+        auth_center.v1.oauth2.RevokeAuthorizationReply:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                traceId:
+                    type: string
+        auth_center.v1.oauth2.RevokeAuthorizationRequest:
+            type: object
+            properties:
+                clientId:
+                    type: string
+        auth_center.v1.oauth2.SetUserStorageReply:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                traceId:
                     type: string
         auth_center.v1.user.DeleteAccountReply:
             type: object
@@ -289,6 +471,29 @@ components:
                     type: string
                 traceId:
                     type: string
+        auth_center.v1.user.GetProfileKeysReply:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                data:
+                    $ref: '#/components/schemas/auth_center.v1.user.GetProfileKeysReply_GetProfileKeysReplyData'
+                traceId:
+                    type: string
+        auth_center.v1.user.GetProfileKeysReply_GetProfileKeysReplyData:
+            type: object
+            properties:
+                baseKeys:
+                    type: array
+                    items:
+                        type: string
+                extraProfileKeys:
+                    type: array
+                    items:
+                        type: string
         auth_center.v1.user.GetProfileReply:
             type: object
             properties:
@@ -355,6 +560,8 @@ components:
                   string birthday = 9;
                   string qq = 10;
                   string phone = 11;
+        google.protobuf.Value:
+            description: Represents a dynamically typed value which can be either null, a number, a string, a boolean, a recursive struct value, or a list of values.
 tags:
     - name: Auth
     - name: OAuth2

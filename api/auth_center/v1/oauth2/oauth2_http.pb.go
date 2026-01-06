@@ -10,6 +10,7 @@ import (
 	context "context"
 	http "github.com/go-kratos/kratos/v2/transport/http"
 	binding "github.com/go-kratos/kratos/v2/transport/http/binding"
+	structpb "google.golang.org/protobuf/types/known/structpb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -20,14 +21,26 @@ var _ = binding.EncodeURL
 const _ = http.SupportPackageIsVersion1
 
 const OperationOAuth2authorize = "/auth_center.v1.oauth2.OAuth2/authorize"
+const OperationOAuth2getToken = "/auth_center.v1.oauth2.OAuth2/getToken"
+const OperationOAuth2getUserProfile = "/auth_center.v1.oauth2.OAuth2/getUserProfile"
+const OperationOAuth2revokeAuthorization = "/auth_center.v1.oauth2.OAuth2/revokeAuthorization"
+const OperationOAuth2setUserStorage = "/auth_center.v1.oauth2.OAuth2/setUserStorage"
 
 type OAuth2HTTPServer interface {
 	Authorize(context.Context, *AuthorizeRequest) (*AuthorizeReply, error)
+	GetToken(context.Context, *GetTokenRequest) (*GetTokenReply, error)
+	GetUserProfile(context.Context, *GetUserProfileRequest) (*GetUserProfileReply, error)
+	RevokeAuthorization(context.Context, *RevokeAuthorizationRequest) (*RevokeAuthorizationReply, error)
+	SetUserStorage(context.Context, *structpb.Struct) (*SetUserStorageReply, error)
 }
 
 func RegisterOAuth2HTTPServer(s *http.Server, srv OAuth2HTTPServer) {
 	r := s.Route("/")
 	r.GET("/oauth2/authorize", _OAuth2_Authorize0_HTTP_Handler(srv))
+	r.POST("/oauth2/token", _OAuth2_GetToken0_HTTP_Handler(srv))
+	r.POST("/oauth2/revoke_authorization", _OAuth2_RevokeAuthorization0_HTTP_Handler(srv))
+	r.POST("/oauth2/user_profile", _OAuth2_GetUserProfile0_HTTP_Handler(srv))
+	r.POST("/oauth2/set_user_storage", _OAuth2_SetUserStorage0_HTTP_Handler(srv))
 }
 
 func _OAuth2_Authorize0_HTTP_Handler(srv OAuth2HTTPServer) func(ctx http.Context) error {
@@ -49,8 +62,100 @@ func _OAuth2_Authorize0_HTTP_Handler(srv OAuth2HTTPServer) func(ctx http.Context
 	}
 }
 
+func _OAuth2_GetToken0_HTTP_Handler(srv OAuth2HTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in GetTokenRequest
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationOAuth2getToken)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.GetToken(ctx, req.(*GetTokenRequest))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*GetTokenReply)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _OAuth2_RevokeAuthorization0_HTTP_Handler(srv OAuth2HTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in RevokeAuthorizationRequest
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationOAuth2revokeAuthorization)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.RevokeAuthorization(ctx, req.(*RevokeAuthorizationRequest))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*RevokeAuthorizationReply)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _OAuth2_GetUserProfile0_HTTP_Handler(srv OAuth2HTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in GetUserProfileRequest
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationOAuth2getUserProfile)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.GetUserProfile(ctx, req.(*GetUserProfileRequest))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*GetUserProfileReply)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _OAuth2_SetUserStorage0_HTTP_Handler(srv OAuth2HTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in structpb.Struct
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationOAuth2setUserStorage)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.SetUserStorage(ctx, req.(*structpb.Struct))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*SetUserStorageReply)
+		return ctx.Result(200, reply)
+	}
+}
+
 type OAuth2HTTPClient interface {
 	Authorize(ctx context.Context, req *AuthorizeRequest, opts ...http.CallOption) (rsp *AuthorizeReply, err error)
+	GetToken(ctx context.Context, req *GetTokenRequest, opts ...http.CallOption) (rsp *GetTokenReply, err error)
+	GetUserProfile(ctx context.Context, req *GetUserProfileRequest, opts ...http.CallOption) (rsp *GetUserProfileReply, err error)
+	RevokeAuthorization(ctx context.Context, req *RevokeAuthorizationRequest, opts ...http.CallOption) (rsp *RevokeAuthorizationReply, err error)
+	SetUserStorage(ctx context.Context, req *structpb.Struct, opts ...http.CallOption) (rsp *SetUserStorageReply, err error)
 }
 
 type OAuth2HTTPClientImpl struct {
@@ -68,6 +173,58 @@ func (c *OAuth2HTTPClientImpl) Authorize(ctx context.Context, in *AuthorizeReque
 	opts = append(opts, http.Operation(OperationOAuth2authorize))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *OAuth2HTTPClientImpl) GetToken(ctx context.Context, in *GetTokenRequest, opts ...http.CallOption) (*GetTokenReply, error) {
+	var out GetTokenReply
+	pattern := "/oauth2/token"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationOAuth2getToken))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *OAuth2HTTPClientImpl) GetUserProfile(ctx context.Context, in *GetUserProfileRequest, opts ...http.CallOption) (*GetUserProfileReply, error) {
+	var out GetUserProfileReply
+	pattern := "/oauth2/user_profile"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationOAuth2getUserProfile))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *OAuth2HTTPClientImpl) RevokeAuthorization(ctx context.Context, in *RevokeAuthorizationRequest, opts ...http.CallOption) (*RevokeAuthorizationReply, error) {
+	var out RevokeAuthorizationReply
+	pattern := "/oauth2/revoke_authorization"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationOAuth2revokeAuthorization))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *OAuth2HTTPClientImpl) SetUserStorage(ctx context.Context, in *structpb.Struct, opts ...http.CallOption) (*SetUserStorageReply, error) {
+	var out SetUserStorageReply
+	pattern := "/oauth2/set_user_storage"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationOAuth2setUserStorage))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {
 		return nil, err
 	}

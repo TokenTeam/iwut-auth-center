@@ -13,14 +13,16 @@ import (
 )
 
 type JwtCheckMiddleware struct {
-	authUsecase *biz.AuthUsecase
-	jwtUtil     *util.JwtUtil
+	authUsecase   *biz.AuthUsecase
+	oauth2Usecase *biz.Oauth2Usecase
+	jwtUtil       *util.JwtUtil
 }
 
-func NewJwtCheckMiddleware(uc *biz.AuthUsecase, jwtUtil *util.JwtUtil) *JwtCheckMiddleware {
+func NewJwtCheckMiddleware(uc *biz.AuthUsecase, oauth2Usecase *biz.Oauth2Usecase, jwtUtil *util.JwtUtil) *JwtCheckMiddleware {
 	return &JwtCheckMiddleware{
-		authUsecase: uc,
-		jwtUtil:     jwtUtil,
+		authUsecase:   uc,
+		oauth2Usecase: oauth2Usecase,
+		jwtUtil:       jwtUtil,
 	}
 }
 
@@ -31,7 +33,8 @@ func (c *JwtCheckMiddleware) GetCheckJwtMiddleware() middleware.Middleware {
 			if !ok {
 				return nil, errors.New(500, "", "transport not found")
 			}
-			if strings.HasPrefix(tr.Operation(), "/auth_center.v1.auth.Auth/") {
+			if strings.HasPrefix(tr.Operation(), "/auth_center.v1.auth.Auth/") ||
+				strings.HasPrefix(tr.Operation(), "/auth_center.v1.oauth2.OAuth2/getToken") {
 				return handler(ctx, req)
 			}
 			header := tr.RequestHeader()
@@ -99,8 +102,26 @@ func (c *JwtCheckMiddleware) GetCheckJwtMiddleware() middleware.Middleware {
 					BaseAuthClaims: baseClaims,
 				})
 			case util.OAuthJwt:
+				oauthClaims, err := c.jwtUtil.ToOAuthClaims(result)
+				if err != nil {
+					return nil, errors.Unauthorized("", err.Error())
+				}
+				if oauthClaims.Type != "access" {
+					return nil, errors.Unauthorized("", "Invalid token type")
+				}
+				// whitelist check: token must be allowed
+				allowed, err := c.oauth2Usecase.Repo.CheckJTIAllowed(ctx, oauthClaims.Uid, oauthClaims.Azp, oauthClaims.Jti)
+				if err != nil {
+					return nil, errors.Unauthorized("", err.Error())
+				}
+				if !allowed {
+					return nil, errors.Unauthorized("", "Token has been revoked")
+				}
+				ctx = c.jwtUtil.WithTokenValue(ctx, &util.TokenValue{
+					Token:       token,
+					OAuthClaims: oauthClaims,
+				})
 			}
-
 			return handler(ctx, req)
 		}
 	}

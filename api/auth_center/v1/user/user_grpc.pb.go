@@ -25,6 +25,7 @@ const (
 	User_DeleteAccount_FullMethodName  = "/auth_center.v1.user.User/deleteAccount"
 	User_GetProfile_FullMethodName     = "/auth_center.v1.user.User/getProfile"
 	User_UpdateProfile_FullMethodName  = "/auth_center.v1.user.User/updateProfile"
+	User_GetProfileKeys_FullMethodName = "/auth_center.v1.user.User/getProfileKeys"
 )
 
 // UserClient is the client API for User service.
@@ -35,6 +36,7 @@ type UserClient interface {
 	DeleteAccount(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*DeleteAccountReply, error)
 	GetProfile(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*GetProfileReply, error)
 	UpdateProfile(ctx context.Context, in *structpb.Struct, opts ...grpc.CallOption) (*UpdateProfileReply, error)
+	GetProfileKeys(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*GetProfileKeysReply, error)
 }
 
 type userClient struct {
@@ -85,6 +87,16 @@ func (c *userClient) UpdateProfile(ctx context.Context, in *structpb.Struct, opt
 	return out, nil
 }
 
+func (c *userClient) GetProfileKeys(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*GetProfileKeysReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetProfileKeysReply)
+	err := c.cc.Invoke(ctx, User_GetProfileKeys_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // UserServer is the server API for User service.
 // All implementations must embed UnimplementedUserServer
 // for forward compatibility.
@@ -93,6 +105,7 @@ type UserServer interface {
 	DeleteAccount(context.Context, *emptypb.Empty) (*DeleteAccountReply, error)
 	GetProfile(context.Context, *emptypb.Empty) (*GetProfileReply, error)
 	UpdateProfile(context.Context, *structpb.Struct) (*UpdateProfileReply, error)
+	GetProfileKeys(context.Context, *emptypb.Empty) (*GetProfileKeysReply, error)
 	mustEmbedUnimplementedUserServer()
 }
 
@@ -114,6 +127,9 @@ func (UnimplementedUserServer) GetProfile(context.Context, *emptypb.Empty) (*Get
 }
 func (UnimplementedUserServer) UpdateProfile(context.Context, *structpb.Struct) (*UpdateProfileReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateProfile not implemented")
+}
+func (UnimplementedUserServer) GetProfileKeys(context.Context, *emptypb.Empty) (*GetProfileKeysReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetProfileKeys not implemented")
 }
 func (UnimplementedUserServer) mustEmbedUnimplementedUserServer() {}
 func (UnimplementedUserServer) testEmbeddedByValue()              {}
@@ -208,6 +224,24 @@ func _User_UpdateProfile_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _User_GetProfileKeys_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServer).GetProfileKeys(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: User_GetProfileKeys_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServer).GetProfileKeys(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // User_ServiceDesc is the grpc.ServiceDesc for User service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -230,6 +264,10 @@ var User_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "updateProfile",
 			Handler:    _User_UpdateProfile_Handler,
+		},
+		{
+			MethodName: "getProfileKeys",
+			Handler:    _User_GetProfileKeys_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

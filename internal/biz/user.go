@@ -7,6 +7,7 @@ type UserRepo interface {
 	DeleteUserAccount(ctx context.Context, userId string) error
 	GetUserProfileById(ctx context.Context, userId string) (*UserProfile, error)
 	UpdateUserProfile(ctx context.Context, userId string, attrs map[string]string) error
+	GetUserProfileKeysById(ctx context.Context, userId string) (*UserProfileKeys, error)
 }
 
 type UserUsecase struct {
@@ -19,6 +20,11 @@ type UserProfile struct {
 	CreatedAt     int64
 	UpdatedAt     int64
 	OfficialAttrs map[string]string
+}
+
+type UserProfileKeys struct {
+	BaseKeys         []string
+	ExtraProfileKeys []string
 }
 
 func NewUserUsecase(repo UserRepo) *UserUsecase {

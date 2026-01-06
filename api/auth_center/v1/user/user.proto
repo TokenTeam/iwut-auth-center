@@ -32,6 +32,12 @@ service User {
       body: "*"
     };
   }
+
+  rpc getProfileKeys (google.protobuf.Empty) returns (GetProfileKeysReply) {
+    option (google.api.http) = {
+      get: "/user/profile-keys"
+    };
+  }
 }
 
 message UpdatePasswordRequest {
@@ -42,13 +48,13 @@ message UpdatePasswordRequest {
 message UpdatePasswordReply {
   int32 code = 1;
   string message = 2;
-  optional string traceId = 3;
+  string traceId = 3;
 }
 
 message DeleteAccountReply {
   int32 code = 1;
   string message = 2;
-  optional string traceId = 3;
+  string traceId = 3;
 }
 
 message GetProfileReply {
@@ -62,7 +68,7 @@ message GetProfileReply {
   int32 code = 1;
   string message = 2;
   optional GetProfileReplyData data = 3;
-  optional string traceId = 4;
+  string traceId = 4;
 }
 //  string nick = 1;
 //  string realName = 2;
@@ -78,5 +84,16 @@ message GetProfileReply {
 message UpdateProfileReply {
   int32 code = 1;
   string message = 2;
-  optional string traceId = 3;
+  string traceId = 3;
+}
+
+message GetProfileKeysReply {
+  message GetProfileKeysReplyData {
+    repeated string baseKeys = 1;
+    repeated string extraProfileKeys = 2;
+  }
+  int32 code = 1;
+  string message = 2;
+  optional GetProfileKeysReplyData data = 3;
+  string traceId = 4;
 }

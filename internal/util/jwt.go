@@ -331,41 +331,55 @@ type BaseAuthClaims struct {
 	Type    string
 }
 type OAuthClaims struct {
-	ClientId string
-	UserId   string
+	Jti   string
+	Uid   string
+	Scope string
+	Iat   int64
+	Exp   int64
+	Iss   string
+	Azp   string
+	Aud   []string
+	Type  string
+	Nonce string
 }
 
 func (j *JwtUtil) WithTokenValue(ctx context.Context, value *TokenValue) context.Context {
 	return context.WithValue(ctx, TokenKey{}, value)
 }
-func (j *JwtUtil) TokenValueFrom(ctx context.Context) TokenValue {
+func (j *JwtUtil) TokenValueFrom(ctx context.Context) *TokenValue {
 	if v := ctx.Value(TokenKey{}); v != nil {
 		switch s := v.(type) {
 		case TokenValue:
-			return s
+			return &s
 		case *TokenValue:
-			return *s
+			return s
 		}
 	}
-	return TokenValue{}
+	return nil
 }
 func (j *JwtUtil) GetBaseAuthClaims(ctx context.Context) (*BaseAuthClaims, error) {
 	value := j.TokenValueFrom(ctx)
+	if value == nil {
+		return nil, errors.New("no token claims found in context")
+	}
 	if value.BaseAuthClaims != nil {
 		return value.BaseAuthClaims, nil
 	}
 	if value.OAuthClaims != nil {
-		return nil, errors.New("token is OAuth type, no BaseAuthClaims")
+		return nil, errors.New("token is OAuth type, requested BaseAuthClaims")
 	}
 	return nil, errors.New("no token claims found in context")
 }
 func (j *JwtUtil) GetOAuthClaims(ctx context.Context) (*OAuthClaims, error) {
 	value := j.TokenValueFrom(ctx)
+	if value == nil {
+		return nil, errors.New("no token claims found in context")
+	}
 	if value.OAuthClaims != nil {
 		return value.OAuthClaims, nil
 	}
 	if value.BaseAuthClaims != nil {
-		return nil, errors.New("token is BaseAuth type, no OAuthClaims")
+		return nil, errors.New("token is BaseAuth type, requested OAuthClaims")
 	}
 	return nil, errors.New("no token claims found in context")
 }
@@ -433,6 +447,116 @@ func (j *JwtUtil) ToBaseAuthClaims(claims map[string]interface{}) (*BaseAuthClai
 	}
 
 	return baseAuthClaims, nil
+}
+
+func (j *JwtUtil) ToOAuthClaims(claims map[string]interface{}) (*OAuthClaims, error) {
+	oauthClaims := &OAuthClaims{
+		Jti:   "",
+		Uid:   "",
+		Scope: "",
+		Iat:   0,
+		Exp:   0,
+		Iss:   "",
+		Azp:   "",
+		Aud:   nil,
+		Type:  "",
+		Nonce: "",
+	}
+	if jtiRaw, found := claims["jti"]; found {
+		if jtiStr, ok := jtiRaw.(string); ok {
+			oauthClaims.Jti = jtiStr
+		}
+	}
+	if oauthClaims.Jti == "" {
+		return nil, errors.New("token missing jti claim")
+	}
+
+	if userIdRaw, found := claims["uid"]; found {
+		if userIdStr, ok := userIdRaw.(string); ok {
+			oauthClaims.Uid = userIdStr
+		}
+	}
+	if oauthClaims.Uid == "" {
+		return nil, errors.New("token missing uid claim")
+	}
+
+	if scopeRaw, found := claims["scope"]; found {
+		if scopeStr, ok := scopeRaw.(string); ok {
+			oauthClaims.Scope = scopeStr
+		}
+	}
+	if oauthClaims.Scope == "" {
+		return nil, errors.New("token missing scope claim")
+	}
+
+	if iatRaw, found := claims["iat"]; found {
+		if iatSec, ok := toInt64Seconds(iatRaw); ok {
+			oauthClaims.Iat = iatSec
+		}
+	}
+	if oauthClaims.Iat == 0 {
+		return nil, errors.New("token missing iat claim")
+	}
+
+	if expRaw, found := claims["exp"]; found {
+		if expSec, ok := toInt64Seconds(expRaw); ok {
+			oauthClaims.Exp = expSec
+		}
+	}
+	if oauthClaims.Exp == 0 {
+		return nil, errors.New("token missing exp claim")
+	}
+
+	if issuer, found := claims["iss"]; found {
+		if issStr, ok := issuer.(string); ok {
+			if issStr != j.issuer {
+				return nil, errors.New("invalid token issuer")
+			}
+			oauthClaims.Iss = issStr
+		}
+	}
+	if oauthClaims.Iss == "" {
+		return nil, errors.New("token missing iss")
+	}
+
+	if azpRaw, found := claims["azp"]; found {
+		if azpStr, ok := azpRaw.(string); ok {
+			oauthClaims.Azp = azpStr
+		}
+	}
+	if oauthClaims.Azp == "" {
+		return nil, errors.New("token missing azp claim")
+	}
+
+	if audRaw, found := claims["aud"]; found {
+		if audSlice, ok := audRaw.([]interface{}); ok {
+			for _, a := range audSlice {
+				if aStr, ok := a.(string); ok {
+					oauthClaims.Aud = append(oauthClaims.Aud, aStr)
+				}
+			}
+		}
+	}
+	if len(oauthClaims.Aud) == 0 {
+		return nil, errors.New("token missing aud claim")
+	}
+
+	if typeRaw, found := claims["type"]; found {
+		if typeStr, ok := typeRaw.(string); ok {
+			oauthClaims.Type = typeStr
+		}
+	}
+	if oauthClaims.Type == "" {
+		return nil, errors.New("token missing type claim")
+	}
+
+	if nonceRaw, found := claims["nonce"]; found {
+		if nonceStr, ok := nonceRaw.(string); ok {
+			oauthClaims.Nonce = nonceStr
+		}
+	}
+
+	return oauthClaims, nil
 }
 
 type JwtType int

@@ -15,8 +15,7 @@ import (
 	"iwut-auth-center/internal/data"
 	"iwut-auth-center/internal/middleware"
 	"iwut-auth-center/internal/server"
-	"iwut-auth-center/internal/service/auth"
-	"iwut-auth-center/internal/service/user"
+	"iwut-auth-center/internal/service"
 	"iwut-auth-center/internal/util"
 )
 
@@ -36,20 +35,31 @@ func wireApp(confServer *conf.Server, confData *conf.Data, jwt *conf.Jwt, confMa
 	authRepo := data.NewAuthRepo(dataData, confData, logger, sha256Util)
 	authUsecase := biz.NewAuthUsecase(authRepo)
 	usecase := mail.NewMailUsecase(confMail, logger)
-	jwtUtil := util.NewJwtUtil(jwt)
-	service := auth.NewAuthService(authUsecase, usecase, jwtUtil, jwt)
-	userRepo := data.NewUserRepo(dataData, confData, logger, sha256Util)
-	userUsecase := biz.NewUserUsecase(userRepo)
-	userService, err := user.NewUserService(userUsecase, authUsecase, jwtUtil, jwt)
+	auditRepo, cleanup2, err := data.NewAuditRepo(dataData, logger)
 	if err != nil {
 		cleanup()
 		return nil, nil, err
 	}
-	grpcServer := server.NewGRPCServer(confServer, service, userService)
-	jwtCheckMiddleware := middleware.NewJwtCheckMiddleware(authUsecase, jwtUtil)
-	httpServer := server.NewHTTPServer(confServer, service, userService, jwtCheckMiddleware)
+	auditUsecase := biz.NewAuditUsecase(auditRepo)
+	jwtUtil := util.NewJwtUtil(jwt)
+	authService := service.NewAuthService(authUsecase, usecase, auditUsecase, jwtUtil, jwt)
+	userRepo := data.NewUserRepo(dataData, confData, logger, sha256Util)
+	userUsecase := biz.NewUserUsecase(userRepo)
+	userService, err := service.NewUserService(userUsecase, authUsecase, auditUsecase, jwtUtil, jwt)
+	if err != nil {
+		cleanup2()
+		cleanup()
+		return nil, nil, err
+	}
+	oauth2Repo := data.NewOauth2Repo(dataData, confData, jwt, logger)
+	oauth2Usecase := biz.NewOauth2Usecase(oauth2Repo)
+	oauth2Service := service.NewOauth2Service(oauth2Usecase, auditUsecase, jwtUtil, jwt)
+	jwtCheckMiddleware := middleware.NewJwtCheckMiddleware(authUsecase, oauth2Usecase, jwtUtil)
+	grpcServer := server.NewGRPCServer(confServer, authService, userService, oauth2Service, jwtCheckMiddleware, logger)
+	httpServer := server.NewHTTPServer(confServer, authService, userService, oauth2Service, jwtCheckMiddleware, logger)
 	app := newApp(logger, grpcServer, httpServer)
 	return app, func() {
+		cleanup2()
 		cleanup()
 	}, nil
 }

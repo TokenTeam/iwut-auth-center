@@ -25,6 +25,8 @@ message Server {
   }
   HTTP http = 1;
   GRPC grpc = 2;
+  string name = 3;
+  string version = 4;
 }
 
 message Data {

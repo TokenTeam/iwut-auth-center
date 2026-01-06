@@ -49,7 +49,7 @@ message LoginReply {
   int32 code = 1;
   string message = 2;
   optional LoginReplyData data = 3;
-  optional string traceId = 4;
+  string traceId = 4;
 }
 
 message GetVerifyCodeRequest {
@@ -59,7 +59,7 @@ message GetVerifyCodeRequest {
 message GetVerifyCodeReply {
   int32 code = 1;
   string message = 2;
-  optional string traceId = 3;
+  string traceId = 3;
 }
 
 message RegisterRequest {
@@ -75,7 +75,7 @@ message RegisterReply {
   int32 code = 1;
   string message = 2;
   optional RegisterReplyData data = 3;
-  optional string traceId = 4;
+  string traceId = 4;
 }
 
 message RefreshTokenRequest {
@@ -90,5 +90,5 @@ message RefreshTokenReply {
   int32 code = 1;
   string message = 2;
   optional RefreshTokenReplyData data = 3;
-  optional string traceId = 4;
+  string traceId = 4;
 }

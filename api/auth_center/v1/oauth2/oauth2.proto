@@ -3,6 +3,7 @@ syntax = "proto3";
 package auth_center.v1.oauth2;
 
 import "google/api/annotations.proto";
+import "google/protobuf/struct.proto";
 
 option go_package = "iwut-auth_center/api/auth_center/v1/oauth2;oauth2";
 
@@ -12,23 +13,108 @@ service OAuth2 {
       get: "/oauth2/authorize"
     };
   }
+  rpc getToken (GetTokenRequest) returns (GetTokenReply) {
+    option (google.api.http) = {
+      post: "/oauth2/token"
+      body: "*"
+    };
+  }
+  rpc revokeAuthorization (RevokeAuthorizationRequest) returns (RevokeAuthorizationReply) {
+    option (google.api.http) = {
+      post: "/oauth2/revoke_authorization"
+      body: "*"
+    };
+  }
+  rpc getUserProfile (GetUserProfileRequest ) returns (GetUserProfileReply) {
+    option (google.api.http) = {
+      post: "/oauth2/user_profile"
+      body: "*"
+    };
+  }
+  rpc setUserStorage (google.protobuf.Struct) returns (SetUserStorageReply) {
+    option (google.api.http) = {
+      post: "/oauth2/set_user_storage"
+      body: "*"
+    };
+  }
+}
+/*
+  'client_id',
+  'response_type',
+  'scope',
+  'redirect_uri',
+  'nonce',
+  'code_challenge',
+  'code_challenge_method',
+ */
+message AuthorizeRequest {
+  string ClientId = 1;
+  string ResponseType = 2;
+  string Scope = 3;
+  string State = 4;
+  string RedirectUri = 5;
+  optional string Nonce = 6;
+  optional string CodeChallenge = 7;
+  optional string CodeChallengeMethod = 8;
 }
 
-message AuthorizeRequest {
-  string response_type = 1;
-  string client_id = 2;
-  string redirect_uri = 3;
-  string scope = 4;
-  string state = 5;
-}
 message AuthorizeReply {
   message AuthorizeReplyData {
-    string authorization_code = 1;
     string redirect_uri = 2;
-    string state = 3;
   }
   int32 code = 1;
   string message = 2;
   optional AuthorizeReplyData data = 3;
   optional string trace_id = 4;
+}
+
+message GetTokenRequest {
+  string grant_type = 1;
+  string code = 2;
+  string client_id = 3;
+  string client_secret = 4;
+  optional string code_verifier = 5;
+}
+
+message GetTokenReply {
+  optional string access_token = 1;
+  optional string id_token = 2;
+  optional string refresh_token = 3;
+  optional string token_type = 4;
+  optional int32 expires_in = 5;
+  optional string scope = 6;
+  optional string error = 7;
+  optional string error_description = 8;
+}
+
+message RevokeAuthorizationRequest {
+  string clientId = 1;
+}
+
+message RevokeAuthorizationReply {
+  int32 code = 1;
+  string message = 2;
+  optional string trace_id = 3;
+}
+
+message GetUserProfileRequest {
+  repeated string scope_keys = 1;
+  repeated string storage_keys = 2;
+}
+
+message GetUserProfileReply {
+  int32 code = 1;
+  string message = 2;
+  message UserProfileData {
+    google.protobuf.Struct scope = 1;
+    map<string, google.protobuf.Value> storage = 2;
+  }
+  optional UserProfileData data = 3;
+  optional string trace_id = 4;
+}
+
+message SetUserStorageReply {
+  int32 code = 1;
+  string message = 2;
+  optional string trace_id = 3;
 }

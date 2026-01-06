@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
 
@@ -14,6 +15,8 @@ import (
 	"github.com/go-kratos/kratos/v2/middleware/tracing"
 	"github.com/go-kratos/kratos/v2/transport/grpc"
 	"github.com/go-kratos/kratos/v2/transport/http"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/sdk/trace"
 
 	_ "go.uber.org/automaxprocs"
 )
@@ -29,6 +32,13 @@ var (
 
 	id, _ = os.Hostname()
 )
+
+func newTracerProvider() *trace.TracerProvider {
+	// 这里简单示例，实际可配置 exporter、采样率等
+	tp := trace.NewTracerProvider()
+	otel.SetTracerProvider(tp)
+	return tp
+}
 
 func init() {
 	flag.StringVar(&flagconf, "conf", "configs", "config path, eg: -conf config.yaml")
@@ -50,15 +60,11 @@ func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server) *kratos.App {
 
 func main() {
 	flag.Parse()
-	logger := log.With(log.NewStdLogger(os.Stdout),
-		"ts", log.DefaultTimestamp,
-		"caller", log.DefaultCaller,
-		"service.id", id,
-		"service.name", Name,
-		"service.version", Version,
-		"trace.id", tracing.TraceID(),
-		"span.id", tracing.SpanID(),
-	)
+
+	// 初始化 tracer
+	tp := newTracerProvider()
+	defer func() { _ = tp.Shutdown(context.Background()) }()
+
 	c := config.New(
 		config.WithSource(
 			env.NewSource("AuthCenter_"),
@@ -77,6 +83,23 @@ func main() {
 	if err := c.Scan(&bc); err != nil {
 		panic(err)
 	}
+
+	if Name == "" {
+		Name = bc.Server.GetName()
+	}
+	if Version == "" {
+		Version = bc.Server.GetVersion()
+	}
+
+	logger := log.With(log.NewStdLogger(os.Stdout),
+		"ts", log.DefaultTimestamp,
+		"caller", log.DefaultCaller,
+		"service.id", id,
+		"service.name", Name,
+		"service.version", Version,
+		"trace.id", tracing.TraceID(),
+		"span.id", tracing.SpanID(),
+	)
 
 	app, cleanup, err := wireApp(bc.Server, bc.Data, bc.Jwt, bc.Mail, logger)
 	if err != nil {

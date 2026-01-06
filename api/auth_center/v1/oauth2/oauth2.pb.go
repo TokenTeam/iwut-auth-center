@@ -10,6 +10,7 @@ import (
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	structpb "google.golang.org/protobuf/types/known/structpb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -22,15 +23,25 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// 'client_id',
+// 'response_type',
+// 'scope',
+// 'redirect_uri',
+// 'nonce',
+// 'code_challenge',
+// 'code_challenge_method',
 type AuthorizeRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ResponseType  string                 `protobuf:"bytes,1,opt,name=response_type,json=responseType,proto3" json:"response_type,omitempty"`
-	ClientId      string                 `protobuf:"bytes,2,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
-	RedirectUri   string                 `protobuf:"bytes,3,opt,name=redirect_uri,json=redirectUri,proto3" json:"redirect_uri,omitempty"`
-	Scope         string                 `protobuf:"bytes,4,opt,name=scope,proto3" json:"scope,omitempty"`
-	State         string                 `protobuf:"bytes,5,opt,name=state,proto3" json:"state,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	ClientId            string                 `protobuf:"bytes,1,opt,name=ClientId,proto3" json:"ClientId,omitempty"`
+	ResponseType        string                 `protobuf:"bytes,2,opt,name=ResponseType,proto3" json:"ResponseType,omitempty"`
+	Scope               string                 `protobuf:"bytes,3,opt,name=Scope,proto3" json:"Scope,omitempty"`
+	State               string                 `protobuf:"bytes,4,opt,name=State,proto3" json:"State,omitempty"`
+	RedirectUri         string                 `protobuf:"bytes,5,opt,name=RedirectUri,proto3" json:"RedirectUri,omitempty"`
+	Nonce               *string                `protobuf:"bytes,6,opt,name=Nonce,proto3,oneof" json:"Nonce,omitempty"`
+	CodeChallenge       *string                `protobuf:"bytes,7,opt,name=CodeChallenge,proto3,oneof" json:"CodeChallenge,omitempty"`
+	CodeChallengeMethod *string                `protobuf:"bytes,8,opt,name=CodeChallengeMethod,proto3,oneof" json:"CodeChallengeMethod,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *AuthorizeRequest) Reset() {
@@ -63,13 +74,6 @@ func (*AuthorizeRequest) Descriptor() ([]byte, []int) {
 	return file_auth_center_v1_oauth2_oauth2_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *AuthorizeRequest) GetResponseType() string {
-	if x != nil {
-		return x.ResponseType
-	}
-	return ""
-}
-
 func (x *AuthorizeRequest) GetClientId() string {
 	if x != nil {
 		return x.ClientId
@@ -77,9 +81,9 @@ func (x *AuthorizeRequest) GetClientId() string {
 	return ""
 }
 
-func (x *AuthorizeRequest) GetRedirectUri() string {
+func (x *AuthorizeRequest) GetResponseType() string {
 	if x != nil {
-		return x.RedirectUri
+		return x.ResponseType
 	}
 	return ""
 }
@@ -94,6 +98,34 @@ func (x *AuthorizeRequest) GetScope() string {
 func (x *AuthorizeRequest) GetState() string {
 	if x != nil {
 		return x.State
+	}
+	return ""
+}
+
+func (x *AuthorizeRequest) GetRedirectUri() string {
+	if x != nil {
+		return x.RedirectUri
+	}
+	return ""
+}
+
+func (x *AuthorizeRequest) GetNonce() string {
+	if x != nil && x.Nonce != nil {
+		return *x.Nonce
+	}
+	return ""
+}
+
+func (x *AuthorizeRequest) GetCodeChallenge() string {
+	if x != nil && x.CodeChallenge != nil {
+		return *x.CodeChallenge
+	}
+	return ""
+}
+
+func (x *AuthorizeRequest) GetCodeChallengeMethod() string {
+	if x != nil && x.CodeChallengeMethod != nil {
+		return *x.CodeChallengeMethod
 	}
 	return ""
 }
@@ -166,18 +198,476 @@ func (x *AuthorizeReply) GetTraceId() string {
 	return ""
 }
 
+type GetTokenRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	GrantType     string                 `protobuf:"bytes,1,opt,name=grant_type,json=grantType,proto3" json:"grant_type,omitempty"`
+	Code          string                 `protobuf:"bytes,2,opt,name=code,proto3" json:"code,omitempty"`
+	ClientId      string                 `protobuf:"bytes,3,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	ClientSecret  string                 `protobuf:"bytes,4,opt,name=client_secret,json=clientSecret,proto3" json:"client_secret,omitempty"`
+	CodeVerifier  *string                `protobuf:"bytes,5,opt,name=code_verifier,json=codeVerifier,proto3,oneof" json:"code_verifier,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetTokenRequest) Reset() {
+	*x = GetTokenRequest{}
+	mi := &file_auth_center_v1_oauth2_oauth2_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetTokenRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetTokenRequest) ProtoMessage() {}
+
+func (x *GetTokenRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_center_v1_oauth2_oauth2_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetTokenRequest.ProtoReflect.Descriptor instead.
+func (*GetTokenRequest) Descriptor() ([]byte, []int) {
+	return file_auth_center_v1_oauth2_oauth2_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *GetTokenRequest) GetGrantType() string {
+	if x != nil {
+		return x.GrantType
+	}
+	return ""
+}
+
+func (x *GetTokenRequest) GetCode() string {
+	if x != nil {
+		return x.Code
+	}
+	return ""
+}
+
+func (x *GetTokenRequest) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
+}
+
+func (x *GetTokenRequest) GetClientSecret() string {
+	if x != nil {
+		return x.ClientSecret
+	}
+	return ""
+}
+
+func (x *GetTokenRequest) GetCodeVerifier() string {
+	if x != nil && x.CodeVerifier != nil {
+		return *x.CodeVerifier
+	}
+	return ""
+}
+
+type GetTokenReply struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	AccessToken      *string                `protobuf:"bytes,1,opt,name=access_token,json=accessToken,proto3,oneof" json:"access_token,omitempty"`
+	IdToken          *string                `protobuf:"bytes,2,opt,name=id_token,json=idToken,proto3,oneof" json:"id_token,omitempty"`
+	RefreshToken     *string                `protobuf:"bytes,3,opt,name=refresh_token,json=refreshToken,proto3,oneof" json:"refresh_token,omitempty"`
+	TokenType        *string                `protobuf:"bytes,4,opt,name=token_type,json=tokenType,proto3,oneof" json:"token_type,omitempty"`
+	ExpiresIn        *int32                 `protobuf:"varint,5,opt,name=expires_in,json=expiresIn,proto3,oneof" json:"expires_in,omitempty"`
+	Scope            *string                `protobuf:"bytes,6,opt,name=scope,proto3,oneof" json:"scope,omitempty"`
+	Error            *string                `protobuf:"bytes,7,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	ErrorDescription *string                `protobuf:"bytes,8,opt,name=error_description,json=errorDescription,proto3,oneof" json:"error_description,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *GetTokenReply) Reset() {
+	*x = GetTokenReply{}
+	mi := &file_auth_center_v1_oauth2_oauth2_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetTokenReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetTokenReply) ProtoMessage() {}
+
+func (x *GetTokenReply) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_center_v1_oauth2_oauth2_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetTokenReply.ProtoReflect.Descriptor instead.
+func (*GetTokenReply) Descriptor() ([]byte, []int) {
+	return file_auth_center_v1_oauth2_oauth2_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *GetTokenReply) GetAccessToken() string {
+	if x != nil && x.AccessToken != nil {
+		return *x.AccessToken
+	}
+	return ""
+}
+
+func (x *GetTokenReply) GetIdToken() string {
+	if x != nil && x.IdToken != nil {
+		return *x.IdToken
+	}
+	return ""
+}
+
+func (x *GetTokenReply) GetRefreshToken() string {
+	if x != nil && x.RefreshToken != nil {
+		return *x.RefreshToken
+	}
+	return ""
+}
+
+func (x *GetTokenReply) GetTokenType() string {
+	if x != nil && x.TokenType != nil {
+		return *x.TokenType
+	}
+	return ""
+}
+
+func (x *GetTokenReply) GetExpiresIn() int32 {
+	if x != nil && x.ExpiresIn != nil {
+		return *x.ExpiresIn
+	}
+	return 0
+}
+
+func (x *GetTokenReply) GetScope() string {
+	if x != nil && x.Scope != nil {
+		return *x.Scope
+	}
+	return ""
+}
+
+func (x *GetTokenReply) GetError() string {
+	if x != nil && x.Error != nil {
+		return *x.Error
+	}
+	return ""
+}
+
+func (x *GetTokenReply) GetErrorDescription() string {
+	if x != nil && x.ErrorDescription != nil {
+		return *x.ErrorDescription
+	}
+	return ""
+}
+
+type RevokeAuthorizationRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ClientId      string                 `protobuf:"bytes,1,opt,name=clientId,proto3" json:"clientId,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RevokeAuthorizationRequest) Reset() {
+	*x = RevokeAuthorizationRequest{}
+	mi := &file_auth_center_v1_oauth2_oauth2_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RevokeAuthorizationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RevokeAuthorizationRequest) ProtoMessage() {}
+
+func (x *RevokeAuthorizationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_center_v1_oauth2_oauth2_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RevokeAuthorizationRequest.ProtoReflect.Descriptor instead.
+func (*RevokeAuthorizationRequest) Descriptor() ([]byte, []int) {
+	return file_auth_center_v1_oauth2_oauth2_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *RevokeAuthorizationRequest) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
+}
+
+type RevokeAuthorizationReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int32                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	TraceId       *string                `protobuf:"bytes,3,opt,name=trace_id,json=traceId,proto3,oneof" json:"trace_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RevokeAuthorizationReply) Reset() {
+	*x = RevokeAuthorizationReply{}
+	mi := &file_auth_center_v1_oauth2_oauth2_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RevokeAuthorizationReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RevokeAuthorizationReply) ProtoMessage() {}
+
+func (x *RevokeAuthorizationReply) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_center_v1_oauth2_oauth2_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RevokeAuthorizationReply.ProtoReflect.Descriptor instead.
+func (*RevokeAuthorizationReply) Descriptor() ([]byte, []int) {
+	return file_auth_center_v1_oauth2_oauth2_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *RevokeAuthorizationReply) GetCode() int32 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *RevokeAuthorizationReply) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *RevokeAuthorizationReply) GetTraceId() string {
+	if x != nil && x.TraceId != nil {
+		return *x.TraceId
+	}
+	return ""
+}
+
+type GetUserProfileRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ScopeKeys     []string               `protobuf:"bytes,1,rep,name=scope_keys,json=scopeKeys,proto3" json:"scope_keys,omitempty"`
+	StorageKeys   []string               `protobuf:"bytes,2,rep,name=storage_keys,json=storageKeys,proto3" json:"storage_keys,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetUserProfileRequest) Reset() {
+	*x = GetUserProfileRequest{}
+	mi := &file_auth_center_v1_oauth2_oauth2_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetUserProfileRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetUserProfileRequest) ProtoMessage() {}
+
+func (x *GetUserProfileRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_center_v1_oauth2_oauth2_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetUserProfileRequest.ProtoReflect.Descriptor instead.
+func (*GetUserProfileRequest) Descriptor() ([]byte, []int) {
+	return file_auth_center_v1_oauth2_oauth2_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *GetUserProfileRequest) GetScopeKeys() []string {
+	if x != nil {
+		return x.ScopeKeys
+	}
+	return nil
+}
+
+func (x *GetUserProfileRequest) GetStorageKeys() []string {
+	if x != nil {
+		return x.StorageKeys
+	}
+	return nil
+}
+
+type GetUserProfileReply struct {
+	state         protoimpl.MessageState               `protogen:"open.v1"`
+	Code          int32                                `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                               `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Data          *GetUserProfileReply_UserProfileData `protobuf:"bytes,3,opt,name=data,proto3,oneof" json:"data,omitempty"`
+	TraceId       *string                              `protobuf:"bytes,4,opt,name=trace_id,json=traceId,proto3,oneof" json:"trace_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetUserProfileReply) Reset() {
+	*x = GetUserProfileReply{}
+	mi := &file_auth_center_v1_oauth2_oauth2_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetUserProfileReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetUserProfileReply) ProtoMessage() {}
+
+func (x *GetUserProfileReply) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_center_v1_oauth2_oauth2_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetUserProfileReply.ProtoReflect.Descriptor instead.
+func (*GetUserProfileReply) Descriptor() ([]byte, []int) {
+	return file_auth_center_v1_oauth2_oauth2_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *GetUserProfileReply) GetCode() int32 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *GetUserProfileReply) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *GetUserProfileReply) GetData() *GetUserProfileReply_UserProfileData {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *GetUserProfileReply) GetTraceId() string {
+	if x != nil && x.TraceId != nil {
+		return *x.TraceId
+	}
+	return ""
+}
+
+type SetUserStorageReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int32                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	TraceId       *string                `protobuf:"bytes,3,opt,name=trace_id,json=traceId,proto3,oneof" json:"trace_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetUserStorageReply) Reset() {
+	*x = SetUserStorageReply{}
+	mi := &file_auth_center_v1_oauth2_oauth2_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetUserStorageReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetUserStorageReply) ProtoMessage() {}
+
+func (x *SetUserStorageReply) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_center_v1_oauth2_oauth2_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetUserStorageReply.ProtoReflect.Descriptor instead.
+func (*SetUserStorageReply) Descriptor() ([]byte, []int) {
+	return file_auth_center_v1_oauth2_oauth2_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *SetUserStorageReply) GetCode() int32 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *SetUserStorageReply) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *SetUserStorageReply) GetTraceId() string {
+	if x != nil && x.TraceId != nil {
+		return *x.TraceId
+	}
+	return ""
+}
+
 type AuthorizeReply_AuthorizeReplyData struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	AuthorizationCode string                 `protobuf:"bytes,1,opt,name=authorization_code,json=authorizationCode,proto3" json:"authorization_code,omitempty"`
-	RedirectUri       string                 `protobuf:"bytes,2,opt,name=redirect_uri,json=redirectUri,proto3" json:"redirect_uri,omitempty"`
-	State             string                 `protobuf:"bytes,3,opt,name=state,proto3" json:"state,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RedirectUri   string                 `protobuf:"bytes,2,opt,name=redirect_uri,json=redirectUri,proto3" json:"redirect_uri,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AuthorizeReply_AuthorizeReplyData) Reset() {
 	*x = AuthorizeReply_AuthorizeReplyData{}
-	mi := &file_auth_center_v1_oauth2_oauth2_proto_msgTypes[2]
+	mi := &file_auth_center_v1_oauth2_oauth2_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -189,7 +679,7 @@ func (x *AuthorizeReply_AuthorizeReplyData) String() string {
 func (*AuthorizeReply_AuthorizeReplyData) ProtoMessage() {}
 
 func (x *AuthorizeReply_AuthorizeReplyData) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_center_v1_oauth2_oauth2_proto_msgTypes[2]
+	mi := &file_auth_center_v1_oauth2_oauth2_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -205,13 +695,6 @@ func (*AuthorizeReply_AuthorizeReplyData) Descriptor() ([]byte, []int) {
 	return file_auth_center_v1_oauth2_oauth2_proto_rawDescGZIP(), []int{1, 0}
 }
 
-func (x *AuthorizeReply_AuthorizeReplyData) GetAuthorizationCode() string {
-	if x != nil {
-		return x.AuthorizationCode
-	}
-	return ""
-}
-
 func (x *AuthorizeReply_AuthorizeReplyData) GetRedirectUri() string {
 	if x != nil {
 		return x.RedirectUri
@@ -219,37 +702,146 @@ func (x *AuthorizeReply_AuthorizeReplyData) GetRedirectUri() string {
 	return ""
 }
 
-func (x *AuthorizeReply_AuthorizeReplyData) GetState() string {
+type GetUserProfileReply_UserProfileData struct {
+	state         protoimpl.MessageState     `protogen:"open.v1"`
+	Scope         *structpb.Struct           `protobuf:"bytes,1,opt,name=scope,proto3" json:"scope,omitempty"`
+	Storage       map[string]*structpb.Value `protobuf:"bytes,2,rep,name=storage,proto3" json:"storage,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetUserProfileReply_UserProfileData) Reset() {
+	*x = GetUserProfileReply_UserProfileData{}
+	mi := &file_auth_center_v1_oauth2_oauth2_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetUserProfileReply_UserProfileData) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetUserProfileReply_UserProfileData) ProtoMessage() {}
+
+func (x *GetUserProfileReply_UserProfileData) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_center_v1_oauth2_oauth2_proto_msgTypes[10]
 	if x != nil {
-		return x.State
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
 	}
-	return ""
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetUserProfileReply_UserProfileData.ProtoReflect.Descriptor instead.
+func (*GetUserProfileReply_UserProfileData) Descriptor() ([]byte, []int) {
+	return file_auth_center_v1_oauth2_oauth2_proto_rawDescGZIP(), []int{7, 0}
+}
+
+func (x *GetUserProfileReply_UserProfileData) GetScope() *structpb.Struct {
+	if x != nil {
+		return x.Scope
+	}
+	return nil
+}
+
+func (x *GetUserProfileReply_UserProfileData) GetStorage() map[string]*structpb.Value {
+	if x != nil {
+		return x.Storage
+	}
+	return nil
 }
 
 var File_auth_center_v1_oauth2_oauth2_proto protoreflect.FileDescriptor
 
 const file_auth_center_v1_oauth2_oauth2_proto_rawDesc = "" +
 	"\n" +
-	"\"auth_center/v1/oauth2/oauth2.proto\x12\x15auth_center.v1.oauth2\x1a\x1cgoogle/api/annotations.proto\"\xa3\x01\n" +
-	"\x10AuthorizeRequest\x12#\n" +
-	"\rresponse_type\x18\x01 \x01(\tR\fresponseType\x12\x1b\n" +
-	"\tclient_id\x18\x02 \x01(\tR\bclientId\x12!\n" +
-	"\fredirect_uri\x18\x03 \x01(\tR\vredirectUri\x12\x14\n" +
-	"\x05scope\x18\x04 \x01(\tR\x05scope\x12\x14\n" +
-	"\x05state\x18\x05 \x01(\tR\x05state\"\xc5\x02\n" +
+	"\"auth_center/v1/oauth2/oauth2.proto\x12\x15auth_center.v1.oauth2\x1a\x1cgoogle/api/annotations.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xd1\x02\n" +
+	"\x10AuthorizeRequest\x12\x1a\n" +
+	"\bClientId\x18\x01 \x01(\tR\bClientId\x12\"\n" +
+	"\fResponseType\x18\x02 \x01(\tR\fResponseType\x12\x14\n" +
+	"\x05Scope\x18\x03 \x01(\tR\x05Scope\x12\x14\n" +
+	"\x05State\x18\x04 \x01(\tR\x05State\x12 \n" +
+	"\vRedirectUri\x18\x05 \x01(\tR\vRedirectUri\x12\x19\n" +
+	"\x05Nonce\x18\x06 \x01(\tH\x00R\x05Nonce\x88\x01\x01\x12)\n" +
+	"\rCodeChallenge\x18\a \x01(\tH\x01R\rCodeChallenge\x88\x01\x01\x125\n" +
+	"\x13CodeChallengeMethod\x18\b \x01(\tH\x02R\x13CodeChallengeMethod\x88\x01\x01B\b\n" +
+	"\x06_NonceB\x10\n" +
+	"\x0e_CodeChallengeB\x16\n" +
+	"\x14_CodeChallengeMethod\"\x80\x02\n" +
 	"\x0eAuthorizeReply\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12Q\n" +
 	"\x04data\x18\x03 \x01(\v28.auth_center.v1.oauth2.AuthorizeReply.AuthorizeReplyDataH\x00R\x04data\x88\x01\x01\x12\x1e\n" +
-	"\btrace_id\x18\x04 \x01(\tH\x01R\atraceId\x88\x01\x01\x1a|\n" +
-	"\x12AuthorizeReplyData\x12-\n" +
-	"\x12authorization_code\x18\x01 \x01(\tR\x11authorizationCode\x12!\n" +
-	"\fredirect_uri\x18\x02 \x01(\tR\vredirectUri\x12\x14\n" +
-	"\x05state\x18\x03 \x01(\tR\x05stateB\a\n" +
+	"\btrace_id\x18\x04 \x01(\tH\x01R\atraceId\x88\x01\x01\x1a7\n" +
+	"\x12AuthorizeReplyData\x12!\n" +
+	"\fredirect_uri\x18\x02 \x01(\tR\vredirectUriB\a\n" +
 	"\x05_dataB\v\n" +
-	"\t_trace_id2\x80\x01\n" +
+	"\t_trace_id\"\xc2\x01\n" +
+	"\x0fGetTokenRequest\x12\x1d\n" +
+	"\n" +
+	"grant_type\x18\x01 \x01(\tR\tgrantType\x12\x12\n" +
+	"\x04code\x18\x02 \x01(\tR\x04code\x12\x1b\n" +
+	"\tclient_id\x18\x03 \x01(\tR\bclientId\x12#\n" +
+	"\rclient_secret\x18\x04 \x01(\tR\fclientSecret\x12(\n" +
+	"\rcode_verifier\x18\x05 \x01(\tH\x00R\fcodeVerifier\x88\x01\x01B\x10\n" +
+	"\x0e_code_verifier\"\xa9\x03\n" +
+	"\rGetTokenReply\x12&\n" +
+	"\faccess_token\x18\x01 \x01(\tH\x00R\vaccessToken\x88\x01\x01\x12\x1e\n" +
+	"\bid_token\x18\x02 \x01(\tH\x01R\aidToken\x88\x01\x01\x12(\n" +
+	"\rrefresh_token\x18\x03 \x01(\tH\x02R\frefreshToken\x88\x01\x01\x12\"\n" +
+	"\n" +
+	"token_type\x18\x04 \x01(\tH\x03R\ttokenType\x88\x01\x01\x12\"\n" +
+	"\n" +
+	"expires_in\x18\x05 \x01(\x05H\x04R\texpiresIn\x88\x01\x01\x12\x19\n" +
+	"\x05scope\x18\x06 \x01(\tH\x05R\x05scope\x88\x01\x01\x12\x19\n" +
+	"\x05error\x18\a \x01(\tH\x06R\x05error\x88\x01\x01\x120\n" +
+	"\x11error_description\x18\b \x01(\tH\aR\x10errorDescription\x88\x01\x01B\x0f\n" +
+	"\r_access_tokenB\v\n" +
+	"\t_id_tokenB\x10\n" +
+	"\x0e_refresh_tokenB\r\n" +
+	"\v_token_typeB\r\n" +
+	"\v_expires_inB\b\n" +
+	"\x06_scopeB\b\n" +
+	"\x06_errorB\x14\n" +
+	"\x12_error_description\"8\n" +
+	"\x1aRevokeAuthorizationRequest\x12\x1a\n" +
+	"\bclientId\x18\x01 \x01(\tR\bclientId\"u\n" +
+	"\x18RevokeAuthorizationReply\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1e\n" +
+	"\btrace_id\x18\x03 \x01(\tH\x00R\atraceId\x88\x01\x01B\v\n" +
+	"\t_trace_id\"Y\n" +
+	"\x15GetUserProfileRequest\x12\x1d\n" +
+	"\n" +
+	"scope_keys\x18\x01 \x03(\tR\tscopeKeys\x12!\n" +
+	"\fstorage_keys\x18\x02 \x03(\tR\vstorageKeys\"\xc8\x03\n" +
+	"\x13GetUserProfileReply\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12S\n" +
+	"\x04data\x18\x03 \x01(\v2:.auth_center.v1.oauth2.GetUserProfileReply.UserProfileDataH\x00R\x04data\x88\x01\x01\x12\x1e\n" +
+	"\btrace_id\x18\x04 \x01(\tH\x01R\atraceId\x88\x01\x01\x1a\xf7\x01\n" +
+	"\x0fUserProfileData\x12-\n" +
+	"\x05scope\x18\x01 \x01(\v2\x17.google.protobuf.StructR\x05scope\x12a\n" +
+	"\astorage\x18\x02 \x03(\v2G.auth_center.v1.oauth2.GetUserProfileReply.UserProfileData.StorageEntryR\astorage\x1aR\n" +
+	"\fStorageEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
+	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01B\a\n" +
+	"\x05_dataB\v\n" +
+	"\t_trace_id\"p\n" +
+	"\x13SetUserStorageReply\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1e\n" +
+	"\btrace_id\x18\x03 \x01(\tH\x00R\atraceId\x88\x01\x01B\v\n" +
+	"\t_trace_id2\xa3\x05\n" +
 	"\x06OAuth2\x12v\n" +
-	"\tauthorize\x12'.auth_center.v1.oauth2.AuthorizeRequest\x1a%.auth_center.v1.oauth2.AuthorizeReply\"\x19\x82\xd3\xe4\x93\x02\x13\x12\x11/oauth2/authorizeB3Z1iwut-auth_center/api/auth_center/v1/oauth2;oauth2b\x06proto3"
+	"\tauthorize\x12'.auth_center.v1.oauth2.AuthorizeRequest\x1a%.auth_center.v1.oauth2.AuthorizeReply\"\x19\x82\xd3\xe4\x93\x02\x13\x12\x11/oauth2/authorize\x12r\n" +
+	"\bgetToken\x12&.auth_center.v1.oauth2.GetTokenRequest\x1a$.auth_center.v1.oauth2.GetTokenReply\"\x18\x82\xd3\xe4\x93\x02\x12:\x01*\"\r/oauth2/token\x12\xa2\x01\n" +
+	"\x13revokeAuthorization\x121.auth_center.v1.oauth2.RevokeAuthorizationRequest\x1a/.auth_center.v1.oauth2.RevokeAuthorizationReply\"'\x82\xd3\xe4\x93\x02!:\x01*\"\x1c/oauth2/revoke_authorization\x12\x8b\x01\n" +
+	"\x0egetUserProfile\x12,.auth_center.v1.oauth2.GetUserProfileRequest\x1a*.auth_center.v1.oauth2.GetUserProfileReply\"\x1f\x82\xd3\xe4\x93\x02\x19:\x01*\"\x14/oauth2/user_profile\x12z\n" +
+	"\x0esetUserStorage\x12\x17.google.protobuf.Struct\x1a*.auth_center.v1.oauth2.SetUserStorageReply\"#\x82\xd3\xe4\x93\x02\x1d:\x01*\"\x18/oauth2/set_user_storageB3Z1iwut-auth_center/api/auth_center/v1/oauth2;oauth2b\x06proto3"
 
 var (
 	file_auth_center_v1_oauth2_oauth2_proto_rawDescOnce sync.Once
@@ -263,21 +855,44 @@ func file_auth_center_v1_oauth2_oauth2_proto_rawDescGZIP() []byte {
 	return file_auth_center_v1_oauth2_oauth2_proto_rawDescData
 }
 
-var file_auth_center_v1_oauth2_oauth2_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_auth_center_v1_oauth2_oauth2_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_auth_center_v1_oauth2_oauth2_proto_goTypes = []any{
-	(*AuthorizeRequest)(nil),                  // 0: auth_center.v1.oauth2.AuthorizeRequest
-	(*AuthorizeReply)(nil),                    // 1: auth_center.v1.oauth2.AuthorizeReply
-	(*AuthorizeReply_AuthorizeReplyData)(nil), // 2: auth_center.v1.oauth2.AuthorizeReply.AuthorizeReplyData
+	(*AuthorizeRequest)(nil),                    // 0: auth_center.v1.oauth2.AuthorizeRequest
+	(*AuthorizeReply)(nil),                      // 1: auth_center.v1.oauth2.AuthorizeReply
+	(*GetTokenRequest)(nil),                     // 2: auth_center.v1.oauth2.GetTokenRequest
+	(*GetTokenReply)(nil),                       // 3: auth_center.v1.oauth2.GetTokenReply
+	(*RevokeAuthorizationRequest)(nil),          // 4: auth_center.v1.oauth2.RevokeAuthorizationRequest
+	(*RevokeAuthorizationReply)(nil),            // 5: auth_center.v1.oauth2.RevokeAuthorizationReply
+	(*GetUserProfileRequest)(nil),               // 6: auth_center.v1.oauth2.GetUserProfileRequest
+	(*GetUserProfileReply)(nil),                 // 7: auth_center.v1.oauth2.GetUserProfileReply
+	(*SetUserStorageReply)(nil),                 // 8: auth_center.v1.oauth2.SetUserStorageReply
+	(*AuthorizeReply_AuthorizeReplyData)(nil),   // 9: auth_center.v1.oauth2.AuthorizeReply.AuthorizeReplyData
+	(*GetUserProfileReply_UserProfileData)(nil), // 10: auth_center.v1.oauth2.GetUserProfileReply.UserProfileData
+	nil,                     // 11: auth_center.v1.oauth2.GetUserProfileReply.UserProfileData.StorageEntry
+	(*structpb.Struct)(nil), // 12: google.protobuf.Struct
+	(*structpb.Value)(nil),  // 13: google.protobuf.Value
 }
 var file_auth_center_v1_oauth2_oauth2_proto_depIdxs = []int32{
-	2, // 0: auth_center.v1.oauth2.AuthorizeReply.data:type_name -> auth_center.v1.oauth2.AuthorizeReply.AuthorizeReplyData
-	0, // 1: auth_center.v1.oauth2.OAuth2.authorize:input_type -> auth_center.v1.oauth2.AuthorizeRequest
-	1, // 2: auth_center.v1.oauth2.OAuth2.authorize:output_type -> auth_center.v1.oauth2.AuthorizeReply
-	2, // [2:3] is the sub-list for method output_type
-	1, // [1:2] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	9,  // 0: auth_center.v1.oauth2.AuthorizeReply.data:type_name -> auth_center.v1.oauth2.AuthorizeReply.AuthorizeReplyData
+	10, // 1: auth_center.v1.oauth2.GetUserProfileReply.data:type_name -> auth_center.v1.oauth2.GetUserProfileReply.UserProfileData
+	12, // 2: auth_center.v1.oauth2.GetUserProfileReply.UserProfileData.scope:type_name -> google.protobuf.Struct
+	11, // 3: auth_center.v1.oauth2.GetUserProfileReply.UserProfileData.storage:type_name -> auth_center.v1.oauth2.GetUserProfileReply.UserProfileData.StorageEntry
+	13, // 4: auth_center.v1.oauth2.GetUserProfileReply.UserProfileData.StorageEntry.value:type_name -> google.protobuf.Value
+	0,  // 5: auth_center.v1.oauth2.OAuth2.authorize:input_type -> auth_center.v1.oauth2.AuthorizeRequest
+	2,  // 6: auth_center.v1.oauth2.OAuth2.getToken:input_type -> auth_center.v1.oauth2.GetTokenRequest
+	4,  // 7: auth_center.v1.oauth2.OAuth2.revokeAuthorization:input_type -> auth_center.v1.oauth2.RevokeAuthorizationRequest
+	6,  // 8: auth_center.v1.oauth2.OAuth2.getUserProfile:input_type -> auth_center.v1.oauth2.GetUserProfileRequest
+	12, // 9: auth_center.v1.oauth2.OAuth2.setUserStorage:input_type -> google.protobuf.Struct
+	1,  // 10: auth_center.v1.oauth2.OAuth2.authorize:output_type -> auth_center.v1.oauth2.AuthorizeReply
+	3,  // 11: auth_center.v1.oauth2.OAuth2.getToken:output_type -> auth_center.v1.oauth2.GetTokenReply
+	5,  // 12: auth_center.v1.oauth2.OAuth2.revokeAuthorization:output_type -> auth_center.v1.oauth2.RevokeAuthorizationReply
+	7,  // 13: auth_center.v1.oauth2.OAuth2.getUserProfile:output_type -> auth_center.v1.oauth2.GetUserProfileReply
+	8,  // 14: auth_center.v1.oauth2.OAuth2.setUserStorage:output_type -> auth_center.v1.oauth2.SetUserStorageReply
+	10, // [10:15] is the sub-list for method output_type
+	5,  // [5:10] is the sub-list for method input_type
+	5,  // [5:5] is the sub-list for extension type_name
+	5,  // [5:5] is the sub-list for extension extendee
+	0,  // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_auth_center_v1_oauth2_oauth2_proto_init() }
@@ -285,14 +900,20 @@ func file_auth_center_v1_oauth2_oauth2_proto_init() {
 	if File_auth_center_v1_oauth2_oauth2_proto != nil {
 		return
 	}
+	file_auth_center_v1_oauth2_oauth2_proto_msgTypes[0].OneofWrappers = []any{}
 	file_auth_center_v1_oauth2_oauth2_proto_msgTypes[1].OneofWrappers = []any{}
+	file_auth_center_v1_oauth2_oauth2_proto_msgTypes[2].OneofWrappers = []any{}
+	file_auth_center_v1_oauth2_oauth2_proto_msgTypes[3].OneofWrappers = []any{}
+	file_auth_center_v1_oauth2_oauth2_proto_msgTypes[5].OneofWrappers = []any{}
+	file_auth_center_v1_oauth2_oauth2_proto_msgTypes[7].OneofWrappers = []any{}
+	file_auth_center_v1_oauth2_oauth2_proto_msgTypes[8].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_auth_center_v1_oauth2_oauth2_proto_rawDesc), len(file_auth_center_v1_oauth2_oauth2_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

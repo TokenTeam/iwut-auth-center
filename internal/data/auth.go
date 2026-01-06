@@ -36,12 +36,13 @@ func NewAuthRepo(data *Data, c *conf.Data, logger log.Logger, sha256Util *util.S
 }
 
 func (r *authRepo) CheckPasswordWithEmailAndGetUserIdAndVersion(ctx context.Context, email string, password string) (string, int, error) {
+	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
+
 	password = r.sha256Util.HashPassword(password)
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	reqId := util.RequestIDFrom(ctx)
-	r.log.Debugf("RequestID: %s, CheckPasswordAndGetUserBaseInfo called with email: %s", reqId, email)
+	l.Debugf("CheckPasswordAndGetUserBaseInfo called with email: %s", email)
 
 	collection := r.userCollection
 	filter := bson.M{"email": email, "password": password}
@@ -57,8 +58,8 @@ func (r *authRepo) CheckPasswordWithEmailAndGetUserIdAndVersion(ctx context.Cont
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return "", -1, biz.UserNotFoundError
 		}
-		r.log.Errorf("failed to find user: %v, traceId: %s", err, reqId)
-		return "", -1, fmt.Errorf("failed to find user: %w, traceId: %s", err, reqId)
+		l.Errorf("failed to find user: %v", err)
+		return "", -1, fmt.Errorf("failed to find user: %w", err)
 	} else if result.DeletedAt != nil {
 		// 30 天内可以恢复
 		if time.Since(*result.DeletedAt) < 30*24*time.Hour {
@@ -70,8 +71,8 @@ func (r *authRepo) CheckPasswordWithEmailAndGetUserIdAndVersion(ctx context.Cont
 			}
 			_, err = collection.UpdateOne(ctx, filter, update)
 			if err != nil {
-				r.log.Errorf("failed to restore deleted user: %v, traceId: %s", err, reqId)
-				return "", -1, fmt.Errorf("failed to restore deleted user: %w, traceId: %s", err, reqId)
+				l.Errorf("failed to restore deleted user: %v", err)
+				return "", -1, fmt.Errorf("failed to restore deleted user: %w", err)
 			}
 		} else {
 			return "", -1, biz.UserHasBeenDeletedError
@@ -82,18 +83,18 @@ func (r *authRepo) CheckPasswordWithEmailAndGetUserIdAndVersion(ctx context.Cont
 }
 
 func (r *authRepo) TryInsertRegisterCaptcha(ctx context.Context, email string, captcha string, ttl time.Duration) error {
+	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	reqID := util.RequestIDFrom(ctx)
-	r.log.Debugf("RequestID: %s, TryInsertCaptcha called with email: %s", reqID, email)
+	l.Debugf("TryInsertCaptcha called with email: %s", email)
 
 	collection := r.userCollection
 	filter := bson.M{"email": email}
 
 	count, err := collection.CountDocuments(ctx, filter)
 	if err != nil {
-		r.log.Errorf("CountDocuments error req=%s err=%v", reqID, err)
+		l.Errorf("CountDocuments error: %v", err)
 		return fmt.Errorf("failed to count documents: %w", err)
 	}
 	if count > 0 {
@@ -106,7 +107,7 @@ func (r *authRepo) TryInsertRegisterCaptcha(ctx context.Context, email string, c
 	// 取最近一条记录做限流
 	zs, err := r.data.redis.ZRevRangeWithScores(ctx, key, 0, 0).Result()
 	if err != nil && !errors.Is(err, redis.Nil) {
-		r.log.Errorf("ZRevrangeWithScores error req=%s err=%v", reqID, err)
+		l.Errorf("ZRevrangeWithScores error: %v", err)
 		return fmt.Errorf("redis zrevrange error: %w", err)
 	}
 	if len(zs) > 0 {
@@ -121,7 +122,7 @@ func (r *authRepo) TryInsertRegisterCaptcha(ctx context.Context, email string, c
 		Score:  float64(now),
 		Member: captcha,
 	}).Err(); err != nil {
-		r.log.Errorf("ZAdd error req=%s err=%v", reqID, err)
+		l.Errorf("ZAdd error: %v", err)
 		return fmt.Errorf("failed to zadd captcha: %w", err)
 	}
 
@@ -129,16 +130,17 @@ func (r *authRepo) TryInsertRegisterCaptcha(ctx context.Context, email string, c
 	cutoff := strconv.FormatInt(time.Now().Add(-ttl).Unix(), 10)
 	if err := r.data.redis.ZRemRangeByScore(ctx, key, "-inf", cutoff).Err(); err != nil {
 		// 记录但不阻塞正常流程
-		r.log.Errorf("ZRemRangeByScore error: %v, reqId: %s", err, reqID)
+		l.Errorf("ZRemRangeByScore error: %v", err)
 	}
 
 	if err := r.data.redis.Expire(ctx, key, ttl).Err(); err != nil {
-		r.log.Errorf("Expire error: %v", err)
+		l.Errorf("Expire error: %v", err)
 	}
 	return nil
 }
+
 func (r *authRepo) CheckCaptchaUsable(ctx context.Context, email string, code string, ttl time.Duration) error {
-	reqID := util.RequestIDFrom(ctx)
+	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
@@ -148,27 +150,27 @@ func (r *authRepo) CheckCaptchaUsable(ctx context.Context, email string, code st
 	cutoff := strconv.FormatInt(time.Now().Add(-ttl).Unix(), 10)
 	if err := r.data.redis.ZRemRangeByScore(ctx, key, "-inf", cutoff).Err(); err != nil {
 		// 记录但不阻塞正常流程
-		r.log.Errorf("ZRemRangeByScore error: %v, reqId: %s", err, reqID)
+		l.Errorf("ZRemRangeByScore error: %v", err)
 	}
 
 	_, err := r.data.redis.ZRank(ctx, key, code).Result()
 	if errors.Is(err, redis.Nil) {
 		return biz.CaptchaNotUsableError
 	} else if err != nil {
-		r.log.Errorf("ZRank error req=%s err=%v", reqID, err)
+		l.Errorf("ZRank error: %v", err)
 		return fmt.Errorf("redis zrank error: %w", err)
 	}
 	return nil
 }
 
 func (r *authRepo) RegisterUser(ctx context.Context, email string, password string) (string, error) {
-	reqID := util.RequestIDFrom(ctx)
+	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 	password = r.sha256Util.HashPassword(password)
 	filter := bson.M{"email": email}
 
 	count, err := r.userCollection.CountDocuments(ctx, filter)
 	if err != nil {
-		r.log.Errorf("CountDocuments error req=%s err=%v", reqID, err)
+		l.Errorf("CountDocuments error: %v", err)
 		return "", fmt.Errorf("failed to count documents: %w", err)
 	}
 	if count > 0 {
@@ -182,7 +184,7 @@ func (r *authRepo) RegisterUser(ctx context.Context, email string, password stri
 		"Version":    0,
 	})
 	if err != nil {
-		r.log.Errorf("InsertOne error req=%s err=%v", reqID, err)
+		l.Errorf("InsertOne error: %v", err)
 		return "", fmt.Errorf("failed to insert user: %w", err)
 	}
 
@@ -199,11 +201,11 @@ func (r *authRepo) RegisterUser(ctx context.Context, email string, password stri
 }
 
 func (r *authRepo) AddOrUpdateUserVersion(ctx context.Context, userId string, version int, ttl time.Duration) error {
-	reqId := util.RequestIDFrom(ctx)
+	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 	key := GetRedisKey("user_version", userId)
 	err := r.data.redis.Set(ctx, key, version, ttl).Err()
 	if err != nil {
-		r.log.Errorf("Set user Version error req=%s err=%v", reqId, err)
+		l.Errorf("Set user Version error: %v", err)
 		return fmt.Errorf("failed to set user Version: %w", err)
 	}
 	return nil
@@ -211,12 +213,12 @@ func (r *authRepo) AddOrUpdateUserVersion(ctx context.Context, userId string, ve
 
 // GetUserVersion ttl 的作用是 当缓存不存在时 使用ttl修复缓存
 func (r *authRepo) GetUserVersion(ctx context.Context, userId string, ttl time.Duration) (int, error) {
-	reqId := util.RequestIDFrom(ctx)
+	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 	key := GetRedisKey("user_version", userId)
 	val, err := r.data.redis.Get(ctx, key).Result()
 	if errors.Is(err, redis.Nil) {
 		// 该情况可能是服务器重启后缓存丢失导致的，理论上不应该发生
-		r.log.Errorf("Get user Version not found req=%s, which shouldn't be possible.", reqId)
+		l.Errorf("Get user Version not found, which shouldn't be possible.")
 
 		collection := r.userCollection
 		filter := bson.M{"_id": userId}
@@ -230,23 +232,23 @@ func (r *authRepo) GetUserVersion(ctx context.Context, userId string, ttl time.D
 			if errors.Is(err, mongo.ErrNoDocuments) {
 				return 1<<31 - 1, biz.UserNotFoundError
 			}
-			r.log.Errorf("failed to find user: %v, traceId: %s", err, reqId)
-			return 1<<31 - 1, fmt.Errorf("failed to find user: %w, traceId: %s", err, reqId)
+			l.Errorf("failed to find user: %v", err)
+			return 1<<31 - 1, fmt.Errorf("failed to find user: %w", err)
 		} else if result.DeletedAt != nil {
 			return 1<<31 - 1, biz.UserHasBeenDeletedError
 		}
 		err = r.AddOrUpdateUserVersion(ctx, userId, result.Version, ttl)
 		if err != nil {
-			r.log.Errorf("AddOrUpdateUserVersion error req=%s err=%v", reqId, err)
+			l.Errorf("AddOrUpdateUserVersion error: %v", err)
 		}
 		return result.Version, nil
 	} else if err != nil {
-		r.log.Errorf("Get user Version error req=%s err=%v", reqId, err)
+		l.Errorf("Get user Version error: %v", err)
 		return 0, fmt.Errorf("failed to get user Version: %w", err)
 	}
 	version, err := strconv.Atoi(val)
 	if err != nil {
-		r.log.Errorf("Atoi user Version error req=%s err=%v", reqId, err)
+		l.Errorf("Atoi user Version error: %v", err)
 		return 0, fmt.Errorf("failed to parse user Version: %w", err)
 	}
 	return version, nil

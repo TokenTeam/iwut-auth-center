@@ -36,9 +36,11 @@ func NewUserRepo(data *Data, c *conf.Data, logger log.Logger, sha256Util *util.S
 }
 
 func (r *userRepo) UpdateUserPassword(ctx context.Context, userId string, oldPassword string, newPassword string) error {
+	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
+
 	uid, err := primitive.ObjectIDFromHex(userId)
 	if err != nil {
-		r.log.Errorf("invalid userId format: %s", userId)
+		l.Errorf("invalid userId format: %s", userId)
 		return fmt.Errorf("invalid userId format: %s", userId)
 	}
 	oldPassword = r.sha256Util.HashPassword(oldPassword)
@@ -46,8 +48,7 @@ func (r *userRepo) UpdateUserPassword(ctx context.Context, userId string, oldPas
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	reqId := util.RequestIDFrom(ctx)
-	r.log.Debugf("RequestID: %s, UpdateUserPassword called with UserId: %s", reqId, userId)
+	l.Debugf("UpdateUserPassword called with UserId: %s", userId)
 
 	collection := r.userCollection
 	filter := bson.M{"_id": uid, "password": oldPassword}
@@ -61,8 +62,8 @@ func (r *userRepo) UpdateUserPassword(ctx context.Context, userId string, oldPas
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return biz.UserNotFoundError
 		}
-		r.log.Errorf("failed to find user: %v, traceId: %s", err, reqId)
-		return fmt.Errorf("failed to find user: %w, traceId: %s", err, reqId)
+		l.Errorf("failed to find user: %v", err)
+		return fmt.Errorf("failed to find user: %w", err)
 	} else if result.DeletedAt != nil {
 		return biz.UserHasBeenDeletedError
 	}
@@ -75,23 +76,24 @@ func (r *userRepo) UpdateUserPassword(ctx context.Context, userId string, oldPas
 	}
 	_, err = collection.UpdateOne(ctx, filter, update)
 	if err != nil {
-		r.log.Errorf("failed to update user password: %v, traceId: %s", err, reqId)
-		return fmt.Errorf("failed to update user password: %w, traceId: %s", err, reqId)
+		l.Errorf("failed to update user password: %v", err)
+		return fmt.Errorf("failed to update user password: %w", err)
 	}
 	return nil
 }
 
 func (r *userRepo) DeleteUserAccount(ctx context.Context, userId string) error {
+	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
+
 	uid, err := primitive.ObjectIDFromHex(userId)
 	if err != nil {
-		r.log.Errorf("invalid userId format: %s", userId)
+		l.Errorf("invalid userId format: %s", userId)
 		return fmt.Errorf("invalid userId format: %s", userId)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	reqId := util.RequestIDFrom(ctx)
-	r.log.Debugf("RequestID: %s, DeleteUserAccount called with UserId: %s", reqId, userId)
+	l.Debugf("DeleteUserAccount called with UserId: %s", userId)
 
 	collection := r.userCollection
 	filter := bson.M{"_id": uid}
@@ -105,8 +107,8 @@ func (r *userRepo) DeleteUserAccount(ctx context.Context, userId string) error {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return biz.UserNotFoundError
 		}
-		r.log.Errorf("failed to find user: %v, traceId: %s", err, reqId)
-		return fmt.Errorf("failed to find user: %w, traceId: %s", err, reqId)
+		l.Errorf("failed to find user: %v", err)
+		return fmt.Errorf("failed to find user: %w", err)
 	} else if result.DeletedAt != nil {
 		return biz.UserHasBeenDeletedError
 	}
@@ -121,24 +123,25 @@ func (r *userRepo) DeleteUserAccount(ctx context.Context, userId string) error {
 	}
 	_, err = collection.UpdateOne(ctx, filter, update)
 	if err != nil {
-		r.log.Errorf("failed to delete user account: %v, traceId: %s", err, reqId)
-		return fmt.Errorf("failed to delete user account: %w, traceId: %s", err, reqId)
+		l.Errorf("failed to delete user account: %v", err)
+		return fmt.Errorf("failed to delete user account: %w", err)
 	}
 	return nil
 }
 
 func (r *userRepo) GetUserProfileById(ctx context.Context, userId string) (*biz.UserProfile, error) {
+	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
+
 	uid, err := primitive.ObjectIDFromHex(userId)
 	if err != nil {
-		r.log.Errorf("invalid userId format: %s", userId)
+		l.Errorf("invalid userId format: %s", userId)
 		return nil, fmt.Errorf("invalid userId format: %s", userId)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	reqId := util.RequestIDFrom(ctx)
-	r.log.Debugf("RequestID: %s, GetUserProfileById called with UserId: %s", reqId, userId)
+	l.Debugf("GetUserProfileById called with UserId: %s", userId)
 
 	collection := r.userCollection
 	pipeline := mongo.Pipeline{
@@ -186,28 +189,28 @@ func (r *userRepo) GetUserProfileById(ctx context.Context, userId string) (*biz.
 	}
 	cur, err := collection.Aggregate(ctx, pipeline)
 	if err != nil {
-		r.log.Errorf("failed to aggregate user profile: %v, traceId: %s", err, reqId)
-		return nil, fmt.Errorf("failed to aggregate user profile: %w, traceId: %s", err, reqId)
+		l.Errorf("failed to aggregate user profile: %v", err)
+		return nil, fmt.Errorf("failed to aggregate user profile: %w", err)
 	}
 	defer func(cur *mongo.Cursor, ctx context.Context) {
 		err := cur.Close(ctx)
 		if err != nil {
-			r.log.Errorf("failed to close cursor: %v, traceId: %s", err, reqId)
+			l.Errorf("failed to close cursor: %v", err)
 		}
 	}(cur, ctx)
 
 	if !cur.Next(ctx) {
 		if err := cur.Err(); err != nil {
-			r.log.Errorf("cursor error: %v, traceId: %s", err, reqId)
-			return nil, fmt.Errorf("cursor error: %w, traceId: %s", err, reqId)
+			l.Errorf("cursor error: %v", err)
+			return nil, fmt.Errorf("cursor error: %w", err)
 		}
 		return nil, biz.UserNotFoundError
 	}
 
 	var doc bson.M
 	if err := cur.Decode(&doc); err != nil {
-		r.log.Errorf("decode error: %v, traceId: %s", err, reqId)
-		return nil, fmt.Errorf("decode error: %w, traceId: %s", err, reqId)
+		l.Errorf("decode error: %v", err)
+		return nil, fmt.Errorf("decode error: %w", err)
 	}
 	userProfile := biz.UserProfile{
 		OfficialAttrs: map[string]string{},
@@ -216,22 +219,22 @@ func (r *userRepo) GetUserProfileById(ctx context.Context, userId string) (*biz.
 	if userId, ok := doc["_id"].(primitive.ObjectID); ok {
 		userProfile.UserId = userId.Hex()
 	} else {
-		return nil, fmt.Errorf("invalid userId format in db, traceId: %s", reqId)
+		return nil, fmt.Errorf("invalid userId format in db")
 	}
 	if email, ok := doc["email"].(string); ok {
 		userProfile.Email = email
 	} else {
-		return nil, fmt.Errorf("invalid email format in db, traceId: %s", reqId)
+		return nil, fmt.Errorf("invalid email format in db")
 	}
 	if createdAt, ok := doc["created_at"].(primitive.DateTime); ok {
 		userProfile.CreatedAt = createdAt.Time().Unix()
 	} else {
-		return nil, fmt.Errorf("invalid created_at format in db, traceId: %s", reqId)
+		return nil, fmt.Errorf("invalid created_at format in db")
 	}
 	if updatedAt, ok := doc["updated_at"].(primitive.DateTime); ok {
 		userProfile.UpdatedAt = updatedAt.Time().Unix()
 	} else {
-		return nil, fmt.Errorf("invalid updated_at format in db, traceId: %s", reqId)
+		return nil, fmt.Errorf("invalid updated_at format in db")
 	}
 
 	official, ok := doc["official"].(bson.M)
@@ -247,24 +250,31 @@ func (r *userRepo) GetUserProfileById(ctx context.Context, userId string) (*biz.
 	}
 	return &userProfile, nil
 }
+
 func (r *userRepo) UpdateUserProfile(ctx context.Context, userId string, attrs map[string]string) error {
+	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
+
 	uid, err := primitive.ObjectIDFromHex(userId)
 	if err != nil {
-		r.log.Errorf("invalid userId format: %s", userId)
+		l.Errorf("invalid userId format: %s", userId)
 		return fmt.Errorf("invalid userId format: %s", userId)
 	}
 
-	count := len(attrs)
-	if int64(count) > r.officialInfoMemoryLimitation {
-		r.log.Errorf("official info memory limitation exceeded: %d > %d", count, r.officialInfoMemoryLimitation)
+	if count := int64(func(m map[string]string) int {
+		total := 0
+		for k, v := range m {
+			total += len(k) + len(v)
+		}
+		return total
+	}(attrs)); count > r.officialInfoMemoryLimitation {
+		l.Errorf("official info memory limitation exceeded: %d > %d", count, r.officialInfoMemoryLimitation)
 		return biz.OfficialInfoMemoryLimitationExceededError
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	reqId := util.RequestIDFrom(ctx)
-	r.log.Debugf("RequestID: %s, UpdateUserProfile called with UserId: %s", reqId, userId)
+	l.Debugf("UpdateUserProfile called with UserId: %s", userId)
 
 	collection := r.userCollection
 	filter := bson.M{"_id": uid}
@@ -278,8 +288,8 @@ func (r *userRepo) UpdateUserProfile(ctx context.Context, userId string, attrs m
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return biz.UserNotFoundError
 		}
-		r.log.Errorf("failed to find user: %v, traceId: %s", err, reqId)
-		return fmt.Errorf("failed to find user: %w, traceId: %s", err, reqId)
+		l.Errorf("failed to find user: %v", err)
+		return fmt.Errorf("failed to find user: %w", err)
 	} else if result.DeletedAt != nil {
 		return biz.UserHasBeenDeletedError
 	}
@@ -295,8 +305,88 @@ func (r *userRepo) UpdateUserProfile(ctx context.Context, userId string, attrs m
 	}
 	_, err = collection.UpdateOne(ctx, filter, update)
 	if err != nil {
-		r.log.Errorf("failed to update user profile: %v, traceId: %s", err, reqId)
-		return fmt.Errorf("failed to update user profile: %w, traceId: %s", err, reqId)
+		l.Errorf("failed to update user profile: %v", err)
+		return fmt.Errorf("failed to update user profile: %w", err)
 	}
 	return nil
+}
+
+func (r *userRepo) GetUserProfileKeysById(ctx context.Context, userId string) (*biz.UserProfileKeys, error) {
+	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
+
+	uid, err := primitive.ObjectIDFromHex(userId)
+	if err != nil {
+		l.Errorf("invalid userId format: %s", userId)
+		return nil, fmt.Errorf("invalid userId format: %s", userId)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	l.Debugf("GetUserProfileKeysById called with UserId: %s", userId)
+
+	prefix := "official__"
+	collection := r.userCollection
+	pipeline := mongo.Pipeline{
+		{{"$match", bson.D{{"_id", uid}}}},
+		{{"$project", bson.D{
+			{"keys", bson.D{
+				{"$map", bson.D{
+					// 先过滤出以 official__ 开头的键
+					{"input", bson.D{
+						{"$filter", bson.D{
+							{"input", bson.D{{"$objectToArray", "$$ROOT"}}},
+							{"as", "kv"},
+							{"cond", bson.D{{"$regexMatch", bson.D{
+								{"input", "$$kv.k"},
+								{"regex", "^" + prefix},
+							}}}},
+						}},
+					}},
+					{"as", "kv"},
+					// 只保留 key
+					{"in", "$$kv.k"},
+				}},
+			}},
+		}}},
+	}
+	cur, err := collection.Aggregate(ctx, pipeline)
+	if err != nil {
+		l.Errorf("failed to aggregate error: %v", err)
+		return nil, fmt.Errorf("aggregate error: %w", err)
+	}
+
+	defer func(cur *mongo.Cursor, ctx context.Context) {
+		err := cur.Close(ctx)
+		if err != nil {
+			l.Errorf("failed to close cursor: %v", err)
+		}
+	}(cur, ctx)
+
+	if !cur.Next(ctx) {
+		if err := cur.Err(); err != nil {
+			l.Errorf("cursor error: %v", err)
+			return nil, fmt.Errorf("cursor error: %w", err)
+		}
+		// 找不到用户
+		return nil, biz.UserNotFoundError
+	}
+
+	var doc struct {
+		Keys []string `bson:"keys"`
+	}
+	if err := cur.Decode(&doc); err != nil {
+		return nil, fmt.Errorf("decode error: %w", err)
+	}
+
+	res := make([]string, 0, len(doc.Keys))
+	for _, k := range doc.Keys {
+		if len(k) >= len(prefix) && k[:len(prefix)] == prefix {
+			res = append(res, k[len(prefix):])
+		}
+	}
+	return &biz.UserProfileKeys{
+		BaseKeys:         []string{"userId", "email", "created_at", "updated_at"},
+		ExtraProfileKeys: res,
+	}, nil
 }
