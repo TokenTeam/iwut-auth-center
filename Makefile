@@ -61,13 +61,6 @@ generate:
 	go generate ./...
 	go mod tidy
 
-.PHONY: pre-gen
-# pre-gen
-pre-gen:
-	make api
-	make config
-	make wire
-
 .PHONY: all
 # generate all
 all:

@@ -43,7 +43,9 @@ func wireApp(confServer *conf.Server, confData *conf.Data, jwt *conf.Jwt, confMa
 	auditUsecase := biz.NewAuditUsecase(auditRepo)
 	jwtUtil := util.NewJwtUtil(jwt)
 	authService := service.NewAuthService(authUsecase, usecase, auditUsecase, jwtUtil, jwt)
-	userRepo := data.NewUserRepo(dataData, confData, logger, sha256Util)
+	appRepo := data.NewAppRepo(dataData, logger)
+	appUsecase := biz.NewAppUsecase(appRepo)
+	userRepo := data.NewUserRepo(dataData, confData, logger, appUsecase, sha256Util)
 	userUsecase := biz.NewUserUsecase(userRepo)
 	userService, err := service.NewUserService(userUsecase, authUsecase, auditUsecase, jwtUtil, jwt)
 	if err != nil {
@@ -51,9 +53,9 @@ func wireApp(confServer *conf.Server, confData *conf.Data, jwt *conf.Jwt, confMa
 		cleanup()
 		return nil, nil, err
 	}
-	oauth2Repo := data.NewOauth2Repo(dataData, confData, jwt, logger)
+	oauth2Repo := data.NewOauth2Repo(dataData, confData, jwt, appUsecase, logger)
 	oauth2Usecase := biz.NewOauth2Usecase(oauth2Repo)
-	oauth2Service := service.NewOauth2Service(oauth2Usecase, auditUsecase, jwtUtil, jwt)
+	oauth2Service := service.NewOauth2Service(oauth2Usecase, auditUsecase, appUsecase, jwtUtil, jwt)
 	jwtCheckMiddleware := middleware.NewJwtCheckMiddleware(authUsecase, oauth2Usecase, jwtUtil)
 	grpcServer := server.NewGRPCServer(confServer, authService, userService, oauth2Service, jwtCheckMiddleware, logger)
 	httpServer := server.NewHTTPServer(confServer, authService, userService, oauth2Service, jwtCheckMiddleware, logger)

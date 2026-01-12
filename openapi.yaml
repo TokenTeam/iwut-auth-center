@@ -230,6 +230,24 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/auth_center.v1.user.GetProfileKeysReply'
+    /user/update-consent:
+        post:
+            tags:
+                - User
+            operationId: User_UpdateUserConsent
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/auth_center.v1.user.UpdateUserConsentRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/auth_center.v1.user.UpdateUserConsentReply'
     /user/update-password:
         post:
             tags:
@@ -560,6 +578,27 @@ components:
                   string birthday = 9;
                   string qq = 10;
                   string phone = 11;
+        auth_center.v1.user.UpdateUserConsentReply:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                traceId:
+                    type: string
+        auth_center.v1.user.UpdateUserConsentRequest:
+            type: object
+            properties:
+                clientId:
+                    type: string
+                clientVersion:
+                    type: string
+                optionalScopes:
+                    type: array
+                    items:
+                        type: string
         google.protobuf.Value:
             description: Represents a dynamically typed value which can be either null, a number, a string, a boolean, a recursive struct value, or a list of values.
 tags:

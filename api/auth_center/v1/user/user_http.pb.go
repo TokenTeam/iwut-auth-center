@@ -26,6 +26,7 @@ const OperationUsergetProfile = "/auth_center.v1.user.User/getProfile"
 const OperationUsergetProfileKeys = "/auth_center.v1.user.User/getProfileKeys"
 const OperationUserupdatePassword = "/auth_center.v1.user.User/updatePassword"
 const OperationUserupdateProfile = "/auth_center.v1.user.User/updateProfile"
+const OperationUserupdateUserConsent = "/auth_center.v1.user.User/updateUserConsent"
 
 type UserHTTPServer interface {
 	DeleteAccount(context.Context, *emptypb.Empty) (*DeleteAccountReply, error)
@@ -33,6 +34,7 @@ type UserHTTPServer interface {
 	GetProfileKeys(context.Context, *emptypb.Empty) (*GetProfileKeysReply, error)
 	UpdatePassword(context.Context, *UpdatePasswordRequest) (*UpdatePasswordReply, error)
 	UpdateProfile(context.Context, *structpb.Struct) (*UpdateProfileReply, error)
+	UpdateUserConsent(context.Context, *UpdateUserConsentRequest) (*UpdateUserConsentReply, error)
 }
 
 func RegisterUserHTTPServer(s *http.Server, srv UserHTTPServer) {
@@ -42,6 +44,7 @@ func RegisterUserHTTPServer(s *http.Server, srv UserHTTPServer) {
 	r.GET("/user/profile", _User_GetProfile0_HTTP_Handler(srv))
 	r.POST("/user/update-profile", _User_UpdateProfile0_HTTP_Handler(srv))
 	r.GET("/user/profile-keys", _User_GetProfileKeys0_HTTP_Handler(srv))
+	r.POST("/user/update-consent", _User_UpdateUserConsent0_HTTP_Handler(srv))
 }
 
 func _User_UpdatePassword0_HTTP_Handler(srv UserHTTPServer) func(ctx http.Context) error {
@@ -145,12 +148,35 @@ func _User_GetProfileKeys0_HTTP_Handler(srv UserHTTPServer) func(ctx http.Contex
 	}
 }
 
+func _User_UpdateUserConsent0_HTTP_Handler(srv UserHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in UpdateUserConsentRequest
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationUserupdateUserConsent)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.UpdateUserConsent(ctx, req.(*UpdateUserConsentRequest))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*UpdateUserConsentReply)
+		return ctx.Result(200, reply)
+	}
+}
+
 type UserHTTPClient interface {
 	DeleteAccount(ctx context.Context, req *emptypb.Empty, opts ...http.CallOption) (rsp *DeleteAccountReply, err error)
 	GetProfile(ctx context.Context, req *emptypb.Empty, opts ...http.CallOption) (rsp *GetProfileReply, err error)
 	GetProfileKeys(ctx context.Context, req *emptypb.Empty, opts ...http.CallOption) (rsp *GetProfileKeysReply, err error)
 	UpdatePassword(ctx context.Context, req *UpdatePasswordRequest, opts ...http.CallOption) (rsp *UpdatePasswordReply, err error)
 	UpdateProfile(ctx context.Context, req *structpb.Struct, opts ...http.CallOption) (rsp *UpdateProfileReply, err error)
+	UpdateUserConsent(ctx context.Context, req *UpdateUserConsentRequest, opts ...http.CallOption) (rsp *UpdateUserConsentReply, err error)
 }
 
 type UserHTTPClientImpl struct {
@@ -218,6 +244,19 @@ func (c *UserHTTPClientImpl) UpdateProfile(ctx context.Context, in *structpb.Str
 	pattern := "/user/update-profile"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationUserupdateProfile))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *UserHTTPClientImpl) UpdateUserConsent(ctx context.Context, in *UpdateUserConsentRequest, opts ...http.CallOption) (*UpdateUserConsentReply, error) {
+	var out UpdateUserConsentReply
+	pattern := "/user/update-consent"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationUserupdateUserConsent))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {

@@ -6,6 +6,7 @@ import "google/api/annotations.proto";
 import "google/protobuf/struct.proto";
 import "google/protobuf/empty.proto";
 
+
 option go_package = "iwut-auth_center/api/auth_center/v1/user;user";
 
 service User {
@@ -36,6 +37,13 @@ service User {
   rpc getProfileKeys (google.protobuf.Empty) returns (GetProfileKeysReply) {
     option (google.api.http) = {
       get: "/user/profile-keys"
+    };
+  }
+
+  rpc updateUserConsent (UpdateUserConsentRequest) returns (UpdateUserConsentReply) {
+    option (google.api.http) = {
+      post: "/user/update-consent"
+      body: "*"
     };
   }
 }
@@ -96,4 +104,16 @@ message GetProfileKeysReply {
   string message = 2;
   optional GetProfileKeysReplyData data = 3;
   string traceId = 4;
+}
+
+message UpdateUserConsentRequest {
+  string clientId = 1;
+  string clientVersion = 2;
+  repeated string optionalScopes = 3;
+}
+
+message UpdateUserConsentReply {
+  int32 code = 1;
+  string message = 2;
+  string traceId = 3;
 }

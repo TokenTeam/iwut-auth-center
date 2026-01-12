@@ -23,20 +23,22 @@ import (
 type oauth2Repo struct {
 	data                       *Data
 	log                        *log.Helper
+	appUsecase                 *biz.AppUsecase
 	userCollection             *mongo.Collection
 	userConsentsCollection     *mongo.Collection
 	refreshTokenLifeSpan       time.Duration
 	oauth2InfoMemoryLimitation int64
 }
 
-func NewOauth2Repo(data *Data, c *conf.Data, jwtConf *conf.Jwt, logger log.Logger) biz.Oauth2Repo {
+func NewOauth2Repo(data *Data, c *conf.Data, jwtConf *conf.Jwt, appUsecase *biz.AppUsecase, logger log.Logger) biz.Oauth2Repo {
 	dbName := c.GetMongodb().GetDatabase()
 	usersCollection := data.mongo.Database(dbName).Collection("user")
-	userConsentsCollection := data.mongo.Database(dbName).Collection("userConsents")
+	userConsentsCollection := data.mongo.Database(dbName).Collection("user_consents")
 
 	return &oauth2Repo{
 		data:                       data,
 		log:                        log.NewHelper(logger),
+		appUsecase:                 appUsecase,
 		userCollection:             usersCollection,
 		userConsentsCollection:     userConsentsCollection,
 		refreshTokenLifeSpan:       time.Duration(jwtConf.GetRefreshTokenLifeSpan()) * time.Second,
@@ -65,7 +67,7 @@ func (r *oauth2Repo) CheckGetCodeRequest(ctx context.Context, codeInfo *biz.Code
 	if ok, err := r.CheckUserPermission(ctx, userId, codeInfo.ClientId); !ok {
 		return false, err
 	}
-	clientInfo, err := r.GetClientInfo(ctx, codeInfo.ClientId)
+	clientInfo, err := r.appUsecase.Repo.GetClientInfo(ctx, codeInfo.ClientId)
 	if err != nil {
 		l.Errorf("GetClientInfo failed: %v", err)
 		return false, err
@@ -255,7 +257,7 @@ func (r *oauth2Repo) GetUserProfile(ctx context.Context, userId string, clientId
 
 	l.Debugf("GetUserProfile userId: %s, clientId: %s", userId, clientId)
 
-	clientInfo, err := r.GetClientInfo(ctx, clientId)
+	clientInfo, err := r.appUsecase.Repo.GetClientInfo(ctx, clientId)
 	if err != nil {
 		l.Errorf("GetClientInfo failed: %v", err)
 		return nil, err
@@ -271,7 +273,7 @@ func (r *oauth2Repo) GetUserProfile(ctx context.Context, userId string, clientId
 	}
 
 	var result struct {
-		ExtraScope    []string `bson:"extra_scope"`
+		OptionalScope []string `bson:"optional_scope"`
 		AgreedVersion string   `bson:"agreed_version"`
 	}
 	err = collection.FindOne(ctx, filter).Decode(&result)
@@ -284,14 +286,14 @@ func (r *oauth2Repo) GetUserProfile(ctx context.Context, userId string, clientId
 		return nil, kratosErrors.Forbidden("", "client version outdated")
 	}
 
-	// 在此处计算可读 scopes：先取并集 clientInfo.BasicScope U result.ExtraScope，然后与 baseScopes 做交集
+	// 在此处计算可读 scopes：先取并集 clientInfo.BasicScope U result.OptionalScope，然后与 baseScopes 做交集
 	unionMap := make(map[string]struct{})
 	for _, s := range clientInfo.BasicScope {
 		if strings.HasPrefix(s, "read__") {
 			unionMap[s[6:]] = struct{}{}
 		}
 	}
-	for _, s := range result.ExtraScope {
+	for _, s := range result.OptionalScope {
 		if strings.HasPrefix(s, "read__") {
 			unionMap[s[6:]] = struct{}{}
 		}
@@ -441,7 +443,7 @@ func (r *oauth2Repo) SetUserProfile(ctx context.Context, userId string, clientId
 
 	l.Debugf("SetUserProfile userId: %s clientId: %s", userId, clientId)
 
-	clientInfo, err := r.GetClientInfo(ctx, clientId)
+	clientInfo, err := r.appUsecase.Repo.GetClientInfo(ctx, clientId)
 	if err != nil {
 		l.Errorf("GetClientInfo failed: %v", err)
 		return err
@@ -502,7 +504,7 @@ func (r *oauth2Repo) SetUserProfile(ctx context.Context, userId string, clientId
 	}
 
 	// 重新检查 ClientInfo
-	clientInfo, err = r.GetClientInfo(ctx, clientId)
+	clientInfo, err = r.appUsecase.Repo.GetClientInfo(ctx, clientId)
 	if err != nil {
 		l.Errorf("GetClientInfo failed: %v", err)
 		return err
@@ -631,8 +633,8 @@ func (r *oauth2Repo) CheckJTIAllowed(ctx context.Context, userId string, clientI
 			return false, nil
 		}
 		// 在 Mongo 中找到了该 jti，尝试写回 Redis 缓存（写回失败只记录日志，不阻塞授权）
-		if werr := r.AllowJTIs(ctx, []string{jti}); werr != nil {
-			l.Errorf("CheckJTIAllowed writeback to Redis failed: %v", werr)
+		if err := r.AllowJTIs(ctx, []string{jti}); err != nil {
+			l.Errorf("CheckJTIAllowed writeback to Redis failed: %v", err)
 		}
 		return true, nil
 	}
@@ -649,7 +651,7 @@ func (r *oauth2Repo) CheckUserPermission(ctx context.Context, userId string, cli
 
 	l.Debugf("CheckUserPermission userId: %s, clientId: %s", userId, clientId)
 
-	clientInfo, err := r.GetClientInfo(ctx, clientId)
+	clientInfo, err := r.appUsecase.Repo.GetClientInfo(ctx, clientId)
 	if err != nil {
 		l.Errorf("GetClientInfo failed: %v", err)
 		return false, err
@@ -663,13 +665,13 @@ func (r *oauth2Repo) CheckUserPermission(ctx context.Context, userId string, cli
 		"client_id": clientId,
 	}
 	var result struct {
-		Scope         []string `bson:"extra_scope"`
+		Scope         []string `bson:"optional_scope"`
 		AgreedVersion string   `bson:"agreed_version"`
 	}
 	err = collection.FindOne(ctx, filter).Decode(&result)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			if clientInfo.Admin != "official" || (clientInfo.ExtraScope != nil && len(clientInfo.ExtraScope) > 0) {
+			if clientInfo.Admin != "official" || (clientInfo.OptionalScope != nil && len(clientInfo.OptionalScope) > 0) {
 				return false, biz.UserPermissionDeniedError
 			}
 
@@ -679,7 +681,7 @@ func (r *oauth2Repo) CheckUserPermission(ctx context.Context, userId string, cli
 				"token_id":       []string{},
 				"granted_at":     time.Now(),
 				"agreed_version": clientInfo.Version,
-				"extra_scope":    []string{},
+				"optional_scope": []string{},
 			}
 			_, err = collection.InsertOne(ctx, record)
 			if err != nil {
@@ -708,106 +710,12 @@ func (r *oauth2Repo) SetClientInfoStorageKeys(ctx context.Context, clientId stri
 	// TODO : implement the request to set the storageKeys after app center is ready
 	key := GetRedisKey("client_info", clientId)
 	r.data.redis.Del(ctx, key)
-	_, err := r.GetClientInfo(ctx, clientId)
+	_, err := r.appUsecase.Repo.GetClientInfo(ctx, clientId)
 	return err
-}
-
-func (r *oauth2Repo) GetClientInfo(ctx context.Context, clientId string) (*biz.ClientInfo, error) {
-	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
-
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	l.Debugf("GetClientInfo clientId: %s", clientId)
-
-	// 先尝试从缓存获取
-	cachedClient, err := r.getClientInfoFromCache(ctx, clientId)
-	if err != nil {
-		l.Errorf("GetClientInfo cache error: %v", err)
-		return nil, err
-	}
-	if cachedClient != nil {
-		l.Debugf("GetClientInfo cache hit for clientId: %s", clientId)
-		return cachedClient, nil
-	}
-	// 缓存未命中，从 AppCenter 获取
-	clientInfo, err := r.getClientInfoFromAppCenter(clientId)
-	if err != nil {
-		l.Errorf("GetClientInfo from AppCenter error: %v", err)
-		return nil, err
-	}
-	if clientInfo == nil {
-		l.Infof("GetClientInfo from AppCenter returned nil for clientId: %s", clientId)
-		return nil, nil
-	}
-	// 将获取到的信息缓存起来
-	err = r.cacheClientInfo(ctx, clientInfo)
-	if err != nil {
-		l.Errorf("cacheClientInfo error: %v", err)
-		// 缓存失败不影响正常返回
-		return clientInfo, err
-	}
-	return clientInfo, nil
-}
-
-func (r *oauth2Repo) getClientInfoFromAppCenter(clientId string) (*biz.ClientInfo, error) {
-	// TODO: implement the logic after app center is ready
-	return &biz.ClientInfo{
-		ClientId:      clientId,
-		ClientSecret:  "123456789abcdef",
-		Version:       "1.0.0",
-		RedirectUri:   []string{"http://localhost:8080/callback"},
-		BasicScope:    []string{"read___id", "read__nick"},
-		ExtraScope:    []string{},
-		StorageKeys:   []string{"test"},
-		DisplayName:   "Test Application",
-		Name:          "Test App",
-		Describe:      "This is a test application for demonstration purposes.",
-		Url:           "http://localhost:8080",
-		Icon:          "",
-		Show:          false,
-		Admin:         "official",
-		Collaborators: []string{},
-	}, nil
 }
 
 // 这里的缓存方案需要仔细考虑 一方面 其有效减少了向AppCenter的请求 但另一方面 在一定程度上 其破坏了数据的一致性 让结构不那么干净
 // 但是我认为这样的缓存是必要的 TODO 后续应当测试缓存效果
-
-const clientInfoTTL = 30 * time.Minute
-
-// cacheClientInfo 将结构体序列化为 JSON 并写入 Redis
-func (r *oauth2Repo) cacheClientInfo(ctx context.Context, client *biz.ClientInfo) error {
-	key := GetRedisKey("client_info", client.ClientId)
-
-	// 序列化为 JSON
-	b, err := json.Marshal(client)
-	if err != nil {
-		return err
-	}
-
-	// 写入 Redis（设置 TTL）
-	return r.data.redis.Set(ctx, key, b, clientInfoTTL).Err()
-}
-
-// GetClientInfoCache 从 Redis 读取 JSON 并反序列化为结构体
-func (r *oauth2Repo) getClientInfoFromCache(ctx context.Context, clientID string) (*biz.ClientInfo, error) {
-	key := GetRedisKey("client_info", clientID)
-
-	val, err := r.data.redis.Get(ctx, key).Result()
-	if err != nil {
-		if errors.Is(err, redis.Nil) {
-			// 未命中缓存，按你的逻辑可以返回 nil,nil 或去 AppCenter 拉取后再 Cache
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	var client biz.ClientInfo
-	if err := json.Unmarshal([]byte(val), &client); err != nil {
-		return nil, err
-	}
-	return &client, nil
-}
 
 const codeInfoTTL = 5 * time.Minute
 

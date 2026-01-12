@@ -21,15 +21,17 @@ type Oauth2Service struct {
 	oauth2.UnimplementedOAuth2Server
 	oauth2Usecase        *biz.Oauth2Usecase
 	auditUsecase         *biz.AuditUsecase
+	appUsecase           *biz.AppUsecase
 	jwtUtil              *util.JwtUtil
 	accessTokenLifeSpan  time.Duration
 	refreshTokenLifeSpan time.Duration
 }
 
-func NewOauth2Service(oauth2Usecase *biz.Oauth2Usecase, auditUsecase *biz.AuditUsecase, jwtUtil *util.JwtUtil, c *conf.Jwt) *Oauth2Service {
+func NewOauth2Service(oauth2Usecase *biz.Oauth2Usecase, auditUsecase *biz.AuditUsecase, appUsecase *biz.AppUsecase, jwtUtil *util.JwtUtil, c *conf.Jwt) *Oauth2Service {
 	return &Oauth2Service{
 		oauth2Usecase:        oauth2Usecase,
 		auditUsecase:         auditUsecase,
+		appUsecase:           appUsecase,
 		jwtUtil:              jwtUtil,
 		accessTokenLifeSpan:  time.Duration(c.GetAccessTokenLifeSpan()) * time.Second,
 		refreshTokenLifeSpan: time.Duration(c.GetRefreshTokenLifeSpan()) * time.Second,
@@ -145,7 +147,7 @@ func (s *Oauth2Service) GetToken(ctx context.Context, in *oauth2.GetTokenRequest
 		}, nil
 	}
 
-	clientInfo, err := s.oauth2Usecase.Repo.GetClientInfo(ctx, codeInfo.ClientId)
+	clientInfo, err := s.appUsecase.Repo.GetClientInfo(ctx, codeInfo.ClientId)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}

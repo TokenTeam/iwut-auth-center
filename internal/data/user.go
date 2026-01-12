@@ -9,27 +9,34 @@ import (
 	"iwut-auth-center/internal/util"
 	"time"
 
+	kratosErrors "github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type userRepo struct {
 	data                         *Data
 	log                          *log.Helper
+	appUsecase                   *biz.AppUsecase
 	userCollection               *mongo.Collection
+	userConsentsCollection       *mongo.Collection
 	sha256Util                   *util.Sha256Util
 	officialInfoMemoryLimitation int64
 }
 
-func NewUserRepo(data *Data, c *conf.Data, logger log.Logger, sha256Util *util.Sha256Util) biz.UserRepo {
+func NewUserRepo(data *Data, c *conf.Data, logger log.Logger, appUsecase *biz.AppUsecase, sha256Util *util.Sha256Util) biz.UserRepo {
 	dbName := c.GetMongodb().GetDatabase()
 	usersCollection := data.mongo.Database(dbName).Collection("user")
+	userConsentsCollection := data.mongo.Database(dbName).Collection("user_consents")
 	return &userRepo{
 		data:                         data,
 		log:                          log.NewHelper(logger),
+		appUsecase:                   appUsecase,
 		userCollection:               usersCollection,
+		userConsentsCollection:       userConsentsCollection,
 		sha256Util:                   sha256Util,
 		officialInfoMemoryLimitation: c.GetMongodb().GetLimitations().GetUser().GetOfficialMemLimit(),
 	}
@@ -389,4 +396,79 @@ func (r *userRepo) GetUserProfileKeysById(ctx context.Context, userId string) (*
 		BaseKeys:         []string{"userId", "email", "created_at", "updated_at"},
 		ExtraProfileKeys: res,
 	}, nil
+}
+
+func (r *userRepo) UpdateUserConsent(ctx context.Context, userId string, clientId string, clientVersion string, optionalScopes []string) error {
+	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
+
+	uid, err := primitive.ObjectIDFromHex(userId)
+	if err != nil {
+		l.Errorf("invalid userId format: %s", userId)
+		return fmt.Errorf("invalid userId format: %s", userId)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	l.Debugf("UpdateUserConsent called with UserId: %s", userId)
+
+	collection := r.userCollection
+	filter := bson.M{"_id": uid}
+
+	// 这个判断不是必要的 这种情况不太可能出现
+	var result struct {
+		DeletedAt *time.Time `bson:"deleted_at"`
+	}
+	err = collection.FindOne(ctx, filter).Decode(&result)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return biz.UserNotFoundError
+		}
+		l.Errorf("failed to find user: %v", err)
+		return fmt.Errorf("failed to find user: %w", err)
+	} else if result.DeletedAt != nil {
+		return biz.UserHasBeenDeletedError
+	}
+
+	clientInfo, err := r.appUsecase.Repo.GetClientInfo(ctx, clientId)
+	if err != nil {
+		l.Errorf("failed to get client info: %v", err)
+		return err
+	}
+	if clientInfo == nil {
+		l.Errorf("client not found: %s", clientId)
+		return kratosErrors.InternalServer("", "client not found with no error: "+clientId)
+	}
+	if clientInfo.Version != clientVersion {
+		l.Errorf("client version mismatch: %s != %s", clientInfo.Version, clientVersion)
+		return kratosErrors.BadRequest("", "client version mismatch: "+clientVersion)
+	}
+	scopeSet := make(map[string]struct{}, len(clientInfo.OptionalScope))
+	for _, v := range clientInfo.OptionalScope {
+		scopeSet[v] = struct{}{}
+	}
+	for _, v := range optionalScopes {
+		if _, ok := scopeSet[v]; !ok {
+			l.Errorf("invalid optional scope: %s", v)
+			return kratosErrors.BadRequest("", "invalid optional scope: "+v)
+		}
+	}
+
+	collection = r.userConsentsCollection
+	filter = bson.M{"user_id": userId, "client_id": clientId}
+
+	update := bson.M{
+		"$set": bson.M{
+			"optional_scope": optionalScopes,
+			"granted_at":     time.Now(),
+			"agreed_version": clientInfo.Version,
+		},
+	}
+	opts := options.Update().SetUpsert(true)
+	_, err = collection.UpdateOne(ctx, filter, update, opts)
+	if err != nil {
+		l.Errorf("failed to update user consent: %v", err)
+		return err
+	}
+	return nil
 }

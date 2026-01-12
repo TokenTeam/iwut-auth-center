@@ -39,7 +39,6 @@ func (s *UserService) UpdatePassword(ctx context.Context, in *user.UpdatePasswor
 	if err != nil {
 		return nil, errorProcess(ctx, err)
 	}
-	// 即使 AddOrUpdateUserVersion 失败，也交给统一 errorProcess 处理
 	if err = s.authUsecase.Repo.AddOrUpdateUserVersion(ctx, claim.Uid, util.NextJWTVersion(claim.Version), s.refreshTokenLifeSpan); err != nil {
 		return nil, errorProcess(ctx, err)
 	}
@@ -47,7 +46,7 @@ func (s *UserService) UpdatePassword(ctx context.Context, in *user.UpdatePasswor
 	return successProcess(ctx, func(reqId string) *user.UpdatePasswordReply {
 		return &user.UpdatePasswordReply{
 			Code:    200,
-			Message: "Success",
+			Message: "Updated successfully",
 			TraceId: reqId,
 		}
 	}), nil
@@ -70,7 +69,7 @@ func (s *UserService) DeleteAccount(ctx context.Context, _ *emptypb.Empty) (*use
 	return successProcess(ctx, func(reqId string) *user.DeleteAccountReply {
 		return &user.DeleteAccountReply{
 			Code:    200,
-			Message: "Success",
+			Message: "Deleted successfully",
 			TraceId: reqId,
 		}
 	}), nil
@@ -91,7 +90,7 @@ func (s *UserService) GetProfile(ctx context.Context, _ *emptypb.Empty) (*user.G
 	return successProcess(ctx, func(reqId string) *user.GetProfileReply {
 		return &user.GetProfileReply{
 			Code:    200,
-			Message: "Success",
+			Message: "Queried successfully",
 			Data: &user.GetProfileReply_GetProfileReplyData{
 				UserId:    userProfile.UserId,
 				Email:     userProfile.Email,
@@ -125,7 +124,7 @@ func (s *UserService) UpdateProfile(ctx context.Context, in *structpb.Struct) (*
 	return successProcess(ctx, func(reqId string) *user.UpdateProfileReply {
 		return &user.UpdateProfileReply{
 			Code:    200,
-			Message: "Success",
+			Message: "Updated successfully",
 			TraceId: reqId,
 		}
 	}), nil
@@ -146,11 +145,31 @@ func (s *UserService) GetProfileKeys(ctx context.Context, _ *emptypb.Empty) (*us
 	return successProcess(ctx, func(reqId string) *user.GetProfileKeysReply {
 		return &user.GetProfileKeysReply{
 			Code:    200,
-			Message: "Query successful",
+			Message: "Queried successfully",
 			Data: &user.GetProfileKeysReply_GetProfileKeysReplyData{
 				BaseKeys:         result.BaseKeys,
 				ExtraProfileKeys: result.ExtraProfileKeys,
 			},
+			TraceId: reqId,
+		}
+	}), nil
+}
+
+func (s *UserService) UpdateUserConsent(ctx context.Context, in *user.UpdateUserConsentRequest) (*user.UpdateUserConsentReply, error) {
+	successProcess, errorProcess := util.GetProcesses[*user.UpdateUserConsentReply]("UpdateUserConsent", GetAuditInsertFunc(*s.auditUsecase))
+
+	claim, err := s.jwtUtil.GetBaseAuthClaims(ctx)
+	if err != nil {
+		return nil, errorProcess(ctx, err)
+	}
+
+	if err = s.userUsecase.Repo.UpdateUserConsent(ctx, claim.Uid, in.GetClientId(), in.GetClientVersion(), in.GetOptionalScopes()); err != nil {
+		return nil, errorProcess(ctx, err)
+	}
+	return successProcess(ctx, func(reqId string) *user.UpdateUserConsentReply {
+		return &user.UpdateUserConsentReply{
+			Code:    200,
+			Message: "Updated successfully",
 			TraceId: reqId,
 		}
 	}), nil

@@ -2,7 +2,7 @@
 ## 项目开发
 ```bash
 make init
-make pre-gen
+make all
 ```
 这两行命令实际上完成了：依赖拉取、proto 代码生成、wire 依赖注入代码生成等工作。
 你可以到 `Makefile` 中查看具体实现。
