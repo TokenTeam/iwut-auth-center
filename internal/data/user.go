@@ -42,6 +42,27 @@ func NewUserRepo(data *Data, c *conf.Data, logger log.Logger, appUsecase *biz.Ap
 	}
 }
 
+// UpdateUserPassword verifies the provided oldPassword and updates it to newPassword.
+// Behavior:
+//   - Converts userId from hex to ObjectID; returns an error if invalid.
+//   - Hashes oldPassword/newPassword using sha256Util before DB operations.
+//   - Finds a document matching {_id: uid, password: oldHashed} and checks deleted_at.
+//   - If found, updates the password, updated_at and bumps the `Version` using
+//     util.NextJWTVersion to invalidate previous tokens/caches.
+//   - Uses a short (5s) context timeout for DB calls.
+//
+// Parameters:
+// - ctx: context for cancellation/timeouts.
+// - userId: hex string representation of MongoDB ObjectID.
+// - oldPassword/newPassword: plain-text passwords.
+// Returns:
+//   - error: biz.UserNotFoundError when credentials don't match; biz.UserHasBeenDeletedError
+//     when the user is soft-deleted; wrapped errors for other failures.
+//
+// Edge cases:
+//   - If the userId is not a valid hex ObjectID, returns a formatted error.
+//   - The update is optimistic: it matches the old hashed password to prevent
+//     blind overwrites.
 func (r *userRepo) UpdateUserPassword(ctx context.Context, userId string, oldPassword string, newPassword string) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
@@ -89,6 +110,18 @@ func (r *userRepo) UpdateUserPassword(ctx context.Context, userId string, oldPas
 	return nil
 }
 
+// DeleteUserAccount marks the user document as deleted (soft delete).
+// Behavior:
+// - Converts userId to ObjectID; returns an error for invalid format.
+// - Fetches the existing document and checks if it's already deleted.
+// - Sets `deleted_at` and `updated_at` to now and bumps `Version` to invalidate tokens.
+// - Uses a 5s timeout for DB operations.
+// Parameters:
+// - ctx: context for cancellation/timeouts.
+// - userId: hex string of the user's ObjectID.
+// Returns:
+//   - error: biz.UserNotFoundError if user doesn't exist; biz.UserHasBeenDeletedError
+//     if already deleted; wrapped errors on DB failures.
 func (r *userRepo) DeleteUserAccount(ctx context.Context, userId string) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
@@ -136,6 +169,21 @@ func (r *userRepo) DeleteUserAccount(ctx context.Context, userId string) error {
 	return nil
 }
 
+// GetUserProfileById returns a UserProfile assembled from the `user` document.
+// Behavior:
+//   - Converts userId to ObjectID and aggregates the document to construct an `official`
+//     map by picking fields that start with "official__" and stripping the prefix.
+//   - Returns email, created_at, updated_at and the official attributes as a map.
+//   - Handles Mongo types (primitive.ObjectID, primitive.DateTime) and validates types
+//     before conversion; returns errors if unexpected types are encountered.
+//   - Uses a 5s DB timeout for the aggregation.
+//
+// Parameters:
+// - ctx: context for cancellation/timeouts.
+// - userId: hex string of the user's ObjectID.
+// Returns:
+// - *biz.UserProfile: populated profile when the user exists (OfficialAttrs may be empty).
+// - error: biz.UserNotFoundError if not found; wrapped errors for DB/decoding issues.
 func (r *userRepo) GetUserProfileById(ctx context.Context, userId string) (*biz.UserProfile, error) {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
@@ -258,6 +306,20 @@ func (r *userRepo) GetUserProfileById(ctx context.Context, userId string) (*biz.
 	return &userProfile, nil
 }
 
+// UpdateUserProfile updates/sets official__* attributes on the user document.
+// Behavior:
+//   - Validates userId and that the total size of provided attrs does not exceed
+//     the configured memory limitation (officialInfoMemoryLimitation).
+//   - Verifies the user exists and is not deleted, then sets updated_at and the
+//     provided `official__<key>` fields atomically with $set.
+//
+// Parameters:
+// - ctx: context for cancellation/timeouts.
+// - userId: hex string of the user's ObjectID.
+// - attrs: map of key->value which will be stored under fields prefixed by `official__`.
+// Returns:
+//   - error: biz.UserNotFoundError if user missing; biz.OfficialInfoMemoryLimitationExceededError
+//     if the attrs exceed configured limit; wrapped DB errors for other failures.
 func (r *userRepo) UpdateUserProfile(ctx context.Context, userId string, attrs map[string]string) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
@@ -318,6 +380,20 @@ func (r *userRepo) UpdateUserProfile(ctx context.Context, userId string, attrs m
 	return nil
 }
 
+// GetUserProfileKeysById returns the list of keys under `official__*` for a user.
+// Behavior:
+//   - Uses an aggregation pipeline to extract the document's keys that start with
+//     the prefix "official__" and returns those keys with the prefix removed.
+//   - Returns a structure containing BaseKeys (fixed list) and ExtraProfileKeys
+//     (derived from the document).
+//   - If the user doesn't exist, returns biz.UserNotFoundError.
+//
+// Parameters:
+// - ctx: context for cancellation/timeouts.
+// - userId: hex string of the user's ObjectID.
+// Returns:
+// - *biz.UserProfileKeys: contains BaseKeys and any ExtraProfileKeys found.
+// - error: biz.UserNotFoundError when not found; wrapped errors for DB failures.
 func (r *userRepo) GetUserProfileKeysById(ctx context.Context, userId string) (*biz.UserProfileKeys, error) {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
@@ -398,6 +474,25 @@ func (r *userRepo) GetUserProfileKeysById(ctx context.Context, userId string) (*
 	}, nil
 }
 
+// UpdateUserConsent records or updates the user's consent for a client application.
+// Behavior:
+//   - Validates userId and that the user exists and is not deleted.
+//   - Fetches client info via appUsecase.Repo.GetClientInfo and verifies the client
+//     exists and the provided clientVersion matches the client metadata.
+//   - Validates that each provided optional scope is allowed by the client's
+//     configured OptionalScope. If invalid, returns a BadRequest error.
+//   - Upserts a document into `user_consents` keyed by {user_id, client_id}
+//     storing optional_scope, granted_at and agreed_version.
+//
+// Parameters:
+// - ctx: context for cancellation/timeouts.
+// - userId: hex string of the user's ObjectID.
+// - clientId: client identifier.
+// - clientVersion: version string to validate against the client's metadata.
+// - optionalScopes: list of optional scopes the user agreed to.
+// Returns:
+//   - error: biz.UserNotFoundError if user missing; kratos BadRequest/InternalServer
+//     errors for invalid client/version or scope; wrapped DB errors for write failures.
 func (r *userRepo) UpdateUserConsent(ctx context.Context, userId string, clientId string, clientVersion string, optionalScopes []string) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 

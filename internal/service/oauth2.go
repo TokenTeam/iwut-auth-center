@@ -27,6 +27,7 @@ type Oauth2Service struct {
 	refreshTokenLifeSpan time.Duration
 }
 
+// NewOauth2Service constructs an Oauth2Service wiring usecases and JWT util.
 func NewOauth2Service(oauth2Usecase *biz.Oauth2Usecase, auditUsecase *biz.AuditUsecase, appUsecase *biz.AppUsecase, jwtUtil *util.JwtUtil, c *conf.Jwt) *Oauth2Service {
 	return &Oauth2Service{
 		oauth2Usecase:        oauth2Usecase,
@@ -38,7 +39,9 @@ func NewOauth2Service(oauth2Usecase *biz.Oauth2Usecase, auditUsecase *biz.AuditU
 	}
 }
 
-// Authorize check info return code
+// Authorize performs OAuth2 authorization request validation and issues an authorization code.
+// - Validates incoming parameters (scope/response_type/PKCE arguments) and user permission via oauth2 usecase,
+// - Generates an authorization code, caches its associated metadata, and returns a redirect URI containing the code.
 func (s *Oauth2Service) Authorize(ctx context.Context, in *oauth2.AuthorizeRequest) (*oauth2.AuthorizeReply, error) {
 	successProcess, errorProcess := util.GetProcesses[*oauth2.AuthorizeReply]("Authorize", GetAuditInsertFunc(*s.auditUsecase))
 
@@ -113,15 +116,10 @@ func stringPtr(s string) *string {
 	return &s
 }
 
-// GetToken 用code交换Token 用户是使用 PKCE 的前端或其他后端
-//
-// Parameters:
-//   - ctx: context.Context
-//   - in: *oauth2.GetTokenRequest 是 OAuth2 标准的请求参数的子集 请参见声明
-//
-// Returns:
-//   - *oauth2.GetTokenReply 是 OAuth2 标准的返回参数的子集 请参见声明
-//   - error 错误信息
+// GetToken exchanges an authorization code for access and refresh tokens.
+// - Validates grant_type, client authentication and PKCE when applicable,
+// - Generates JTI, issues tokens (access/refresh), records the JTI in user consents and invalidates the used code.
+// - Returns OAuth2-compliant error structures when validation fails.
 func (s *Oauth2Service) GetToken(ctx context.Context, in *oauth2.GetTokenRequest) (*oauth2.GetTokenReply, error) {
 	if in.GetGrantType() != "authorization_code" {
 		return &oauth2.GetTokenReply{
@@ -234,6 +232,9 @@ func (s *Oauth2Service) GetToken(ctx context.Context, in *oauth2.GetTokenRequest
 	}, nil
 }
 
+// RevokeAuthorization revokes the authenticated user's consent for a client.
+// - Validates caller via JWT and delegates the revoke operation to oauth2 usecase repo.
+// - Returns RPC-level success or propagated errors and records audit.
 func (s *Oauth2Service) RevokeAuthorization(ctx context.Context, in *oauth2.RevokeAuthorizationRequest) (*oauth2.RevokeAuthorizationReply, error) {
 	successProcess, errorProcess := util.GetProcesses[*oauth2.RevokeAuthorizationReply]("RevokeAuthorization", GetAuditInsertFunc(*s.auditUsecase))
 	claim, err := s.jwtUtil.GetBaseAuthClaims(ctx)
@@ -254,6 +255,8 @@ func (s *Oauth2Service) RevokeAuthorization(ctx context.Context, in *oauth2.Revo
 	}), nil
 }
 
+// GetUserProfile returns the profile visible to the requesting OAuth client (azp from JWT).
+// - Extracts OAuth claims, delegates profile assembly to oauth2 usecase repo, converts maps to structpb and returns them.
 func (s *Oauth2Service) GetUserProfile(ctx context.Context, in *oauth2.GetUserProfileRequest) (*oauth2.GetUserProfileReply, error) {
 	successProcess, errorProcess := util.GetProcesses[*oauth2.GetUserProfileReply]("GetUserProfile", GetAuditInsertFunc(*s.auditUsecase))
 	claim, err := s.jwtUtil.GetOAuthClaims(ctx)
@@ -286,6 +289,8 @@ func (s *Oauth2Service) GetUserProfile(ctx context.Context, in *oauth2.GetUserPr
 	}), nil
 }
 
+// SetUserStorage updates namespaced storage keys for the authenticated OAuth client (azp).
+// - Parses incoming structpb to map[string]string and delegates persistence to oauth2 usecase repo.
 func (s *Oauth2Service) SetUserStorage(ctx context.Context, in *structpb.Struct) (*oauth2.SetUserStorageReply, error) {
 	successProcess, errorProcess := util.GetProcesses[*oauth2.SetUserStorageReply]("SetUserStorage", GetAuditInsertFunc(*s.auditUsecase))
 	claim, err := s.jwtUtil.GetOAuthClaims(ctx)

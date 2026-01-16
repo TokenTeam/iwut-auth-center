@@ -27,14 +27,19 @@ type AuthService struct {
 	refreshTokenLifeSpan time.Duration
 }
 
+// NewAuthService constructs an AuthService.
+// It wires usecases, mail sender, audit usecase and JWT util and configures token lifetimes.
 func NewAuthService(authUsecase *biz.AuthUsecase, mailUsecase *mail.Usecase, auditUsecase *biz.AuditUsecase, jwtUtil *util.JwtUtil, c *conf.Jwt) *AuthService {
-
 	return &AuthService{authUsecase: authUsecase, mailUsecase: mailUsecase, auditUsecase: auditUsecase, jwtUtil: jwtUtil,
 		accessTokenLifeSpan:  time.Duration(c.GetAccessTokenLifeSpan()) * time.Second,
 		refreshTokenLifeSpan: time.Duration(c.GetRefreshTokenLifeSpan()) * time.Second,
 	}
 }
 
+// PasswordLogin handles a password-based login request.
+// - Verifies credentials via the auth usecase, issues access and refresh JWTs on success,
+// - Updates cached user version used to validate refresh tokens,
+// - Records audit information via the audit helper provided by util.GetProcesses.
 func (s *AuthService) PasswordLogin(ctx context.Context, in *auth.LoginRequest) (*auth.LoginReply, error) {
 
 	successProcess, errorProcess := util.GetProcesses[*auth.LoginReply]("PasswordLogin", GetAuditInsertFunc(*s.auditUsecase))
@@ -77,6 +82,8 @@ func (s *AuthService) PasswordLogin(ctx context.Context, in *auth.LoginRequest) 
 	}, util.Audit{UserID: &userId}), nil
 }
 
+// GenerateSecure6DigitCode returns a cryptographically secure 6-digit numeric code as string.
+// Used for generating email verification codes.
 func GenerateSecure6DigitCode() (string, error) {
 	randNumber := big.NewInt(1000000) // 上限为 1_000_000（不包含）
 	n, err := rand.Int(rand.Reader, randNumber)
@@ -86,6 +93,8 @@ func GenerateSecure6DigitCode() (string, error) {
 	return fmt.Sprintf("%06d", n.Int64()), nil
 }
 
+// GetRegisterMail generates a verification code, stores rate-limited captcha via auth usecase
+// and sends the code via mail usecase. It returns RPC-level success/failure with auditing.
 func (s *AuthService) GetRegisterMail(ctx context.Context, in *auth.GetVerifyCodeRequest) (*auth.GetVerifyCodeReply, error) {
 	successProcess, errorProcess := util.GetProcesses[*auth.GetVerifyCodeReply]("GetRegisterMail", GetAuditInsertFunc(*s.auditUsecase))
 	captcha, err := GenerateSecure6DigitCode()
@@ -110,6 +119,10 @@ func (s *AuthService) GetRegisterMail(ctx context.Context, in *auth.GetVerifyCod
 	}, util.Audit{Message: stringPtr(in.GetEmail())}), nil
 }
 
+// Register handles user registration:
+// - Validates the provided verification code via auth usecase,
+// - Creates a new user record via auth usecase,
+// - Returns created user id on success and records audit.
 func (s *AuthService) Register(ctx context.Context, in *auth.RegisterRequest) (*auth.RegisterReply, error) {
 	successProcess, errorProcess := util.GetProcesses[*auth.RegisterReply]("Register", GetAuditInsertFunc(*s.auditUsecase))
 	err := s.authUsecase.Repo.CheckCaptchaUsable(ctx, in.GetEmail(), in.GetVerifyCode(), 10*time.Minute)
@@ -134,6 +147,10 @@ func (s *AuthService) Register(ctx context.Context, in *auth.RegisterRequest) (*
 	}, util.Audit{UserID: &id}), nil
 }
 
+// RefreshToken handles a refresh token exchange:
+// - Accepts a refresh token from request body or cookie, decodes and validates the JWT,
+// - Verifies token type and version against cached user version via auth usecase,
+// - Issues new access and refresh tokens when valid.
 func (s *AuthService) RefreshToken(ctx context.Context, in *auth.RefreshTokenRequest) (*auth.RefreshTokenReply, error) {
 	// Specify the concrete type parameter so the generic helper returns the correct function type
 	successProcess, errorProcess := util.GetProcesses[*auth.RefreshTokenReply]("RefreshToken", GetAuditInsertFunc(*s.auditUsecase))

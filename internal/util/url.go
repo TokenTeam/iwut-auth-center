@@ -11,15 +11,31 @@ func BuildRedirectURL(baseURL string, params map[string]string) (string, error) 
 		return "", nil
 	}
 
-	// 去掉末尾多余 `/`（保留单个 `/` 的场景，如 "https://a.com/"）
-	for strings.HasSuffix(baseURL, "/") && len(baseURL) > len("https://a.com") {
-		// 简单处理：只去掉末尾连续 `/`，不做复杂 host 判断
-		baseURL = strings.TrimRight(baseURL, "/")
-	}
+	// 记录原始字符串是否以 '/' 结尾（用于决定是否保留单个根路径 '/'）
+	origEndsWithSlash := strings.HasSuffix(baseURL, "/")
 
 	u, err := url.Parse(baseURL)
 	if err != nil {
 		return "", err
+	}
+
+	// 规范化 path：
+	// - 如果 path 为空但原始 baseURL 以 '/' 结尾，保留单个 '/'（例如 "https://a.com/"）
+	// - 否则去掉 path 末尾多余的 '/'（但不要把单个 '/' 去掉）
+	if u.Path == "" {
+		if origEndsWithSlash {
+			u.Path = "/"
+		}
+	} else {
+		if u.Path != "/" {
+			trimmed := strings.TrimRight(u.Path, "/")
+			if trimmed == "" && origEndsWithSlash {
+				// 原 path 由多重 '/' 组成且原始字符串以 '/' 结尾，保留单个 '/'
+				u.Path = "/"
+			} else {
+				u.Path = trimmed
+			}
+		}
 	}
 
 	q := u.Query()

@@ -30,6 +30,18 @@ type oauth2Repo struct {
 	oauth2InfoMemoryLimitation int64
 }
 
+// NewOauth2Repo constructs an oauth2 repository backed by MongoDB and Redis.
+// Behavior:
+// - Binds collections `user` and `user_consents` and reads configuration limits.
+// - Does not modify DB schema or create indexes.
+// Parameters:
+// - data: initialized *Data with mongo/redis clients.
+// - c: configuration used to read DB name and memory limits.
+// - jwtConf: JWT related configuration (used to determine refresh token lifetime).
+// - appUsecase: used to query client metadata when needed.
+// - logger: logger for repository.
+// Returns:
+// - biz.Oauth2Repo: repository implementation.
 func NewOauth2Repo(data *Data, c *conf.Data, jwtConf *conf.Jwt, appUsecase *biz.AppUsecase, logger log.Logger) biz.Oauth2Repo {
 	dbName := c.GetMongodb().GetDatabase()
 	usersCollection := data.mongo.Database(dbName).Collection("user")
@@ -46,7 +58,17 @@ func NewOauth2Repo(data *Data, c *conf.Data, jwtConf *conf.Jwt, appUsecase *biz.
 	}
 }
 
-// CheckGetCodeRequest 检查获取 code 的请求是否合法
+// CheckGetCodeRequest validates an incoming authorization code request.
+// Behavior:
+// - Validates codeInfo.ResponseType and Scope are supported.
+// - Ensures the user has permission for the client via CheckUserPermission.
+// - Verifies the provided redirect_uri matches the client metadata from AppCenter.
+// Parameters:
+// - ctx: context for cancellation/timeouts.
+// - codeInfo: authorization request metadata (userId, clientId, redirectUri, scope, responseType).
+// Returns:
+// - bool: true if request is valid, false otherwise.
+// - error: kratos error describing why the request is invalid or wrapped internal errors.
 func (r *oauth2Repo) CheckGetCodeRequest(ctx context.Context, codeInfo *biz.CodeInfo) (bool, error) {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
@@ -83,7 +105,16 @@ func (r *oauth2Repo) CheckGetCodeRequest(ctx context.Context, codeInfo *biz.Code
 	return false, kratosErrors.BadRequest("", "redirect_uri mismatch")
 }
 
-// SetCodeInfo 存储 code 信息
+// SetCodeInfo stores an authorization code and its associated metadata in Redis.
+// Behavior:
+// - Serializes the provided CodeInfo to JSON and writes it to Redis with a short TTL.
+// - Uses a 5s context timeout for Redis calls.
+// Parameters:
+// - ctx: context for cancellation/timeouts.
+// - code: authorization code string.
+// - codeInfo: metadata associated with the code.
+// Returns:
+// - error: non-nil on serialization or Redis errors.
 func (r *oauth2Repo) SetCodeInfo(ctx context.Context, code string, codeInfo *biz.CodeInfo) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
@@ -101,7 +132,17 @@ func (r *oauth2Repo) SetCodeInfo(ctx context.Context, code string, codeInfo *biz
 	return nil
 }
 
-// GetCodeInfo 获取 code 信息
+// GetCodeInfo reads a code's metadata from Redis.
+// Behavior:
+// - Reads JSON blob from Redis and unmarshals into biz.CodeInfo.
+// - Returns (nil, nil) when the code is not present (expired or never set).
+// - Uses a 5s context timeout for Redis operations.
+// Parameters:
+// - ctx: context for cancellation/timeouts.
+// - code: authorization code string to look up.
+// Returns:
+// - *biz.CodeInfo: the stored metadata when present.
+// - error: non-nil on Redis/errors or JSON unmarshal failures.
 func (r *oauth2Repo) GetCodeInfo(ctx context.Context, code string) (*biz.CodeInfo, error) {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
@@ -120,7 +161,14 @@ func (r *oauth2Repo) GetCodeInfo(ctx context.Context, code string) (*biz.CodeInf
 	return codeInfo, nil
 }
 
-// EraseCodeInfo 删除 code 信息 (使 code 失效)
+// EraseCodeInfo removes a stored authorization code from Redis (makes the code invalid).
+// Behavior:
+// - Deletes the redis key associated with the code; logs and returns Redis errors.
+// Parameters:
+// - ctx: context for cancellation/timeouts.
+// - code: authorization code to remove.
+// Returns:
+// - error: non-nil on Redis errors.
 func (r *oauth2Repo) EraseCodeInfo(ctx context.Context, code string) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
@@ -136,7 +184,21 @@ func (r *oauth2Repo) EraseCodeInfo(ctx context.Context, code string) error {
 	return nil
 }
 
-// InsertJTIToUserConsents 将 jti 插入用户授权记录中
+// InsertJTIToUserConsents appends a JTI to the user's consent record and manages
+// allowed token tracking.
+// Behavior:
+//   - Reads the user_consents document for {user_id, client_id} and appends the new jti
+//     to the token_id array.
+//   - Writes the new JTI to Redis allowlist via AllowJTIs so refresh tokens can be validated quickly.
+//   - Keeps at most 5 JTIs per consent; older ids beyond the limit are removed from
+//     the document and scheduled to be removed from Redis via RemoveJTIsFormRedis.
+//
+// Parameters:
+// - ctx: context for cancellation/timeouts.
+// - userId, clientId: identifiers locating the consent record.
+// - jti: token identifier to add.
+// Returns:
+// - error: kratos NotFound when consent missing; wrapped DB/Redis errors otherwise.
 func (r *oauth2Repo) InsertJTIToUserConsents(ctx context.Context, userId string, clientId string, jti string) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
@@ -203,7 +265,19 @@ func (r *oauth2Repo) InsertJTIToUserConsents(ctx context.Context, userId string,
 	return nil
 }
 
-// RevokeUserConsent 撤销用户对某客户端的授权
+// RevokeUserConsent atomically revokes a user's consent for a client.
+// Behavior:
+//   - Atomically reads and clears the `token_id` array from the `user_consents` document
+//     using FindOneAndUpdate and returns the pre-update value.
+//   - Removes any corresponding allowed token keys from Redis (via RemoveJTIsFormRedis).
+//   - Uses short timeouts for DB/Redis operations and logs failures.
+//
+// Parameters:
+// - ctx: context for cancellation/timeouts.
+// - userId: user identifier.
+// - clientId: client identifier.
+// Returns:
+// - error: kratos.NotFound if user consent does not exist; wrapped DB/Redis errors otherwise.
 func (r *oauth2Repo) RevokeUserConsent(ctx context.Context, userId string, clientId string) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
@@ -248,7 +322,25 @@ func (r *oauth2Repo) RevokeUserConsent(ctx context.Context, userId string, clien
 	return nil
 }
 
-// GetUserProfile 获取用户信息
+// GetUserProfile returns the OAuth2 user profile visible to a client.
+// Behavior:
+//   - Validates the client and that the client-version matches the user's agreed version.
+//   - Computes the readable scopes as intersection of requested scopes and granted scopes
+//     (basic + optional), rejects requests for scopes not granted or for sensitive scopes like `password`.
+//   - Projects only the requested readable fields from the `user` collection and
+//     converts BSON values to Go types via util.ConvertBSONValueToGOType.
+//   - Also resolves storage keys into namespaced fields (clientName__key) and returns
+//     both official attributes and storage key values.
+//
+// Parameters:
+// - ctx: context for cancellation/timeouts.
+// - userId: hex string of the user's MongoDB ObjectID.
+// - clientId: client identifier.
+// - scopes: list of requested scope keys (base scope names, not prefixed).
+// - storageKeys: list of storage key names the client wants to read.
+// Returns:
+// - *biz.Oauth2UserProfile: contains OfficialAttrs (key->value) and StorageKeyValue (key->*string).
+// - error: biz.UserNotFoundError when the user is missing; kratos errors for permission problems; wrapped DB errors otherwise.
 func (r *oauth2Repo) GetUserProfile(ctx context.Context, userId string, clientId string, scopes []string, storageKeys []string) (*biz.Oauth2UserProfile, error) {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
@@ -412,7 +504,22 @@ func (r *oauth2Repo) GetUserProfile(ctx context.Context, userId string, clientId
 	}, nil
 }
 
-// SetUserProfile 增量更新用户存储键值对
+// SetUserProfile incrementally updates user's storage key/value pairs for a client.
+// Behavior:
+// - Validates userId format and checks basic limits: max keys (20) and total memory usage against oauth2InfoMemoryLimitation.
+// - Validates the client exists and that the user's consent record agreed_version matches the client version; rejects when version mismatches.
+// - If storageKeyValues contain keys not already known by the client, attempts to update the client's StorageKeys via SetClientInfoStorageKeys and re-checks client metadata; if keys remain invalid, returns an error.
+// - Writes values into the user document using namespaced field names <clientName>__<key> via a single $set update.
+// - Uses short timeouts (5s) for DB/Redis calls and logs failures.
+//
+// Parameters:
+// - ctx: context for cancellation/timeouts.
+// - userId: hex string of the user's MongoDB ObjectID.
+// - clientId: client identifier.
+// - storageKeyValues: map of storage key -> value to set (will be namespaced by client name).
+//
+// Returns:
+// - error: kratos.BadRequest for invalid input/limits; kratos.Forbidden when client version mismatches; biz.OAuth2InfoMemoryLimitationExceededError when memory limit exceeded; wrapped DB/Redis errors for persistence failures.
 func (r *oauth2Repo) SetUserProfile(ctx context.Context, userId string, clientId string, storageKeyValues map[string]string) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
@@ -546,6 +653,15 @@ func (r *oauth2Repo) SetUserProfile(ctx context.Context, userId string, clientId
 	return nil
 }
 
+// AllowJTIs writes allowed JTIs to Redis so refresh token validation can be fast.
+// Behavior:
+// - Stores each provided jti into Redis under key allowed_tokens:<jti> with TTL = refreshTokenLifeSpan.
+// - Uses a Redis pipeline for batched writes; ignores empty jti entries.
+// Parameters:
+// - ctx: context for cancellation/timeouts.
+// - jtis: slice of token identifiers to allow.
+// Returns:
+// - error: non-nil when Redis pipeline Exec fails (other than redis.Nil).
 func (r *oauth2Repo) AllowJTIs(ctx context.Context, jtis []string) error {
 	// 新的白名单实现：把允许的 jti 写入 Redis，过期时间为 refreshTokenLifeSpan
 	if len(jtis) == 0 {
@@ -572,6 +688,15 @@ func (r *oauth2Repo) AllowJTIs(ctx context.Context, jtis []string) error {
 	return nil
 }
 
+// RemoveJTIsFormRedis deletes the allowed token keys for the provided JTIs.
+// Behavior:
+// - Uses a Redis pipeline to DEL allowed_tokens:<jti> for each id, with a short context timeout.
+// - Logs failures and returns any pipeline error.
+// Parameters:
+// - ctx: context for cancellation/timeouts.
+// - jtis: slice of token IDs to remove from allowlist.
+// Returns:
+// - error: non-nil when Redis operations fail.
 func (r *oauth2Repo) RemoveJTIsFormRedis(ctx context.Context, jtis []string) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
@@ -591,6 +716,22 @@ func (r *oauth2Repo) RemoveJTIsFormRedis(ctx context.Context, jtis []string) err
 	return err
 }
 
+// CheckJTIAllowed checks whether a refresh token JTI is allowed for the user+client.
+// Behavior:
+//   - First checks Redis allowlist for allowed_tokens:<jti> (fast path).
+//   - On Redis miss, falls back to MongoDB: loads the user_consents document for {user_id, client_id}
+//     and checks whether the jti exists in token_id array. If found, attempts a non-critical
+//     write-back to Redis via AllowJTIs.
+//   - Returns (true,nil) when allowed; (false,nil) when not allowed; (false,error) on internal errors.
+//
+// Parameters:
+// - ctx: context for cancellation/timeouts.
+// - userId: user identifier.
+// - clientId: client identifier.
+// - jti: token identifier to check.
+// Returns:
+// - bool: whether the jti is allowed.
+// - error: non-nil on Redis/Mongo errors.
 func (r *oauth2Repo) CheckJTIAllowed(ctx context.Context, userId string, clientId string, jti string) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -643,6 +784,20 @@ func (r *oauth2Repo) CheckJTIAllowed(ctx context.Context, userId string, clientI
 	return false, err
 }
 
+// CheckUserPermission determines whether the user has or can be granted permission for the client.
+// Behavior:
+//   - Loads client metadata and checks existence.
+//   - Looks up user_consents for {user_id, client_id}. If not found and the client has
+//     Admin == "official" and no optional scopes, auto-creates a consent record (convenience behavior).
+//   - If client version mismatches the user's agreed version, returns a Forbidden error.
+//
+// Parameters:
+// - ctx: context for cancellation/timeouts.
+// - userId: user identifier.
+// - clientId: client identifier.
+// Returns:
+// - bool: true if permission exists/was created; false otherwise.
+// - error: biz.UserPermissionDeniedError when permission denied; kratos errors on invalid client; wrapped DB errors otherwise.
 func (r *oauth2Repo) CheckUserPermission(ctx context.Context, userId string, clientId string) (bool, error) {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
@@ -701,6 +856,16 @@ func (r *oauth2Repo) CheckUserPermission(ctx context.Context, userId string, cli
 	return true, nil
 }
 
+// SetClientInfoStorageKeys updates the client's allowed storage keys (currently a placeholder).
+// Behavior:
+// - Intended to update AppCenter / client metadata and invalidate local cache.
+// - Current implementation only deletes local Redis cache and refreshes client info from AppCenter.
+// Parameters:
+// - ctx: context for cancellation/timeouts.
+// - clientId: client identifier.
+// - storageKeys: new storage keys to set for the client.
+// Returns:
+// - error: non-nil if underlying AppCenter call fails.
 func (r *oauth2Repo) SetClientInfoStorageKeys(ctx context.Context, clientId string, storageKeys []string) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
@@ -719,6 +884,15 @@ func (r *oauth2Repo) SetClientInfoStorageKeys(ctx context.Context, clientId stri
 
 const codeInfoTTL = 5 * time.Minute
 
+// cacheCodeInfo serializes and stores CodeInfo in Redis with a TTL.
+// Behavior:
+// - Marshals codeInfo to JSON and SETs it to key oauth2_code:<code> with codeInfoTTL.
+// Parameters:
+// - ctx: context for cancellation/timeouts.
+// - code: code string key.
+// - codeInfo: metadata to store.
+// Returns:
+// - error: non-nil on JSON marshal or Redis set error.
 func (r *oauth2Repo) cacheCodeInfo(ctx context.Context, code string, codeInfo *biz.CodeInfo) error {
 	key := GetRedisKey("oauth2_code", code)
 
@@ -732,6 +906,16 @@ func (r *oauth2Repo) cacheCodeInfo(ctx context.Context, code string, codeInfo *b
 	return r.data.redis.Set(ctx, key, b, codeInfoTTL).Err()
 }
 
+// getCodeInfoFromCache reads and unmarshals CodeInfo from Redis.
+// Behavior:
+// - GETs oauth2_code:<code>, returns (nil,nil) when key not found (redis.Nil).
+// - Unmarshals JSON into biz.CodeInfo and returns it.
+// Parameters:
+// - ctx: context for cancellation/timeouts.
+// - code: code string key.
+// Returns:
+// - *biz.CodeInfo: pointer to decoded data when present.
+// - error: non-nil on Redis errors (other than Nil) or JSON unmarshal failures.
 func (r *oauth2Repo) getCodeInfoFromCache(ctx context.Context, code string) (*biz.CodeInfo, error) {
 	key := GetRedisKey("oauth2_code", code)
 

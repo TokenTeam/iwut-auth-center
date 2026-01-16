@@ -23,6 +23,18 @@ func NewAppRepo(data *Data, logger log.Logger) biz.AppRepo {
 	}
 }
 
+// GetClientInfo retrieves client information for the given clientId.
+// Behavior:
+//   - It first attempts to load the client information from Redis cache.
+//   - If the cache misses, it falls back to fetching the information from the App Center
+//     via getClientInfoFromAppCenter and then caches the result via cacheClientInfo.
+//
+// Parameters:
+// - ctx: context for cancellation and deadlines.
+// - clientId: the identifier of the client application to look up.
+// Returns:
+// - *biz.ClientInfo: the client information when found, or nil if not found.
+// - error: non-nil if an error occurred while accessing cache or App Center.
 func (r *appRepo) GetClientInfo(ctx context.Context, clientId string) (*biz.ClientInfo, error) {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
@@ -41,7 +53,7 @@ func (r *appRepo) GetClientInfo(ctx context.Context, clientId string) (*biz.Clie
 		return cachedClient, nil
 	}
 	// 缓存未命中，从 AppCenter 获取
-	clientInfo, err := r.getClientInfoFromAppCenter(clientId)
+	clientInfo, err := r.getClientInfoFromAppCenter(ctx, clientId)
 	if err != nil {
 		l.Errorf("GetClientInfo from AppCenter error: %v", err)
 		return nil, err
@@ -55,14 +67,20 @@ func (r *appRepo) GetClientInfo(ctx context.Context, clientId string) (*biz.Clie
 	if err != nil {
 		l.Errorf("cacheClientInfo error: %v", err)
 		// 缓存失败不影响正常返回
-		return clientInfo, err
 	}
 	return clientInfo, nil
 }
 
 const clientInfoTTL = 30 * time.Minute
 
-// cacheClientInfo 将结构体序列化为 JSON 并写入 Redis
+// cacheClientInfo serializes the provided ClientInfo into JSON and stores it in Redis
+// with a TTL defined by clientInfoTTL. It returns an error if serialization or
+// Redis SET fails.
+// Parameters:
+// - ctx: context for cancellation and deadlines.
+// - client: pointer to biz.ClientInfo to be cached.
+// Returns:
+// - error: non-nil when JSON marshaling or Redis operations fail.
 func (r *appRepo) cacheClientInfo(ctx context.Context, client *biz.ClientInfo) error {
 	key := GetRedisKey("client_info", client.ClientId)
 
@@ -76,7 +94,17 @@ func (r *appRepo) cacheClientInfo(ctx context.Context, client *biz.ClientInfo) e
 	return r.data.redis.Set(ctx, key, b, clientInfoTTL).Err()
 }
 
-// GetClientInfoCache 从 Redis 读取 JSON 并反序列化为结构体
+// getClientInfoFromCache attempts to read a client info JSON blob from Redis and
+// unmarshal it into a biz.ClientInfo struct.
+// Behavior:
+// - If the key is missing in Redis, it returns (nil, nil) to indicate a cache miss.
+// - If the value exists but JSON unmarshalling fails, it returns an error.
+// Parameters:
+// - ctx: context for cancellation and deadlines.
+// - clientID: the client identifier used to build the Redis key.
+// Returns:
+// - *biz.ClientInfo: the unmarshaled client info when present.
+// - error: non-nil if a Redis or unmarshalling error occurs.
 func (r *appRepo) getClientInfoFromCache(ctx context.Context, clientID string) (*biz.ClientInfo, error) {
 	key := GetRedisKey("client_info", clientID)
 
@@ -96,7 +124,16 @@ func (r *appRepo) getClientInfoFromCache(ctx context.Context, clientID string) (
 	return &client, nil
 }
 
-func (r *appRepo) getClientInfoFromAppCenter(clientId string) (*biz.ClientInfo, error) {
+// getClientInfoFromAppCenter is a placeholder function that should query the
+// external App Center service to retrieve client metadata when the cache misses.
+// Current implementation returns a stubbed example client and nil error.
+// Parameters:
+// - ctx: context for cancellation and deadlines.
+// - clientId: the identifier of the client application to fetch.
+// Returns:
+// - *biz.ClientInfo: the client info obtained from App Center or nil if not found.
+// - error: non-nil if the external call fails.
+func (r *appRepo) getClientInfoFromAppCenter(ctx context.Context, clientId string) (*biz.ClientInfo, error) {
 	// TODO: implement the logic after app center is ready
 	return &biz.ClientInfo{
 		ClientId:      clientId,

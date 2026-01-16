@@ -15,6 +15,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type authRepo struct {
@@ -35,6 +36,25 @@ func NewAuthRepo(data *Data, c *conf.Data, logger log.Logger, sha256Util *util.S
 	}
 }
 
+// CheckPasswordWithEmailAndGetUserIdAndVersion verifies the provided password for
+// the user with the given email, and returns the user's ID and version on success.
+// Behavior:
+//   - The provided plain password is hashed with the repo's sha256 util before
+//     querying the MongoDB `user` collection for a document matching {email, password}.
+//   - If no document is found, it returns biz.UserNotFoundError.
+//   - If a matching user has a deleted_at timestamp, attempt to restore the user
+//     when the deletion is within a 30-day recovery window by clearing deleted_at
+//     and updating updated_at; if restore fails return an error. If the deletion is
+//     older than 30 days, return biz.UserHasBeenDeletedError.
+//
+// Parameters:
+// - ctx: context for cancellation and timeouts.
+// - email: user email to look up.
+// - password: plain-text password to verify.
+// Returns:
+// - userId (hex string): the MongoDB object id as hex when validation succeeds.
+// - version: integer version stored on the user document.
+// - error: non-nil for validation failures, not-found, DB errors, or restore failures.
 func (r *authRepo) CheckPasswordWithEmailAndGetUserIdAndVersion(ctx context.Context, email string, password string) (string, int, error) {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
@@ -82,6 +102,27 @@ func (r *authRepo) CheckPasswordWithEmailAndGetUserIdAndVersion(ctx context.Cont
 	return result.UserId.Hex(), result.Version, nil
 }
 
+// TryInsertRegisterCaptcha attempts to record a registration captcha for an email
+// in Redis sorted set and enforces rate limiting.
+// Behavior:
+//   - Checks MongoDB user collection to ensure the email is not already registered;
+//     if registered returns biz.UserAlreadyExistsError.
+//   - Uses a Redis sorted set (key: register_captcha:<email>) where members are
+//     captcha codes and score is the Unix timestamp when inserted.
+//   - Retrieves the most recent score to enforce a minimum interval (1 minute)
+//     between captcha requests for the same email; if too frequent returns
+//     biz.AskingCaptchaTooFrequentlyError.
+//   - Adds the new captcha as a member with current timestamp score, trims old
+//     entries older than ttl via ZRemRangeByScore, and sets the key's TTL.
+//
+// Parameters:
+// - ctx: context for cancellation.
+// - email: email the captcha is for.
+// - captcha: the captcha code to store as the member string.
+// - ttl: time-to-live for captcha entries (used for trimming and key expiry).
+// Returns:
+//   - error: non-nil if DB or Redis operations fail or rate limit / existence rules
+//     are violated.
 func (r *authRepo) TryInsertRegisterCaptcha(ctx context.Context, email string, captcha string, ttl time.Duration) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -123,7 +164,7 @@ func (r *authRepo) TryInsertRegisterCaptcha(ctx context.Context, email string, c
 		Member: captcha,
 	}).Err(); err != nil {
 		l.Errorf("ZAdd error: %v", err)
-		return fmt.Errorf("failed to zadd captcha: %w", err)
+		return fmt.Errorf("failed to add captcha: %w", err)
 	}
 
 	// 清理早于有效期的旧条目（假设 expireAt 是该 captcha 类型的最终有效截止）
@@ -139,6 +180,21 @@ func (r *authRepo) TryInsertRegisterCaptcha(ctx context.Context, email string, c
 	return nil
 }
 
+// CheckCaptchaUsable verifies whether the provided captcha code for an email is
+// currently usable (exists and within TTL).
+// Behavior:
+//   - Trims old entries older than ttl from the Redis sorted set to keep the set clean.
+//   - Uses ZRank to check presence of the code; if Redis returns Nil it indicates
+//     the code is not present and biz.CaptchaNotUsableError is returned.
+//   - Other Redis errors are wrapped and returned.
+//
+// Parameters:
+// - ctx: context for cancellation.
+// - email: the email the captcha was issued for.
+// - code: the captcha code to validate.
+// - ttl: time-to-live used to determine which entries should be trimmed prior to check.
+// Returns:
+// - error: non-nil when captcha is not usable or on Redis errors.
 func (r *authRepo) CheckCaptchaUsable(ctx context.Context, email string, code string, ttl time.Duration) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -163,33 +219,63 @@ func (r *authRepo) CheckCaptchaUsable(ctx context.Context, email string, code st
 	return nil
 }
 
+// RegisterUser creates a new user document in MongoDB with the given email and
+// hashed password. It returns the inserted document ID as a string on success.
+// Behavior:
+//   - Hashes the provided password using the repo's sha256 util before storing.
+//   - Checks for existing users with the same email and returns
+//     biz.UserAlreadyExistsError if present.
+//   - Inserts a new document with created_at, updated_at and Version = 0.
+//   - Converts the MongoDB InsertedID into a string (hex when ObjectID).
+//
+// Notes and edge cases:
+//   - Concurrent registrations for the same email may still result in duplicates
+//     if no unique index is enforced at the DB level; the application should ensure
+//     a unique index on `email` to prevent races.
+//
+// Parameters:
+// - ctx: context for cancellation.
+// - email: user email to register.
+// - password: plain-text password to hash and store.
+// Returns:
+// - id string: inserted document id formatted as a string.
+// - error: non-nil on validation, DB errors, or other failures.
 func (r *authRepo) RegisterUser(ctx context.Context, email string, password string) (string, error) {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 	password = r.sha256Util.HashPassword(password)
 	filter := bson.M{"email": email}
+	update := bson.M{
+		"$setOnInsert": bson.M{
+			"email":      email,
+			"password":   password,
+			"created_at": time.Now(),
+			"updated_at": time.Now(),
+			"Version":    0,
+		},
+	}
+	opt := options.Update().SetUpsert(true)
+	res, err := r.userCollection.UpdateOne(ctx, filter, update, opt)
+	if err != nil {
+		// 仍然可能因并发插入产生 duplicate-key（极端 race），需要检查 err 的 11000
+		var we mongo.WriteException
+		if errors.As(err, &we) {
+			for _, e := range we.WriteErrors {
+				if e.Code == 11000 {
+					return "", biz.UserAlreadyExistsError
+				}
+			}
+		}
+		l.Errorf("failed to upsert user: %v", err)
+		return "", fmt.Errorf("failed to upsert user: %w", err)
+	}
 
-	count, err := r.userCollection.CountDocuments(ctx, filter)
-	if err != nil {
-		l.Errorf("CountDocuments error: %v", err)
-		return "", fmt.Errorf("failed to count documents: %w", err)
-	}
-	if count > 0 {
+	// UpsertedID == nil：表示已经存在并被匹配（没有插入新文档）
+	if res.UpsertedID == nil {
 		return "", biz.UserAlreadyExistsError
-	}
-	result, err := r.userCollection.InsertOne(ctx, bson.M{
-		"email":      email,
-		"password":   password,
-		"created_at": time.Now(),
-		"updated_at": time.Now(),
-		"Version":    0,
-	})
-	if err != nil {
-		l.Errorf("InsertOne error: %v", err)
-		return "", fmt.Errorf("failed to insert user: %w", err)
 	}
 
 	var idStr string
-	switch id := result.InsertedID.(type) {
+	switch id := res.UpsertedID.(type) {
 	case primitive.ObjectID:
 		idStr = id.Hex()
 	case string:
@@ -200,6 +286,19 @@ func (r *authRepo) RegisterUser(ctx context.Context, email string, password stri
 	return idStr, nil
 }
 
+// AddOrUpdateUserVersion stores the user's version in Redis with a TTL.
+// Behavior:
+//   - Writes the provided integer `version` into Redis key user_version:<userId>
+//     with the provided TTL to keep a cached version that can be used for
+//     optimistic concurrency checks elsewhere in the application.
+//
+// Parameters:
+// - ctx: context for cancellation.
+// - userId: user identifier used to build the redis key.
+// - version: integer version to cache.
+// - ttl: TTL to set for the redis key.
+// Returns:
+// - error: non-nil if the Redis SET operation fails.
 func (r *authRepo) AddOrUpdateUserVersion(ctx context.Context, userId string, version int, ttl time.Duration) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 	key := GetRedisKey("user_version", userId)
@@ -211,7 +310,34 @@ func (r *authRepo) AddOrUpdateUserVersion(ctx context.Context, userId string, ve
 	return nil
 }
 
-// GetUserVersion ttl 的作用是 当缓存不存在时 使用ttl修复缓存
+// GetUserVersion returns the cached version for a user. If the Redis cache is
+// missing (redis.Nil), it queries MongoDB for the user's version, repopulates
+// the cache with the provided ttl, and returns that value.
+// Behavior:
+// - Attempts to GET user_version:<userId> from Redis.
+// - If the key is missing (redis.Nil):
+//   - Query the MongoDB `user` collection for the document with _id == userId.
+//   - If the user is not found, return biz.UserNotFoundError and a sentinel int.
+//   - If the user has a deleted_at timestamp, return biz.UserHasBeenDeletedError.
+//   - Otherwise, update the Redis cache with the found version using AddOrUpdateUserVersion.
+//
+// - If Redis returns another error, wrap and return it.
+// - Converts the cached string value to int and returns it.
+// Edge cases & notes:
+//   - The function returns (1<<31 - 1) as the int value in combination with a
+//     not-found or deleted error to provide a distinguishable sentinel; callers
+//     should check the error first.
+//   - The MongoDB query expects the `_id` to match `userId` as stored; if your
+//     application stores ObjectIDs, you must ensure consistent typing or adapt
+//     the lookup accordingly.
+//
+// Parameters:
+// - ctx: context for cancellation.
+// - userId: identifier of the user to look up.
+// - ttl: ttl to use when repopulating the redis cache on a cache miss.
+// Returns:
+// - int: the cached or DB-derived version on success.
+// - error: non-nil on redis/mongo errors or when user is not found / deleted.
 func (r *authRepo) GetUserVersion(ctx context.Context, userId string, ttl time.Duration) (int, error) {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 	key := GetRedisKey("user_version", userId)
@@ -244,12 +370,12 @@ func (r *authRepo) GetUserVersion(ctx context.Context, userId string, ttl time.D
 		return result.Version, nil
 	} else if err != nil {
 		l.Errorf("Get user Version error: %v", err)
-		return 0, fmt.Errorf("failed to get user Version: %w", err)
+		return 1<<31 - 1, fmt.Errorf("failed to get user Version: %w", err)
 	}
 	version, err := strconv.Atoi(val)
 	if err != nil {
-		l.Errorf("Atoi user Version error: %v", err)
-		return 0, fmt.Errorf("failed to parse user Version: %w", err)
+		l.Errorf("parse user Version error: %v", err)
+		return 1<<31 - 1, fmt.Errorf("failed to parse user Version: %w", err)
 	}
 	return version, nil
 }

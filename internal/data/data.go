@@ -11,6 +11,7 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-redis/redis/v8"
 	"github.com/google/wire"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"gorm.io/driver/mysql"
@@ -31,10 +32,15 @@ type Data struct {
 }
 
 // NewData .
-func NewData(c *conf.Data) (*Data, func(), error) {
+func NewData(c *conf.Data, logger log.Logger) (*Data, func(), error) {
 	mongoClient, err := initMongo(c)
 	if err != nil {
 		return nil, nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := ensureUserEmailUniqueIndex(ctx, mongoClient.Database(c.GetMongodb().GetDatabase()).Collection("user")); err != nil {
+		(log.NewHelper(logger)).Warnf("ensure email unique index failed: %v", err)
 	}
 	redisClient, err := initRedis(c)
 	if err != nil {
@@ -138,6 +144,22 @@ func initMongo(c *conf.Data) (*mongo.Client, error) {
 		return nil, err
 	}
 	return client, nil
+}
+
+func ensureUserEmailUniqueIndex(ctx context.Context, col *mongo.Collection) error {
+	// Create an ascending index on `email` and mark it unique.
+	// create indexes as part of a controlled migration step if needed.
+	idxOpts := options.Index()
+	idxOpts.SetUnique(true)
+	// optional: give the index a stable name
+	idxOpts.SetName("idx_user_email_unique")
+
+	idx := mongo.IndexModel{
+		Keys:    bson.D{{Key: "email", Value: 1}},
+		Options: idxOpts,
+	}
+	_, err := col.Indexes().CreateOne(ctx, idx)
+	return err
 }
 
 func initRedis(c *conf.Data) (*redis.Client, error) {
