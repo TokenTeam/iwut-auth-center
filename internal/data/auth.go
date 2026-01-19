@@ -180,7 +180,84 @@ func (r *authRepo) TryInsertRegisterCaptcha(ctx context.Context, email string, c
 	return nil
 }
 
-// CheckCaptchaUsable verifies whether the provided captcha code for an email is
+// TryInsertResetPasswordCaptcha attempts to record a password reset captcha for an email
+// in Redis sorted set and enforces rate limiting.
+// Behavior:
+//   - Checks MongoDB user collection to ensure the email exists; if not, returns biz.UserNotFoundError.
+//   - Uses a Redis sorted set (key: reset_password_captcha:<email>) where members are
+//     captcha codes and score is the Unix timestamp when inserted.
+//   - Retrieves the most recent score to enforce a minimum interval (1 minute)
+//     between captcha requests for the same email; if too frequent returns
+//     biz.AskingCaptchaTooFrequentlyError.
+//   - Adds the new captcha as a member with current timestamp score, trims old
+//     entries older than ttl via ZRemRangeByScore, and sets the key's TTL.
+//
+// Parameters:
+// - ctx: context for cancellation.
+// - email: email the captcha is for.
+// - captcha: the captcha code to store as the member string.
+// - ttl: time-to-live for captcha entries (used for trimming and key expiry).
+// Returns:
+//   - error: non-nil if Redis operations fail or rate limit / existence rules are violated.
+func (r *authRepo) TryInsertResetPasswordCaptcha(ctx context.Context, email string, captcha string, ttl time.Duration) error {
+	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	l.Debugf("TryInsertResetPasswordCaptcha called with email: %s", email)
+
+	// 首先检查 MongoDB 中是否存在该 email 对应的账号
+	collection := r.userCollection
+	filter := bson.M{"email": email}
+
+	count, err := collection.CountDocuments(ctx, filter)
+	if err != nil {
+		l.Errorf("CountDocuments error: %v", err)
+		return fmt.Errorf("failed to count documents: %w", err)
+	}
+	if count == 0 {
+		return biz.UserNotFoundError
+	}
+
+	key := GetRedisKey("reset_password_captcha", email)
+	now := time.Now().Unix()
+
+	// 取最近一条记录做限流
+	zs, err := r.data.redis.ZRevRangeWithScores(ctx, key, 0, 0).Result()
+	if err != nil && !errors.Is(err, redis.Nil) {
+		l.Errorf("ZRevrangeWithScores error: %v", err)
+		return fmt.Errorf("redis zrevrange error: %w", err)
+	}
+	if len(zs) > 0 {
+		lastTs := int64(zs[0].Score)
+		if time.Unix(now, 0).Sub(time.Unix(lastTs, 0)) < time.Minute {
+			return biz.AskingCaptchaTooFrequentlyError
+		}
+	}
+
+	// 插入新 captcha（score = now）
+	if err := r.data.redis.ZAdd(ctx, key, &redis.Z{
+		Score:  float64(now),
+		Member: captcha,
+	}).Err(); err != nil {
+		l.Errorf("ZAdd error: %v", err)
+		return fmt.Errorf("failed to add captcha: %w", err)
+	}
+
+	// 清理早于有效期的旧条目（假设 expireAt 是该 captcha 类型的最终有效截止）
+	cutoff := strconv.FormatInt(time.Now().Add(-ttl).Unix(), 10)
+	if err := r.data.redis.ZRemRangeByScore(ctx, key, "-inf", cutoff).Err(); err != nil {
+		// 记录但不阻塞正常流程
+		l.Errorf("ZRemRangeByScore error: %v", err)
+	}
+
+	if err := r.data.redis.Expire(ctx, key, ttl).Err(); err != nil {
+		l.Errorf("Expire error: %v", err)
+	}
+	return nil
+}
+
+// CheckRegisterCaptchaUsable verifies whether the provided captcha code for an email is
 // currently usable (exists and within TTL).
 // Behavior:
 //   - Trims old entries older than ttl from the Redis sorted set to keep the set clean.
@@ -195,12 +272,51 @@ func (r *authRepo) TryInsertRegisterCaptcha(ctx context.Context, email string, c
 // - ttl: time-to-live used to determine which entries should be trimmed prior to check.
 // Returns:
 // - error: non-nil when captcha is not usable or on Redis errors.
-func (r *authRepo) CheckCaptchaUsable(ctx context.Context, email string, code string, ttl time.Duration) error {
+func (r *authRepo) CheckRegisterCaptchaUsable(ctx context.Context, email string, code string, ttl time.Duration) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	key := GetRedisKey("register_captcha", email)
+
+	// 清理早于有效期的旧条目（假设 expireAt 是该 captcha 类型的最终有效截止）
+	cutoff := strconv.FormatInt(time.Now().Add(-ttl).Unix(), 10)
+	if err := r.data.redis.ZRemRangeByScore(ctx, key, "-inf", cutoff).Err(); err != nil {
+		// 记录但不阻塞正常流程
+		l.Errorf("ZRemRangeByScore error: %v", err)
+	}
+
+	_, err := r.data.redis.ZRank(ctx, key, code).Result()
+	if errors.Is(err, redis.Nil) {
+		return biz.CaptchaNotUsableError
+	} else if err != nil {
+		l.Errorf("ZRank error: %v", err)
+		return fmt.Errorf("redis zrank error: %w", err)
+	}
+	return nil
+}
+
+// CheckResetPasswordCaptchaUsable verifies whether the provided reset password captcha code
+// for an email is currently usable (exists and within TTL).
+// Behavior:
+//   - Trims old entries older than ttl from the Redis sorted set to keep the set clean.
+//   - Uses ZRank to check presence of the code; if Redis returns Nil it indicates
+//     the code is not present and biz.CaptchaNotUsableError is returned.
+//   - Other Redis errors are wrapped and returned.
+//
+// Parameters:
+// - ctx: context for cancellation.
+// - email: the email the captcha was issued for.
+// - code: the captcha code to validate.
+// - ttl: time-to-live used to determine which entries should be trimmed prior to check.
+// Returns:
+// - error: non-nil when captcha is not usable or on Redis errors.
+func (r *authRepo) CheckResetPasswordCaptchaUsable(ctx context.Context, email string, code string, ttl time.Duration) error {
+	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	key := GetRedisKey("reset_password_captcha", email)
 
 	// 清理早于有效期的旧条目（假设 expireAt 是该 captcha 类型的最终有效截止）
 	cutoff := strconv.FormatInt(time.Now().Add(-ttl).Unix(), 10)
@@ -284,6 +400,27 @@ func (r *authRepo) RegisterUser(ctx context.Context, email string, password stri
 		idStr = fmt.Sprintf("%v", id)
 	}
 	return idStr, nil
+}
+
+func (r *authRepo) ResetPassword(ctx context.Context, email string, newPassword string) error {
+	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
+	newPassword = r.sha256Util.HashPassword(newPassword)
+	filter := bson.M{"email": email}
+	update := bson.M{
+		"$set": bson.M{
+			"password":   newPassword,
+			"updated_at": time.Now(),
+		},
+	}
+	res, err := r.userCollection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		l.Errorf("failed to update user password: %v", err)
+		return fmt.Errorf("failed to update user password: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		return biz.UserNotFoundError
+	}
+	return nil
 }
 
 // AddOrUpdateUserVersion stores the user's version in Redis with a TTL.

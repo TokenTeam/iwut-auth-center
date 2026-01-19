@@ -23,6 +23,23 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/auth_center.v1.auth.GetVerifyCodeReply'
+    /auth/get-reset-url-mail:
+        get:
+            tags:
+                - Auth
+            operationId: Auth_GetResetUrlMail
+            parameters:
+                - name: email
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/auth_center.v1.auth.GetResetUrlReply'
     /auth/login:
         post:
             tags:
@@ -77,6 +94,24 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/auth_center.v1.auth.RegisterReply'
+    /auth/reset-password:
+        post:
+            tags:
+                - Auth
+            operationId: Auth_ResetPassword
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/auth_center.v1.auth.ResetPasswordRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/auth_center.v1.auth.ResetPasswordReply'
     /oauth2/authorize:
         get:
             tags:
@@ -286,6 +321,16 @@ paths:
                                 $ref: '#/components/schemas/auth_center.v1.user.UpdateProfileReply'
 components:
     schemas:
+        auth_center.v1.auth.GetResetUrlReply:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                traceId:
+                    type: string
         auth_center.v1.auth.GetVerifyCodeReply:
             type: object
             properties:
@@ -364,6 +409,25 @@ components:
                 userId:
                     type: string
         auth_center.v1.auth.RegisterRequest:
+            type: object
+            properties:
+                email:
+                    type: string
+                verifyCode:
+                    type: string
+                password:
+                    type: string
+        auth_center.v1.auth.ResetPasswordReply:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                traceId:
+                    type: string
+        auth_center.v1.auth.ResetPasswordRequest:
             type: object
             properties:
                 email:

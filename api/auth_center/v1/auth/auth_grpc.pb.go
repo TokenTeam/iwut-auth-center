@@ -21,7 +21,9 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	Auth_PasswordLogin_FullMethodName   = "/auth_center.v1.auth.Auth/passwordLogin"
 	Auth_GetRegisterMail_FullMethodName = "/auth_center.v1.auth.Auth/getRegisterMail"
+	Auth_GetResetUrlMail_FullMethodName = "/auth_center.v1.auth.Auth/getResetUrlMail"
 	Auth_Register_FullMethodName        = "/auth_center.v1.auth.Auth/register"
+	Auth_ResetPassword_FullMethodName   = "/auth_center.v1.auth.Auth/resetPassword"
 	Auth_RefreshToken_FullMethodName    = "/auth_center.v1.auth.Auth/refreshToken"
 )
 
@@ -31,7 +33,9 @@ const (
 type AuthClient interface {
 	PasswordLogin(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginReply, error)
 	GetRegisterMail(ctx context.Context, in *GetVerifyCodeRequest, opts ...grpc.CallOption) (*GetVerifyCodeReply, error)
+	GetResetUrlMail(ctx context.Context, in *GetResetUrlRequest, opts ...grpc.CallOption) (*GetResetUrlReply, error)
 	Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterReply, error)
+	ResetPassword(ctx context.Context, in *ResetPasswordRequest, opts ...grpc.CallOption) (*ResetPasswordReply, error)
 	RefreshToken(ctx context.Context, in *RefreshTokenRequest, opts ...grpc.CallOption) (*RefreshTokenReply, error)
 }
 
@@ -63,10 +67,30 @@ func (c *authClient) GetRegisterMail(ctx context.Context, in *GetVerifyCodeReque
 	return out, nil
 }
 
+func (c *authClient) GetResetUrlMail(ctx context.Context, in *GetResetUrlRequest, opts ...grpc.CallOption) (*GetResetUrlReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetResetUrlReply)
+	err := c.cc.Invoke(ctx, Auth_GetResetUrlMail_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *authClient) Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RegisterReply)
 	err := c.cc.Invoke(ctx, Auth_Register_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authClient) ResetPassword(ctx context.Context, in *ResetPasswordRequest, opts ...grpc.CallOption) (*ResetPasswordReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResetPasswordReply)
+	err := c.cc.Invoke(ctx, Auth_ResetPassword_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +113,9 @@ func (c *authClient) RefreshToken(ctx context.Context, in *RefreshTokenRequest, 
 type AuthServer interface {
 	PasswordLogin(context.Context, *LoginRequest) (*LoginReply, error)
 	GetRegisterMail(context.Context, *GetVerifyCodeRequest) (*GetVerifyCodeReply, error)
+	GetResetUrlMail(context.Context, *GetResetUrlRequest) (*GetResetUrlReply, error)
 	Register(context.Context, *RegisterRequest) (*RegisterReply, error)
+	ResetPassword(context.Context, *ResetPasswordRequest) (*ResetPasswordReply, error)
 	RefreshToken(context.Context, *RefreshTokenRequest) (*RefreshTokenReply, error)
 	mustEmbedUnimplementedAuthServer()
 }
@@ -107,8 +133,14 @@ func (UnimplementedAuthServer) PasswordLogin(context.Context, *LoginRequest) (*L
 func (UnimplementedAuthServer) GetRegisterMail(context.Context, *GetVerifyCodeRequest) (*GetVerifyCodeReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetRegisterMail not implemented")
 }
+func (UnimplementedAuthServer) GetResetUrlMail(context.Context, *GetResetUrlRequest) (*GetResetUrlReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetResetUrlMail not implemented")
+}
 func (UnimplementedAuthServer) Register(context.Context, *RegisterRequest) (*RegisterReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method Register not implemented")
+}
+func (UnimplementedAuthServer) ResetPassword(context.Context, *ResetPasswordRequest) (*ResetPasswordReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResetPassword not implemented")
 }
 func (UnimplementedAuthServer) RefreshToken(context.Context, *RefreshTokenRequest) (*RefreshTokenReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method RefreshToken not implemented")
@@ -170,6 +202,24 @@ func _Auth_GetRegisterMail_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Auth_GetResetUrlMail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetResetUrlRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServer).GetResetUrlMail(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Auth_GetResetUrlMail_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServer).GetResetUrlMail(ctx, req.(*GetResetUrlRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Auth_Register_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RegisterRequest)
 	if err := dec(in); err != nil {
@@ -184,6 +234,24 @@ func _Auth_Register_Handler(srv interface{}, ctx context.Context, dec func(inter
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AuthServer).Register(ctx, req.(*RegisterRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Auth_ResetPassword_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetPasswordRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServer).ResetPassword(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Auth_ResetPassword_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServer).ResetPassword(ctx, req.(*ResetPasswordRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -222,8 +290,16 @@ var Auth_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Auth_GetRegisterMail_Handler,
 		},
 		{
+			MethodName: "getResetUrlMail",
+			Handler:    _Auth_GetResetUrlMail_Handler,
+		},
+		{
 			MethodName: "register",
 			Handler:    _Auth_Register_Handler,
+		},
+		{
+			MethodName: "resetPassword",
+			Handler:    _Auth_ResetPassword_Handler,
 		},
 		{
 			MethodName: "refreshToken",

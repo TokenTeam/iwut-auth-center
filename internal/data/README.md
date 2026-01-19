@@ -47,6 +47,12 @@ Auth（auth.go）
   - 在 Redis 的有序集合（register_captcha:<email>）中写入验证码并做限流（最近一条间隔至少 1 分钟）；若 email 已注册返回 biz.UserAlreadyExistsError。
 - CheckCaptchaUsable(ctx, email, code, ttl)
   - 清理过期条目并通过 ZRank 检查验证码是否存在，redis.Nil 映射为 biz.CaptchaNotUsableError。
+- TryInsertResetPasswordCaptcha(ctx, email, captcha, ttl)
+  - 为重置密码生成/存储验证码并做限流：先在 MongoDB 的 `user` 集合中检查 `email` 是否存在，若不存在返回 biz.UserNotFoundError；再在 Redis 有序集合（reset_password_captcha:<email>）中写入验证码并限制最短请求间隔为 1 分钟（间隔过短返回 biz.AskingCaptchaTooFrequentlyError）；插入后会清理过期条目并设置键的 TTL。
+- CheckResetPasswordCaptchaUsable(ctx, email, code, ttl)
+  - 与注册验证码的检查类似：先清理过期条目，然后通过 ZRank 检查 code 是否存在；不存在返回 biz.CaptchaNotUsableError，其他 Redis 错误上抛。
+- ResetPassword(ctx, email, newPassword)
+  - 对新密码做 sha256 哈希并在 MongoDB 中按 `email` 更新用户的 `password` 字段与 `updated_at`；若没有匹配的用户返回 biz.UserNotFoundError。
 - RegisterUser(ctx, email, password)
   - Hash 密码后通过 Upsert 插入用户（$setOnInsert），若已存在返回 biz.UserAlreadyExistsError；返回插入的 id。</n
 - AddOrUpdateUserVersion / GetUserVersion

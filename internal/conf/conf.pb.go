@@ -96,6 +96,7 @@ type Server struct {
 	Grpc          *Server_GRPC           `protobuf:"bytes,2,opt,name=grpc,proto3" json:"grpc,omitempty"`
 	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
 	Version       string                 `protobuf:"bytes,4,opt,name=version,proto3" json:"version,omitempty"`
+	FrontendUrl   string                 `protobuf:"bytes,5,opt,name=frontend_url,json=frontendUrl,proto3" json:"frontend_url,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -154,6 +155,13 @@ func (x *Server) GetName() string {
 func (x *Server) GetVersion() string {
 	if x != nil {
 		return x.Version
+	}
+	return ""
+}
+
+func (x *Server) GetFrontendUrl() string {
+	if x != nil {
+		return x.FrontendUrl
 	}
 	return ""
 }
@@ -868,12 +876,13 @@ const file_conf_conf_proto_rawDesc = "" +
 	"\x06server\x18\x01 \x01(\v2\x12.kratos.api.ServerR\x06server\x12$\n" +
 	"\x04data\x18\x02 \x01(\v2\x10.kratos.api.DataR\x04data\x12!\n" +
 	"\x03jwt\x18\x03 \x01(\v2\x0f.kratos.api.JwtR\x03jwt\x12$\n" +
-	"\x04mail\x18\x04 \x01(\v2\x10.kratos.api.MailR\x04mail\"\xe6\x02\n" +
+	"\x04mail\x18\x04 \x01(\v2\x10.kratos.api.MailR\x04mail\"\x89\x03\n" +
 	"\x06Server\x12+\n" +
 	"\x04http\x18\x01 \x01(\v2\x17.kratos.api.Server.HTTPR\x04http\x12+\n" +
 	"\x04grpc\x18\x02 \x01(\v2\x17.kratos.api.Server.GRPCR\x04grpc\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x18\n" +
-	"\aversion\x18\x04 \x01(\tR\aversion\x1ai\n" +
+	"\aversion\x18\x04 \x01(\tR\aversion\x12!\n" +
+	"\ffrontend_url\x18\x05 \x01(\tR\vfrontendUrl\x1ai\n" +
 	"\x04HTTP\x12\x18\n" +
 	"\anetwork\x18\x01 \x01(\tR\anetwork\x12\x12\n" +
 	"\x04addr\x18\x02 \x01(\tR\x04addr\x123\n" +

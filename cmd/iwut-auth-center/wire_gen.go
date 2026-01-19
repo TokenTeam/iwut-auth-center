@@ -42,7 +42,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, jwt *conf.Jwt, confMa
 	}
 	auditUsecase := biz.NewAuditUsecase(auditRepo)
 	jwtUtil := util.NewJwtUtil(jwt)
-	authService := service.NewAuthService(authUsecase, usecase, auditUsecase, jwtUtil, jwt)
+	authService := service.NewAuthService(authUsecase, usecase, auditUsecase, jwtUtil, jwt, confServer)
 	appRepo := data.NewAppRepo(dataData, logger)
 	appUsecase := biz.NewAppUsecase(appRepo)
 	userRepo := data.NewUserRepo(dataData, confData, logger, appUsecase, sha256Util)

@@ -21,9 +21,22 @@ service Auth {
     };
   }
 
+  rpc getResetUrlMail (GetResetUrlRequest) returns (GetResetUrlReply) {
+    option (google.api.http) = {
+      get: "/auth/get-reset-url-mail"
+    };
+  }
+
   rpc register (RegisterRequest) returns (RegisterReply) {
     option (google.api.http) = {
       post: "/auth/register"
+      body: "*"
+    };
+  }
+
+  rpc resetPassword (ResetPasswordRequest) returns (ResetPasswordReply) {
+    option (google.api.http) = {
+      post: "/auth/reset-password"
       body: "*"
     };
   }
@@ -62,6 +75,16 @@ message GetVerifyCodeReply {
   string traceId = 3;
 }
 
+message GetResetUrlRequest {
+  string email = 1;
+}
+
+message GetResetUrlReply {
+  int32 code = 1;
+  string message = 2;
+  string traceId = 3;
+}
+
 message RegisterRequest {
   string email = 1;
   string verifyCode = 2;
@@ -75,6 +98,18 @@ message RegisterReply {
   int32 code = 1;
   string message = 2;
   optional RegisterReplyData data = 3;
+  string traceId = 4;
+}
+
+message ResetPasswordRequest {
+  string email = 1;
+  string verifyCode = 2;
+  string password = 3;
+}
+
+message ResetPasswordReply {
+  int32 code = 1;
+  string message = 2;
   string traceId = 4;
 }
 

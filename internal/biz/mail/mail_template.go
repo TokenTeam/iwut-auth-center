@@ -1,7 +1,7 @@
 package mail
 
 var (
-	verifyCodeTemplate string = `<body>
+	mailTemplate string = `<body>
     <table width="100%" border="0" cellspacing="0" cellpadding="0">
         <tbody>
             <tr>
@@ -43,7 +43,7 @@ var (
                                             <tr>
                                                 <td class="text-18 c-grey4 pb-30"
                                                     style="font-size:18px; line-height:25px; font-family:Arial, sans-serif, 'Motiva Sans'; text-align:left; color:#002333; padding-bottom: 30px;">
-                                                    您正在进行验证操作，这是您验证帐户所需的 Uni 令牌验证码，有效时间为 {{ExpireTime}} 分钟。
+                                                    {{Info}}，有效时间为 {{ExpireTime}} 分钟。
                                                 </td>
                                             </tr>
                                         </tbody>
@@ -63,7 +63,7 @@ var (
                                                                         <tbody>
                                                                             <tr>
                                                                                 <td style="font-size:18px; line-height:25px; font-family:Arial, sans-serif, 'Motiva Sans'; color:#8f98a0; text-align:center;">
-                                                                                    验证码
+                                                                                    {{Title}}
                                                                                 </td>
                                                                             </tr>
                                                                             <tr>
@@ -103,8 +103,8 @@ var (
                                                 <td class="text-18 c-grey4 pb-30"
                                                     style="font-size:18px; line-height:25px; font-family:Arial, sans-serif, 'Motiva Sans'; text-align:left; color:#002333; padding-bottom: 30px;">
                                                     
-                                                    如果这不是来自您的验证请求，请您忽略本邮件并<span style="color: #002333; font-weight: bold;">不要将验证码转发给任何人</span>。<br><br>
-                                                    此电子邮件包含一个代码，您需要用它验证您的帐户。切勿与任何人分享此代码。
+                                                    如果这不是来自您的验证请求，请您忽略本邮件并<span style="color: #002333; font-weight: bold;">不要将{{Title}}转发给任何人</span>。<br><br>
+                                                    此电子邮件包含一个{{Title}}，您需要用它验证您的帐户。切勿与任何人分享此{{Title}}。
                                                 </td>
                                             </tr>
                                         </tbody>

@@ -7,6 +7,7 @@ import (
 	"iwut-auth-center/internal/conf"
 	"iwut-auth-center/internal/util"
 	"net/smtp"
+	"strconv"
 	"strings"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -35,10 +36,27 @@ func (m *Usecase) SendVerifyCodeMail(ctx context.Context, expireTime int32, capt
 		m.logger.Errorf("trying to send a mail without recipients. reqId: %s", reqId)
 		return fmt.Errorf("no recipients")
 	}
-	body := verifyCodeTemplate
-	body = strings.ReplaceAll(body, "{{ExpireTime}}", string(expireTime))
+	body := mailTemplate
+	body = strings.ReplaceAll(body, "{{ExpireTime}}", strconv.FormatInt(int64(expireTime), 10))
+	body = strings.ReplaceAll(body, "{{Info}}", "您正在进行验证操作，这是您验证帐户所需的令牌验证码")
+	body = strings.ReplaceAll(body, "{{Title}}", "验证码")
 	body = strings.ReplaceAll(body, "{{Captcha}}", captcha)
 	subject := "掌上吾理--用户验证 " + captcha
+	return m.SendEmail(ctx, subject, to, body)
+}
+
+func (m *Usecase) SendResetPasswordMail(ctx context.Context, expireTime int32, url string, to []string) error {
+	if len(to) == 0 {
+		reqId := util.RequestIDFrom(ctx)
+		m.logger.Errorf("trying to send a mail without recipients. reqId: %s", reqId)
+		return fmt.Errorf("no recipients")
+	}
+	body := mailTemplate
+	body = strings.ReplaceAll(body, "{{ExpireTime}}", strconv.FormatInt(int64(expireTime), 10))
+	body = strings.ReplaceAll(body, "{{Info}}", "您正在重置密码，这是您重置密码所需的重置链接")
+	body = strings.ReplaceAll(body, "{{Title}}", "链接")
+	body = strings.ReplaceAll(body, "{{Captcha}}", "<a href=\""+url+"\">点击跳转</a>")
+	subject := "掌上吾理--密码重置链接"
 	return m.SendEmail(ctx, subject, to, body)
 }
 
@@ -97,7 +115,7 @@ func (l LoginAuth) Next(fromServer []byte, more bool) (toServer []byte, err erro
 		case "Password:":
 			return []byte(l.password), nil
 		default:
-			return nil, errors.New("Unkown fromServer")
+			return nil, errors.New("unknown fromServer")
 		}
 	}
 	return nil, nil

@@ -20,22 +20,28 @@ var _ = binding.EncodeURL
 const _ = http.SupportPackageIsVersion1
 
 const OperationAuthgetRegisterMail = "/auth_center.v1.auth.Auth/getRegisterMail"
+const OperationAuthgetResetUrlMail = "/auth_center.v1.auth.Auth/getResetUrlMail"
 const OperationAuthpasswordLogin = "/auth_center.v1.auth.Auth/passwordLogin"
 const OperationAuthrefreshToken = "/auth_center.v1.auth.Auth/refreshToken"
 const OperationAuthregister = "/auth_center.v1.auth.Auth/register"
+const OperationAuthresetPassword = "/auth_center.v1.auth.Auth/resetPassword"
 
 type AuthHTTPServer interface {
 	GetRegisterMail(context.Context, *GetVerifyCodeRequest) (*GetVerifyCodeReply, error)
+	GetResetUrlMail(context.Context, *GetResetUrlRequest) (*GetResetUrlReply, error)
 	PasswordLogin(context.Context, *LoginRequest) (*LoginReply, error)
 	RefreshToken(context.Context, *RefreshTokenRequest) (*RefreshTokenReply, error)
 	Register(context.Context, *RegisterRequest) (*RegisterReply, error)
+	ResetPassword(context.Context, *ResetPasswordRequest) (*ResetPasswordReply, error)
 }
 
 func RegisterAuthHTTPServer(s *http.Server, srv AuthHTTPServer) {
 	r := s.Route("/")
 	r.POST("/auth/login", _Auth_PasswordLogin0_HTTP_Handler(srv))
 	r.GET("/auth/get-register-mail", _Auth_GetRegisterMail0_HTTP_Handler(srv))
+	r.GET("/auth/get-reset-url-mail", _Auth_GetResetUrlMail0_HTTP_Handler(srv))
 	r.POST("/auth/register", _Auth_Register0_HTTP_Handler(srv))
+	r.POST("/auth/reset-password", _Auth_ResetPassword0_HTTP_Handler(srv))
 	r.POST("/auth/refresh-token", _Auth_RefreshToken0_HTTP_Handler(srv))
 }
 
@@ -80,6 +86,25 @@ func _Auth_GetRegisterMail0_HTTP_Handler(srv AuthHTTPServer) func(ctx http.Conte
 	}
 }
 
+func _Auth_GetResetUrlMail0_HTTP_Handler(srv AuthHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in GetResetUrlRequest
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationAuthgetResetUrlMail)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.GetResetUrlMail(ctx, req.(*GetResetUrlRequest))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*GetResetUrlReply)
+		return ctx.Result(200, reply)
+	}
+}
+
 func _Auth_Register0_HTTP_Handler(srv AuthHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in RegisterRequest
@@ -98,6 +123,28 @@ func _Auth_Register0_HTTP_Handler(srv AuthHTTPServer) func(ctx http.Context) err
 			return err
 		}
 		reply := out.(*RegisterReply)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Auth_ResetPassword0_HTTP_Handler(srv AuthHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in ResetPasswordRequest
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationAuthresetPassword)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.ResetPassword(ctx, req.(*ResetPasswordRequest))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*ResetPasswordReply)
 		return ctx.Result(200, reply)
 	}
 }
@@ -126,9 +173,11 @@ func _Auth_RefreshToken0_HTTP_Handler(srv AuthHTTPServer) func(ctx http.Context)
 
 type AuthHTTPClient interface {
 	GetRegisterMail(ctx context.Context, req *GetVerifyCodeRequest, opts ...http.CallOption) (rsp *GetVerifyCodeReply, err error)
+	GetResetUrlMail(ctx context.Context, req *GetResetUrlRequest, opts ...http.CallOption) (rsp *GetResetUrlReply, err error)
 	PasswordLogin(ctx context.Context, req *LoginRequest, opts ...http.CallOption) (rsp *LoginReply, err error)
 	RefreshToken(ctx context.Context, req *RefreshTokenRequest, opts ...http.CallOption) (rsp *RefreshTokenReply, err error)
 	Register(ctx context.Context, req *RegisterRequest, opts ...http.CallOption) (rsp *RegisterReply, err error)
+	ResetPassword(ctx context.Context, req *ResetPasswordRequest, opts ...http.CallOption) (rsp *ResetPasswordReply, err error)
 }
 
 type AuthHTTPClientImpl struct {
@@ -144,6 +193,19 @@ func (c *AuthHTTPClientImpl) GetRegisterMail(ctx context.Context, in *GetVerifyC
 	pattern := "/auth/get-register-mail"
 	path := binding.EncodeURL(pattern, in, true)
 	opts = append(opts, http.Operation(OperationAuthgetRegisterMail))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *AuthHTTPClientImpl) GetResetUrlMail(ctx context.Context, in *GetResetUrlRequest, opts ...http.CallOption) (*GetResetUrlReply, error) {
+	var out GetResetUrlReply
+	pattern := "/auth/get-reset-url-mail"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationAuthgetResetUrlMail))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
 	if err != nil {
@@ -183,6 +245,19 @@ func (c *AuthHTTPClientImpl) Register(ctx context.Context, in *RegisterRequest, 
 	pattern := "/auth/register"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationAuthregister))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *AuthHTTPClientImpl) ResetPassword(ctx context.Context, in *ResetPasswordRequest, opts ...http.CallOption) (*ResetPasswordReply, error) {
+	var out ResetPasswordReply
+	pattern := "/auth/reset-password"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationAuthresetPassword))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {

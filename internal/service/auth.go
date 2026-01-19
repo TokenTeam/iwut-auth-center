@@ -25,14 +25,16 @@ type AuthService struct {
 	jwtUtil              *util.JwtUtil
 	accessTokenLifeSpan  time.Duration
 	refreshTokenLifeSpan time.Duration
+	frontendUrl          string
 }
 
 // NewAuthService constructs an AuthService.
 // It wires usecases, mail sender, audit usecase and JWT util and configures token lifetimes.
-func NewAuthService(authUsecase *biz.AuthUsecase, mailUsecase *mail.Usecase, auditUsecase *biz.AuditUsecase, jwtUtil *util.JwtUtil, c *conf.Jwt) *AuthService {
+func NewAuthService(authUsecase *biz.AuthUsecase, mailUsecase *mail.Usecase, auditUsecase *biz.AuditUsecase, jwtUtil *util.JwtUtil, c *conf.Jwt, sc *conf.Server) *AuthService {
 	return &AuthService{authUsecase: authUsecase, mailUsecase: mailUsecase, auditUsecase: auditUsecase, jwtUtil: jwtUtil,
 		accessTokenLifeSpan:  time.Duration(c.GetAccessTokenLifeSpan()) * time.Second,
 		refreshTokenLifeSpan: time.Duration(c.GetRefreshTokenLifeSpan()) * time.Second,
+		frontendUrl:          strings.TrimSuffix(sc.GetFrontendUrl(), "/"),
 	}
 }
 
@@ -119,13 +121,47 @@ func (s *AuthService) GetRegisterMail(ctx context.Context, in *auth.GetVerifyCod
 	}, util.Audit{Message: stringPtr(in.GetEmail())}), nil
 }
 
+// GetResetUrlMail handles password reset URL generation and emailing.
+// - Generates a secure reset URL with a verification code,
+// - Stores the code via auth usecase for later validation,
+// - Sends the reset URL via mail usecase,
+// - Returns RPC-level success/failure with auditing.
+func (s *AuthService) GetResetUrlMail(ctx context.Context, in *auth.GetResetUrlRequest) (*auth.GetResetUrlReply, error) {
+	successProcess, errorProcess := util.GetProcesses[*auth.GetResetUrlReply]("GetResetUrlMail", GetAuditInsertFunc(*s.auditUsecase))
+	captcha, err := GenerateSecure6DigitCode()
+	if err != nil {
+		return nil, errorProcess(ctx, errors.InternalServer("500", "failed to generate verify code"))
+	}
+	err = s.authUsecase.Repo.TryInsertResetPasswordCaptcha(ctx, in.Email, captcha, 10*time.Minute)
+	if err != nil {
+		return nil, errorProcess(ctx, err)
+	}
+	// resetUrl := fmt.Sprintf("%s/reset-password?email=%s&code=%s", i??(), in.GetEmail(), captcha)
+	resetUrl, err := util.BuildRedirectURL(s.frontendUrl+"/reset-password", map[string]string{
+		"email": in.GetEmail(),
+		"code":  captcha,
+	})
+	err = s.mailUsecase.SendResetPasswordMail(ctx, 10, resetUrl, []string{in.GetEmail()})
+	if err != nil {
+		return nil, errorProcess(ctx, err)
+	}
+
+	return successProcess(ctx, func(reqId string) *auth.GetResetUrlReply {
+		return &auth.GetResetUrlReply{
+			Code:    200,
+			Message: "send reset url mail successful",
+			TraceId: reqId,
+		}
+	}, util.Audit{Message: stringPtr(in.GetEmail())}), nil
+}
+
 // Register handles user registration:
 // - Validates the provided verification code via auth usecase,
 // - Creates a new user record via auth usecase,
 // - Returns created user id on success and records audit.
 func (s *AuthService) Register(ctx context.Context, in *auth.RegisterRequest) (*auth.RegisterReply, error) {
 	successProcess, errorProcess := util.GetProcesses[*auth.RegisterReply]("Register", GetAuditInsertFunc(*s.auditUsecase))
-	err := s.authUsecase.Repo.CheckCaptchaUsable(ctx, in.GetEmail(), in.GetVerifyCode(), 10*time.Minute)
+	err := s.authUsecase.Repo.CheckRegisterCaptchaUsable(ctx, in.GetEmail(), in.GetVerifyCode(), 10*time.Minute)
 	if err != nil {
 		return nil, errorProcess(ctx, err)
 	}
@@ -145,6 +181,31 @@ func (s *AuthService) Register(ctx context.Context, in *auth.RegisterRequest) (*
 			TraceId: reqId,
 		}
 	}, util.Audit{UserID: &id}), nil
+}
+
+// ResetPassword handles password reset requests:
+// - Validates the provided verification code via auth usecase,
+// - Updates the user's password via auth usecase,
+// - Returns RPC-level success/failure with auditing.
+func (s *AuthService) ResetPassword(ctx context.Context, in *auth.ResetPasswordRequest) (*auth.ResetPasswordReply, error) {
+	successProcess, errorProcess := util.GetProcesses[*auth.ResetPasswordReply]("ResetPassword", GetAuditInsertFunc(*s.auditUsecase))
+	err := s.authUsecase.Repo.CheckResetPasswordCaptchaUsable(ctx, in.GetEmail(), in.GetVerifyCode(), 10*time.Minute)
+	if err != nil {
+		return nil, errorProcess(ctx, err)
+	}
+	err = s.authUsecase.Repo.ResetPassword(ctx, in.GetEmail(), in.GetPassword())
+	if err != nil {
+		return nil, errorProcess(ctx, err)
+	}
+
+	return successProcess(ctx, func(reqId string) *auth.ResetPasswordReply {
+		return &auth.ResetPasswordReply{
+			Code:    200,
+			Message: "Reset password successful",
+			TraceId: reqId,
+		}
+	}, util.Audit{Message: stringPtr(in.GetEmail())}), nil
+
 }
 
 // RefreshToken handles a refresh token exchange:

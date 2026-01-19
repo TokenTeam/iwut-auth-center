@@ -133,7 +133,7 @@ func (r *appRepo) getClientInfoFromCache(ctx context.Context, clientID string) (
 // Returns:
 // - *biz.ClientInfo: the client info obtained from App Center or nil if not found.
 // - error: non-nil if the external call fails.
-func (r *appRepo) getClientInfoFromAppCenter(ctx context.Context, clientId string) (*biz.ClientInfo, error) {
+func (r *appRepo) getClientInfoFromAppCenter(_ context.Context, clientId string) (*biz.ClientInfo, error) {
 	// TODO: implement the logic after app center is ready
 	return &biz.ClientInfo{
 		ClientId:      clientId,
