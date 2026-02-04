@@ -16,6 +16,9 @@ import (
 	"github.com/go-kratos/kratos/v2/transport/grpc"
 	"github.com/go-kratos/kratos/v2/transport/http"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/jaeger"
+	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
 
 	_ "go.uber.org/automaxprocs"
@@ -33,9 +36,39 @@ var (
 	id, _ = os.Hostname()
 )
 
-func newTracerProvider() *trace.TracerProvider {
-	// 这里简单示例，实际可配置 exporter、采样率等
-	tp := trace.NewTracerProvider()
+func newTracerProvider(jaegerEndPoint string) *trace.TracerProvider {
+
+	if jaegerEndPoint == "" {
+		jaegerEndPoint = "http://localhost:14268/api/traces"
+	}
+
+	// Create the Jaeger exporter
+	exp, err := jaeger.New(jaeger.WithCollectorEndpoint(jaeger.WithEndpoint(jaegerEndPoint)))
+	if err != nil {
+		// If exporter can't be created, return a basic tracer provider so app can continue.
+		_ = err
+		tp := trace.NewTracerProvider()
+		otel.SetTracerProvider(tp)
+		return tp
+	}
+
+	// Prepare resource with service information. Caller should set Name and Version
+	// before calling this function.
+	res, err := resource.New(context.Background(),
+		resource.WithAttributes(
+			attribute.String("service.name", Name),
+			attribute.String("service.version", Version),
+		),
+	)
+	if err != nil {
+		res = resource.Default()
+	}
+
+	// Use batcher for better performance in production
+	tp := trace.NewTracerProvider(
+		trace.WithBatcher(exp),
+		trace.WithResource(res),
+	)
 	otel.SetTracerProvider(tp)
 	return tp
 }
@@ -60,10 +93,6 @@ func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server) *kratos.App {
 
 func main() {
 	flag.Parse()
-
-	// 初始化 tracer
-	tp := newTracerProvider()
-	defer func() { _ = tp.Shutdown(context.Background()) }()
 
 	c := config.New(
 		config.WithSource(
@@ -90,6 +119,10 @@ func main() {
 	if Version == "" {
 		Version = bc.Server.GetVersion()
 	}
+
+	// 初始化 tracer：在已设置 Name/Version 后创建
+	tp := newTracerProvider(bc.Server.GetJaegerEndpoint())
+	defer func() { _ = tp.Shutdown(context.Background()) }()
 
 	logger := log.With(log.NewStdLogger(os.Stdout),
 		"ts", log.DefaultTimestamp,

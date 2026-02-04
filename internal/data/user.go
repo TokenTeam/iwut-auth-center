@@ -82,7 +82,7 @@ func (r *userRepo) UpdateUserPassword(ctx context.Context, userId string, oldPas
 	filter := bson.M{"_id": uid, "password": oldPassword}
 
 	var result struct {
-		Version   int        `bson:"Version"`
+		Version   int        `bson:"version"`
 		DeletedAt *time.Time `bson:"deleted_at"`
 	}
 	err = collection.FindOne(ctx, filter).Decode(&result)
@@ -99,7 +99,7 @@ func (r *userRepo) UpdateUserPassword(ctx context.Context, userId string, oldPas
 		"$set": bson.M{
 			"password":   newPassword,
 			"updated_at": time.Now(),
-			"Version":    util.NextJWTVersion(result.Version),
+			"version":    util.NextJWTVersion(result.Version),
 		},
 	}
 	_, err = collection.UpdateOne(ctx, filter, update)
@@ -140,7 +140,7 @@ func (r *userRepo) DeleteUserAccount(ctx context.Context, userId string) error {
 
 	var result struct {
 		DeletedAt *time.Time `bson:"deleted_at"`
-		Version   int        `bson:"Version"`
+		Version   int        `bson:"version"`
 	}
 	err = collection.FindOne(ctx, filter).Decode(&result)
 	if err != nil {
@@ -158,7 +158,7 @@ func (r *userRepo) DeleteUserAccount(ctx context.Context, userId string) error {
 		"$set": bson.M{
 			"deleted_at": now,
 			"updated_at": now,
-			"Version":    util.NextJWTVersion(result.Version),
+			"version":    util.NextJWTVersion(result.Version),
 		},
 	}
 	_, err = collection.UpdateOne(ctx, filter, update)

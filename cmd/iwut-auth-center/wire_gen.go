@@ -32,7 +32,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, jwt *conf.Jwt, confMa
 		return nil, nil, err
 	}
 	sha256Util := util.NewSha256Util(jwt)
-	authRepo := data.NewAuthRepo(dataData, confData, logger, sha256Util)
+	authRepo := data.NewAuthRepo(dataData, confData, jwt, logger, sha256Util)
 	authUsecase := biz.NewAuthUsecase(authRepo)
 	usecase := mail.NewMailUsecase(confMail, logger)
 	auditRepo, cleanup2, err := data.NewAuditRepo(dataData, logger)

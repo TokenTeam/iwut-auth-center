@@ -19,20 +19,22 @@ import (
 )
 
 type authRepo struct {
-	data           *Data
-	log            *log.Helper
-	userCollection *mongo.Collection
-	sha256Util     *util.Sha256Util
+	data                *Data
+	log                 *log.Helper
+	userCollection      *mongo.Collection
+	sha256Util          *util.Sha256Util
+	accessTokenLifeSpan time.Duration
 }
 
-func NewAuthRepo(data *Data, c *conf.Data, logger log.Logger, sha256Util *util.Sha256Util) biz.AuthRepo {
+func NewAuthRepo(data *Data, c *conf.Data, cj *conf.Jwt, logger log.Logger, sha256Util *util.Sha256Util) biz.AuthRepo {
 	dbName := c.GetMongodb().GetDatabase()
 	usersCollection := data.mongo.Database(dbName).Collection("user")
 	return &authRepo{
-		data:           data,
-		log:            log.NewHelper(logger),
-		userCollection: usersCollection,
-		sha256Util:     sha256Util,
+		data:                data,
+		log:                 log.NewHelper(logger),
+		userCollection:      usersCollection,
+		sha256Util:          sha256Util,
+		accessTokenLifeSpan: time.Duration(cj.GetAccessTokenLifeSpan()) * time.Second,
 	}
 }
 
@@ -69,7 +71,7 @@ func (r *authRepo) CheckPasswordWithEmailAndGetUserIdAndVersion(ctx context.Cont
 
 	var result struct {
 		UserId    primitive.ObjectID `bson:"_id"`
-		Version   int                `bson:"Version"`
+		Version   int                `bson:"version"`
 		DeletedAt *time.Time         `bson:"deleted_at"`
 	}
 	err := collection.FindOne(ctx, filter).Decode(&result)
@@ -293,6 +295,13 @@ func (r *authRepo) CheckRegisterCaptchaUsable(ctx context.Context, email string,
 		l.Errorf("ZRank error: %v", err)
 		return fmt.Errorf("redis zrank error: %w", err)
 	}
+
+	// 校验成功：删除该 key，使其它未使用的验证码均失效
+	if err := r.data.redis.Del(ctx, key).Err(); err != nil {
+		l.Errorf("Del captcha key error: %v", err)
+		// 不阻塞正常流程，仍认为验证码可用
+	}
+
 	return nil
 }
 
@@ -332,6 +341,12 @@ func (r *authRepo) CheckResetPasswordCaptchaUsable(ctx context.Context, email st
 		l.Errorf("ZRank error: %v", err)
 		return fmt.Errorf("redis zrank error: %w", err)
 	}
+
+	// 校验成功：删除该 key，使其它未使用的验证码均失效
+	if err := r.data.redis.Del(ctx, key).Err(); err != nil {
+		l.Errorf("Del reset-password captcha key error: %v", err)
+		// 不阻塞正常流程，仍认为验证码可用
+	}
 	return nil
 }
 
@@ -366,7 +381,7 @@ func (r *authRepo) RegisterUser(ctx context.Context, email string, password stri
 			"password":   password,
 			"created_at": time.Now(),
 			"updated_at": time.Now(),
-			"Version":    0,
+			"version":    0,
 		},
 	}
 	opt := options.Update().SetUpsert(true)
@@ -406,9 +421,23 @@ func (r *authRepo) ResetPassword(ctx context.Context, email string, newPassword 
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 	newPassword = r.sha256Util.HashPassword(newPassword)
 	filter := bson.M{"email": email}
+	var result struct {
+		UserId  primitive.ObjectID `bson:"_id"`
+		Version int                `bson:"version"`
+	}
+	err := r.userCollection.FindOne(ctx, filter).Decode(&result)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return biz.UserNotFoundError
+		}
+		l.Errorf("failed to find user: %v", err)
+		return fmt.Errorf("failed to find user: %w", err)
+	}
+	result.Version = util.NextJWTVersion(result.Version)
 	update := bson.M{
 		"$set": bson.M{
 			"password":   newPassword,
+			"version":    result.Version,
 			"updated_at": time.Now(),
 		},
 	}
@@ -419,6 +448,11 @@ func (r *authRepo) ResetPassword(ctx context.Context, email string, newPassword 
 	}
 	if res.MatchedCount == 0 {
 		return biz.UserNotFoundError
+	}
+	err = r.AddOrUpdateUserVersion(ctx, result.UserId.Hex(), result.Version, r.accessTokenLifeSpan)
+	if err != nil {
+		l.Errorf("AddOrUpdateUserVersion error: %v", err)
+		return fmt.Errorf("failed to update user version in redis: %w", err)
 	}
 	return nil
 }
