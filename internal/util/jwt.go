@@ -318,29 +318,50 @@ func ParseRSAPublicKeyFromPEM(pemBytes []byte) (*rsa.PublicKey, error) {
 type TokenKey struct{}
 
 type TokenValue struct {
-	Token          string
 	BaseAuthClaims *BaseAuthClaims
 	OAuthClaims    *OAuthClaims
 }
 type BaseAuthClaims struct {
-	Uid     string
-	Iat     int64
-	Exp     int64
-	Iss     string
-	Version int
-	Type    string
+	Uid     string `json:"Uid"`
+	Iat     int64  `json:"Iat"`
+	Exp     int64  `json:"Exp"`
+	Iss     string `json:"Iss"`
+	Version int    `json:"Version"`
+	Type    string `json:"Type"`
 }
 type OAuthClaims struct {
-	Jti   string
-	Uid   string
-	Scope string
-	Iat   int64
-	Exp   int64
-	Iss   string
-	Azp   string
-	Aud   []string
-	Type  string
-	Nonce string
+	Jti   string   `json:"Jti"`
+	Uid   string   `json:"Uid"`
+	Scope string   `json:"Scope"`
+	Iat   int64    `json:"Iat"`
+	Exp   int64    `json:"Exp"`
+	Iss   string   `json:"Iss"`
+	Azp   string   `json:"Azp"`
+	Aud   []string `json:"Aud"`
+	Type  string   `json:"Type"`
+	Nonce string   `json:"Nonce"`
+}
+
+// BaseAuthClaimsFromJSON parses a BaseAuthClaims instance from a JSON string.
+// The input JSON is expected to use capitalized keys like the example:
+// {"Uid":"...","Iat":123,"Exp":456,"Iss":"...","Version":1,"Type":"access"}
+func BaseAuthClaimsFromJSON(data string) (*BaseAuthClaims, error) {
+	var c BaseAuthClaims
+	if err := json.Unmarshal([]byte(data), &c); err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+// OAuthClaimsFromJSON parses an OAuthClaims instance from a JSON string.
+// The input JSON is expected to use capitalized keys like the example:
+// {"Jti":"...","Uid":"...","Scope":"read","Iat":123,"Exp":456,"Iss":"...","Azp":"...","Aud":["..."],"Type":"access","Nonce":"..."}
+func OAuthClaimsFromJSON(data string) (*OAuthClaims, error) {
+	var c OAuthClaims
+	if err := json.Unmarshal([]byte(data), &c); err != nil {
+		return nil, err
+	}
+	return &c, nil
 }
 
 func (j *JwtUtil) WithTokenValue(ctx context.Context, value *TokenValue) context.Context {
@@ -449,120 +470,11 @@ func (j *JwtUtil) ToBaseAuthClaims(claims map[string]interface{}) (*BaseAuthClai
 	return baseAuthClaims, nil
 }
 
-func (j *JwtUtil) ToOAuthClaims(claims map[string]interface{}) (*OAuthClaims, error) {
-	oauthClaims := &OAuthClaims{
-		Jti:   "",
-		Uid:   "",
-		Scope: "",
-		Iat:   0,
-		Exp:   0,
-		Iss:   "",
-		Azp:   "",
-		Aud:   nil,
-		Type:  "",
-		Nonce: "",
-	}
-	if jtiRaw, found := claims["jti"]; found {
-		if jtiStr, ok := jtiRaw.(string); ok {
-			oauthClaims.Jti = jtiStr
-		}
-	}
-	if oauthClaims.Jti == "" {
-		return nil, errors.New("token missing jti claim")
-	}
-
-	if userIdRaw, found := claims["uid"]; found {
-		if userIdStr, ok := userIdRaw.(string); ok {
-			oauthClaims.Uid = userIdStr
-		}
-	}
-	if oauthClaims.Uid == "" {
-		return nil, errors.New("token missing uid claim")
-	}
-
-	if scopeRaw, found := claims["scope"]; found {
-		if scopeStr, ok := scopeRaw.(string); ok {
-			oauthClaims.Scope = scopeStr
-		}
-	}
-	if oauthClaims.Scope == "" {
-		return nil, errors.New("token missing scope claim")
-	}
-
-	if iatRaw, found := claims["iat"]; found {
-		if iatSec, ok := toInt64Seconds(iatRaw); ok {
-			oauthClaims.Iat = iatSec
-		}
-	}
-	if oauthClaims.Iat == 0 {
-		return nil, errors.New("token missing iat claim")
-	}
-
-	if expRaw, found := claims["exp"]; found {
-		if expSec, ok := toInt64Seconds(expRaw); ok {
-			oauthClaims.Exp = expSec
-		}
-	}
-	if oauthClaims.Exp == 0 {
-		return nil, errors.New("token missing exp claim")
-	}
-
-	if issuer, found := claims["iss"]; found {
-		if issStr, ok := issuer.(string); ok {
-			if issStr != j.issuer {
-				return nil, errors.New("invalid token issuer")
-			}
-			oauthClaims.Iss = issStr
-		}
-	}
-	if oauthClaims.Iss == "" {
-		return nil, errors.New("token missing iss")
-	}
-
-	if azpRaw, found := claims["azp"]; found {
-		if azpStr, ok := azpRaw.(string); ok {
-			oauthClaims.Azp = azpStr
-		}
-	}
-	if oauthClaims.Azp == "" {
-		return nil, errors.New("token missing azp claim")
-	}
-
-	if audRaw, found := claims["aud"]; found {
-		if audSlice, ok := audRaw.([]interface{}); ok {
-			for _, a := range audSlice {
-				if aStr, ok := a.(string); ok {
-					oauthClaims.Aud = append(oauthClaims.Aud, aStr)
-				}
-			}
-		}
-	}
-	if len(oauthClaims.Aud) == 0 {
-		return nil, errors.New("token missing aud claim")
-	}
-
-	if typeRaw, found := claims["type"]; found {
-		if typeStr, ok := typeRaw.(string); ok {
-			oauthClaims.Type = typeStr
-		}
-	}
-	if oauthClaims.Type == "" {
-		return nil, errors.New("token missing type claim")
-	}
-
-	if nonceRaw, found := claims["nonce"]; found {
-		if nonceStr, ok := nonceRaw.(string); ok {
-			oauthClaims.Nonce = nonceStr
-		}
-	}
-
-	return oauthClaims, nil
-}
-
 type JwtType int
 
 const (
-	OfficialJwt JwtType = iota
+	UnknownJwt JwtType = iota
+	OfficialJwt
 	OAuthJwt
 )
 

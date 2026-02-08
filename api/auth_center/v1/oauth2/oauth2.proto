@@ -38,15 +38,7 @@ service OAuth2 {
     };
   }
 }
-/*
-  'client_id',
-  'response_type',
-  'scope',
-  'redirect_uri',
-  'nonce',
-  'code_challenge',
-  'code_challenge_method',
- */
+
 message AuthorizeRequest {
   string ClientId = 1;
   string ResponseType = 2;

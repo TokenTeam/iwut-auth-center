@@ -668,8 +668,9 @@ func (r *oauth2Repo) AllowJTIs(ctx context.Context, jtis []string) error {
 		return nil
 	}
 
-	reqId := util.RequestIDFrom(ctx)
-	r.log.Debugf("RequestID: %s, AllowJTIs jtis: %+v", reqId, jtis)
+	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
+
+	l.Debugf("AllowJTIs jtis: %+v", jtis)
 
 	pipe := r.data.redis.Pipeline()
 	for _, id := range jtis {
@@ -682,7 +683,7 @@ func (r *oauth2Repo) AllowJTIs(ctx context.Context, jtis []string) error {
 
 	_, err := pipe.Exec(ctx)
 	if err != nil && !errors.Is(err, redis.Nil) {
-		r.log.Errorf("AllowJTIs pipeline exec error req=%s err=%v", reqId, err)
+		l.Errorf("AllowJTIs pipeline exec error err=%v", err)
 		return err
 	}
 	return nil
@@ -714,74 +715,6 @@ func (r *oauth2Repo) RemoveJTIsFormRedis(ctx context.Context, jtis []string) err
 	}
 	_, err := pipe.Exec(ctx)
 	return err
-}
-
-// CheckJTIAllowed checks whether a refresh token JTI is allowed for the user+client.
-// Behavior:
-//   - First checks Redis allowlist for allowed_tokens:<jti> (fast path).
-//   - On Redis miss, falls back to MongoDB: loads the user_consents document for {user_id, client_id}
-//     and checks whether the jti exists in token_id array. If found, attempts a non-critical
-//     write-back to Redis via AllowJTIs.
-//   - Returns (true,nil) when allowed; (false,nil) when not allowed; (false,error) on internal errors.
-//
-// Parameters:
-// - ctx: context for cancellation/timeouts.
-// - userId: user identifier.
-// - clientId: client identifier.
-// - jti: token identifier to check.
-// Returns:
-// - bool: whether the jti is allowed.
-// - error: non-nil on Redis/Mongo errors.
-func (r *oauth2Repo) CheckJTIAllowed(ctx context.Context, userId string, clientId string, jti string) (bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
-
-	l.Debugf("CheckJTIAllowed jti: %s", jti)
-	key := GetRedisKey("allowed_tokens", jti)
-	_, err := r.data.redis.Get(ctx, key).Result()
-	if err == nil {
-		// 缓存命中
-		return true, nil
-	}
-	if errors.Is(err, redis.Nil) {
-		// Redis 未命中，回退到 MongoDB 检查
-		ctx2, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		var doc struct {
-			TokenID []string `bson:"token_id"`
-		}
-		// 查询应使用 user id 和 client id，而不是直接按 token_id 全局查询
-		filter := bson.M{"user_id": userId, "client_id": clientId}
-		if err := r.userConsentsCollection.FindOne(ctx2, filter).Decode(&doc); err != nil {
-			if errors.Is(err, mongo.ErrNoDocuments) {
-				// Mongo 未命中 -> token 不被允许
-				return false, nil
-			}
-			l.Errorf("CheckJTIAllowed mongo error: %v", err)
-			return false, err
-		}
-		// 遍历 token_id 数组检查是否存在该 jti
-		found := false
-		for _, tid := range doc.TokenID {
-			if tid == jti {
-				found = true
-				break
-			}
-		}
-		if !found {
-			// 在该用户和 client 下未找到对应 jti
-			return false, nil
-		}
-		// 在 Mongo 中找到了该 jti，尝试写回 Redis 缓存（写回失败只记录日志，不阻塞授权）
-		if err := r.AllowJTIs(ctx, []string{jti}); err != nil {
-			l.Errorf("CheckJTIAllowed writeback to Redis failed: %v", err)
-		}
-		return true, nil
-	}
-	// 其它 Redis 错误则返回错误
-	l.Errorf("CheckJTIAllowed redis error: %v", err)
-	return false, err
 }
 
 // CheckUserPermission determines whether the user has or can be granted permission for the client.
