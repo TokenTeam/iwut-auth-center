@@ -12,10 +12,9 @@ import (
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-redis/redis/v8"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type authRepo struct {
@@ -70,9 +69,9 @@ func (r *authRepo) CheckPasswordWithEmailAndGetUserIdAndVersion(ctx context.Cont
 	filter := bson.M{"email": email, "password": password}
 
 	var result struct {
-		UserId    primitive.ObjectID `bson:"_id"`
-		Version   int                `bson:"version"`
-		DeletedAt *time.Time         `bson:"deleted_at"`
+		UserId    bson.ObjectID `bson:"_id"`
+		Version   int           `bson:"version"`
+		DeletedAt *time.Time    `bson:"deleted_at"`
 	}
 	err := collection.FindOne(ctx, filter).Decode(&result)
 
@@ -384,7 +383,7 @@ func (r *authRepo) RegisterUser(ctx context.Context, email string, password stri
 			"version":    0,
 		},
 	}
-	opt := options.Update().SetUpsert(true)
+	opt := options.UpdateOne().SetUpsert(true)
 	res, err := r.userCollection.UpdateOne(ctx, filter, update, opt)
 	if err != nil {
 		// 仍然可能因并发插入产生 duplicate-key（极端 race），需要检查 err 的 11000
@@ -407,7 +406,7 @@ func (r *authRepo) RegisterUser(ctx context.Context, email string, password stri
 
 	var idStr string
 	switch id := res.UpsertedID.(type) {
-	case primitive.ObjectID:
+	case bson.ObjectID:
 		idStr = id.Hex()
 	case string:
 		idStr = id
@@ -422,8 +421,8 @@ func (r *authRepo) ResetPassword(ctx context.Context, email string, newPassword 
 	newPassword = r.sha256Util.HashPassword(newPassword)
 	filter := bson.M{"email": email}
 	var result struct {
-		UserId  primitive.ObjectID `bson:"_id"`
-		Version int                `bson:"version"`
+		UserId  bson.ObjectID `bson:"_id"`
+		Version int           `bson:"version"`
 	}
 	err := r.userCollection.FindOne(ctx, filter).Decode(&result)
 	if err != nil {

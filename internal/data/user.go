@@ -11,10 +11,9 @@ import (
 
 	kratosErrors "github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type userRepo struct {
@@ -66,7 +65,7 @@ func NewUserRepo(data *Data, c *conf.Data, logger log.Logger, appUsecase *biz.Ap
 func (r *userRepo) UpdateUserPassword(ctx context.Context, userId string, oldPassword string, newPassword string) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
-	uid, err := primitive.ObjectIDFromHex(userId)
+	uid, err := bson.ObjectIDFromHex(userId)
 	if err != nil {
 		l.Errorf("invalid userId format: %s", userId)
 		return fmt.Errorf("invalid userId format: %s", userId)
@@ -125,7 +124,7 @@ func (r *userRepo) UpdateUserPassword(ctx context.Context, userId string, oldPas
 func (r *userRepo) DeleteUserAccount(ctx context.Context, userId string) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
-	uid, err := primitive.ObjectIDFromHex(userId)
+	uid, err := bson.ObjectIDFromHex(userId)
 	if err != nil {
 		l.Errorf("invalid userId format: %s", userId)
 		return fmt.Errorf("invalid userId format: %s", userId)
@@ -187,7 +186,7 @@ func (r *userRepo) DeleteUserAccount(ctx context.Context, userId string) error {
 func (r *userRepo) GetUserProfileById(ctx context.Context, userId string) (*biz.UserProfile, error) {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
-	uid, err := primitive.ObjectIDFromHex(userId)
+	uid, err := bson.ObjectIDFromHex(userId)
 	if err != nil {
 		l.Errorf("invalid userId format: %s", userId)
 		return nil, fmt.Errorf("invalid userId format: %s", userId)
@@ -271,7 +270,7 @@ func (r *userRepo) GetUserProfileById(ctx context.Context, userId string) (*biz.
 		OfficialAttrs: map[string]string{},
 	}
 
-	if userId, ok := doc["_id"].(primitive.ObjectID); ok {
+	if userId, ok := doc["_id"].(bson.ObjectID); ok {
 		userProfile.UserId = userId.Hex()
 	} else {
 		return nil, fmt.Errorf("invalid userId format in db")
@@ -281,12 +280,12 @@ func (r *userRepo) GetUserProfileById(ctx context.Context, userId string) (*biz.
 	} else {
 		return nil, fmt.Errorf("invalid email format in db")
 	}
-	if createdAt, ok := doc["created_at"].(primitive.DateTime); ok {
+	if createdAt, ok := doc["created_at"].(bson.DateTime); ok {
 		userProfile.CreatedAt = createdAt.Time().Unix()
 	} else {
 		return nil, fmt.Errorf("invalid created_at format in db")
 	}
-	if updatedAt, ok := doc["updated_at"].(primitive.DateTime); ok {
+	if updatedAt, ok := doc["updated_at"].(bson.DateTime); ok {
 		userProfile.UpdatedAt = updatedAt.Time().Unix()
 	} else {
 		return nil, fmt.Errorf("invalid updated_at format in db")
@@ -323,7 +322,7 @@ func (r *userRepo) GetUserProfileById(ctx context.Context, userId string) (*biz.
 func (r *userRepo) UpdateUserProfile(ctx context.Context, userId string, attrs map[string]string) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
-	uid, err := primitive.ObjectIDFromHex(userId)
+	uid, err := bson.ObjectIDFromHex(userId)
 	if err != nil {
 		l.Errorf("invalid userId format: %s", userId)
 		return fmt.Errorf("invalid userId format: %s", userId)
@@ -397,7 +396,7 @@ func (r *userRepo) UpdateUserProfile(ctx context.Context, userId string, attrs m
 func (r *userRepo) GetUserProfileKeysById(ctx context.Context, userId string) (*biz.UserProfileKeys, error) {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
-	uid, err := primitive.ObjectIDFromHex(userId)
+	uid, err := bson.ObjectIDFromHex(userId)
 	if err != nil {
 		l.Errorf("invalid userId format: %s", userId)
 		return nil, fmt.Errorf("invalid userId format: %s", userId)
@@ -496,7 +495,7 @@ func (r *userRepo) GetUserProfileKeysById(ctx context.Context, userId string) (*
 func (r *userRepo) UpdateUserConsent(ctx context.Context, userId string, clientId string, clientVersion string, optionalScopes []string) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
-	uid, err := primitive.ObjectIDFromHex(userId)
+	uid, err := bson.ObjectIDFromHex(userId)
 	if err != nil {
 		l.Errorf("invalid userId format: %s", userId)
 		return fmt.Errorf("invalid userId format: %s", userId)
@@ -559,7 +558,7 @@ func (r *userRepo) UpdateUserConsent(ctx context.Context, userId string, clientI
 			"agreed_version": clientInfo.Version,
 		},
 	}
-	opts := options.Update().SetUpsert(true)
+	opts := options.UpdateOne().SetUpsert(true)
 	_, err = collection.UpdateOne(ctx, filter, update, opts)
 	if err != nil {
 		l.Errorf("failed to update user consent: %v", err)

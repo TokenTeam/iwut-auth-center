@@ -11,9 +11,9 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-redis/redis/v8"
 	"github.com/google/wire"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
@@ -134,7 +134,17 @@ func initMongo(c *conf.Data) (*mongo.Client, error) {
 		clientOpts.SetAuth(cred)
 	}
 
-	client, err := mongo.Connect(ctx, clientOpts)
+	if dl, ok := ctx.Deadline(); ok {
+		timeout := time.Until(dl)
+		if timeout <= 0 {
+			timeout = 10 * time.Second
+		}
+		clientOpts.SetConnectTimeout(timeout)
+	} else {
+		clientOpts.SetConnectTimeout(10 * time.Second)
+	}
+
+	client, err := mongo.Connect(clientOpts)
 	if err != nil {
 		return nil, err
 	}

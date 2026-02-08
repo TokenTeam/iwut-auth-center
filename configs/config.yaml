@@ -8,7 +8,7 @@ server:
   name: "${serverName:AuthCenter}"
   version: "${serverVersion:1.0.0}"
   frontend_url: "${frontendUrl:http://localhost:3000}"
-  jaeger_endpoint: "${jaegerEndpoint:http://localhost:14268/api/traces}"
+  jaeger_endpoint: "${jaegerEndpoint:localhost:4317}"
 data:
   database:
     driver: mysql

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"net/url"
 	"os"
 
 	"iwut-auth-center/internal/conf"
@@ -17,7 +18,8 @@ import (
 	"github.com/go-kratos/kratos/v2/transport/http"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/exporters/jaeger"
+	otlptrace "go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+	otlptracegrpc "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
 
@@ -38,12 +40,27 @@ var (
 
 func newTracerProvider(jaegerEndPoint string) *trace.TracerProvider {
 
-	if jaegerEndPoint == "" {
-		jaegerEndPoint = "http://localhost:14268/api/traces"
+	// Interpret the provided endpoint. If it's an HTTP URL, extract host:port.
+	// Default to the OTLP gRPC default endpoint if empty or cannot parse.
+	endpoint := jaegerEndPoint
+	if endpoint == "" {
+		endpoint = "localhost:4317"
+	} else {
+		if u, err := url.Parse(endpoint); err == nil && u.Scheme != "" {
+			// If URL contains a host component use it (host:port); otherwise keep original
+			if u.Host != "" {
+				endpoint = u.Host
+			}
+		}
 	}
 
-	// Create the Jaeger exporter
-	exp, err := jaeger.New(jaeger.WithCollectorEndpoint(jaeger.WithEndpoint(jaegerEndPoint)))
+	// Create OTLP gRPC exporter client. Use insecure connection for plaintext.
+	ctx := context.Background()
+	client := otlptracegrpc.NewClient(
+		otlptracegrpc.WithEndpoint(endpoint),
+		otlptracegrpc.WithInsecure(),
+	)
+	exp, err := otlptrace.New(ctx, client)
 	if err != nil {
 		// If exporter can't be created, return a basic tracer provider so app can continue.
 		_ = err

@@ -14,10 +14,9 @@ import (
 	kratosErrors "github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-redis/redis/v8"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type oauth2Repo struct {
@@ -422,7 +421,7 @@ func (r *oauth2Repo) GetUserProfile(ctx context.Context, userId string, clientId
 	l.Debugf("GetUserProfile readableScopes: %+v", readableScopes)
 
 	// convert userId to ObjectID for querying user collection
-	uid, err := primitive.ObjectIDFromHex(userId)
+	uid, err := bson.ObjectIDFromHex(userId)
 	if err != nil {
 		l.Errorf("invalid userId format: %s", userId)
 		return nil, fmt.Errorf("invalid userId format: %s", userId)
@@ -523,7 +522,7 @@ func (r *oauth2Repo) GetUserProfile(ctx context.Context, userId string, clientId
 func (r *oauth2Repo) SetUserProfile(ctx context.Context, userId string, clientId string, storageKeyValues map[string]string) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
-	uid, err := primitive.ObjectIDFromHex(userId)
+	uid, err := bson.ObjectIDFromHex(userId)
 	if err != nil {
 		l.Errorf("invalid userId format: %s", userId)
 		return fmt.Errorf("invalid userId format: %s", userId)

@@ -3,7 +3,7 @@ package util
 import (
 	"fmt"
 
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -11,9 +11,9 @@ func ConvertBSONValueToGOType(v any) (any, error) {
 	switch t := v.(type) {
 	case nil:
 		return nil, nil
-	case primitive.DateTime:
+	case bson.DateTime:
 		return t.Time(), nil
-	case primitive.ObjectID:
+	case bson.ObjectID:
 		return t.Hex(), nil
 	case string:
 		return t, nil
