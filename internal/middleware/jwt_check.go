@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"context"
-	"iwut-auth-center/internal/biz"
 	"iwut-auth-center/internal/util"
 	"strings"
 
@@ -12,16 +11,12 @@ import (
 )
 
 type JwtCheckMiddleware struct {
-	authUsecase   *biz.AuthUsecase
-	oauth2Usecase *biz.Oauth2Usecase
-	jwtUtil       *util.JwtUtil
+	jwtUtil *util.JwtUtil
 }
 
-func NewJwtCheckMiddleware(uc *biz.AuthUsecase, oauth2Usecase *biz.Oauth2Usecase, jwtUtil *util.JwtUtil) *JwtCheckMiddleware {
+func NewJwtInfoMiddleware(jwtUtil *util.JwtUtil) *JwtCheckMiddleware {
 	return &JwtCheckMiddleware{
-		authUsecase:   uc,
-		oauth2Usecase: oauth2Usecase,
-		jwtUtil:       jwtUtil,
+		jwtUtil: jwtUtil,
 	}
 }
 
@@ -37,7 +32,7 @@ func GetJwtTypeFromHeader(header transport.Header) util.JwtType {
 	}
 }
 
-func (c *JwtCheckMiddleware) GetCheckJwtMiddleware() middleware.Middleware {
+func (c *JwtCheckMiddleware) GetJwtInfoMiddleware() middleware.Middleware {
 	return func(handler middleware.Handler) middleware.Handler {
 		return func(ctx context.Context, req any) (any, error) {
 			tr, ok := transport.FromServerContext(ctx)

@@ -2,4 +2,4 @@ package middleware
 
 import "github.com/google/wire"
 
-var ProviderSet = wire.NewSet(NewJwtCheckMiddleware)
+var ProviderSet = wire.NewSet(NewJwtInfoMiddleware)

@@ -71,6 +71,7 @@ func (s *Oauth2Service) Authorize(ctx context.Context, in *oauth2.AuthorizeReque
 		UserId:              claim.Uid,
 		ClientId:            in.ClientId,
 		ResponseType:        in.ResponseType,
+		InternalVersion:     in.InternalVersion,
 		Scope:               in.Scope,
 		RedirectUri:         in.RedirectUri,
 		Nonce:               nonce,
@@ -145,7 +146,7 @@ func (s *Oauth2Service) GetToken(ctx context.Context, in *oauth2.GetTokenRequest
 		}, nil
 	}
 
-	clientInfo, err := s.appUsecase.Repo.GetClientInfo(ctx, codeInfo.ClientId)
+	clientInfo, err := s.appUsecase.Repo.GetApplicationInfo(ctx, codeInfo.ClientId)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
@@ -263,15 +264,26 @@ func (s *Oauth2Service) GetUserProfile(ctx context.Context, in *oauth2.GetUserPr
 	if err != nil {
 		return nil, errorProcess(ctx, err)
 	}
-	userProfile, err := s.oauth2Usecase.Repo.GetUserProfile(ctx, claim.Uid, claim.Azp, in.GetScopeKeys(), in.GetStorageKeys())
+	var officialProfile map[string]any
+	if in.GetScope() != nil {
+		officialProfile, err = s.oauth2Usecase.Repo.GetUserOfficialProfile(ctx, claim.Uid, claim.Azp, in.GetScope().GetInternalVersion(), in.GetScope().GetScopeKeys())
+		if err != nil {
+			return nil, errorProcess(ctx, err)
+		}
+	}
+	var storageKeyValue map[string]*string
+	if in.GetStorage() != nil {
+		storageKeyValue, err = s.oauth2Usecase.Repo.GetUserProfile(ctx, claim.Uid, claim.Azp, in.GetStorage().GetStorageKeys())
+		if err != nil {
+			return nil, errorProcess(ctx, err)
+		}
+	}
+	officialAttrs, err := structpb.NewStruct(officialProfile)
 	if err != nil {
 		return nil, errorProcess(ctx, err)
 	}
-	officialAttrs, err := structpb.NewStruct(userProfile.OfficialAttrs)
-	if err != nil {
-		return nil, errorProcess(ctx, err)
-	}
-	storage, err := util.StringMapToStructpbValueMap(userProfile.StorageKeyValue)
+
+	storage, err := util.StringMapToStructpbValueMap(storageKeyValue)
 	if err != nil {
 		return nil, errorProcess(ctx, err)
 	}

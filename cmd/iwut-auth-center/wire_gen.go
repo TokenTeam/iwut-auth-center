@@ -53,10 +53,10 @@ func wireApp(confServer *conf.Server, confData *conf.Data, jwt *conf.Jwt, confMa
 		cleanup()
 		return nil, nil, err
 	}
-	oauth2Repo := data.NewOauth2Repo(dataData, confData, jwt, appUsecase, logger)
+	oauth2Repo := data.NewOauth2Repo(dataData, confData, jwt, appUsecase, userUsecase, logger)
 	oauth2Usecase := biz.NewOauth2Usecase(oauth2Repo)
 	oauth2Service := service.NewOauth2Service(oauth2Usecase, auditUsecase, appUsecase, jwtUtil, jwt)
-	jwtCheckMiddleware := middleware.NewJwtCheckMiddleware(authUsecase, oauth2Usecase, jwtUtil)
+	jwtCheckMiddleware := middleware.NewJwtInfoMiddleware(jwtUtil)
 	grpcServer := server.NewGRPCServer(confServer, authService, userService, oauth2Service, jwtCheckMiddleware, logger)
 	httpServer := server.NewHTTPServer(confServer, authService, userService, oauth2Service, jwtCheckMiddleware, logger)
 	app := newApp(logger, grpcServer, httpServer)

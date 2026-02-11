@@ -45,9 +45,10 @@ message AuthorizeRequest {
   string Scope = 3;
   string State = 4;
   string RedirectUri = 5;
-  optional string Nonce = 6;
-  optional string CodeChallenge = 7;
-  optional string CodeChallengeMethod = 8;
+  int32 InternalVersion = 6;
+  optional string Nonce = 7;
+  optional string CodeChallenge = 8;
+  optional string CodeChallengeMethod = 9;
 }
 
 message AuthorizeReply {
@@ -90,8 +91,15 @@ message RevokeAuthorizationReply {
 }
 
 message GetUserProfileRequest {
-  repeated string scope_keys = 1;
-  repeated string storage_keys = 2;
+  message Scope {
+    int32 internal_version = 1;
+    repeated string scope_keys = 2;
+  }
+  message Storage {
+    repeated string storage_keys = 1;
+  }
+  optional Scope scope = 1;
+  optional Storage storage = 2;
 }
 
 message GetUserProfileReply {

@@ -406,8 +406,8 @@ func (x *GetProfileKeysReply) GetTraceId() string {
 type UpdateUserConsentRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	ClientId       string                 `protobuf:"bytes,1,opt,name=clientId,proto3" json:"clientId,omitempty"`
-	ClientVersion  string                 `protobuf:"bytes,2,opt,name=clientVersion,proto3" json:"clientVersion,omitempty"`
-	OptionalScopes []string               `protobuf:"bytes,3,rep,name=optionalScopes,proto3" json:"optionalScopes,omitempty"`
+	ClientVersion  int32                  `protobuf:"varint,2,opt,name=clientVersion,proto3" json:"clientVersion,omitempty"`
+	OptionalScopes []string               `protobuf:"bytes,4,rep,name=optionalScopes,proto3" json:"optionalScopes,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -449,11 +449,11 @@ func (x *UpdateUserConsentRequest) GetClientId() string {
 	return ""
 }
 
-func (x *UpdateUserConsentRequest) GetClientVersion() string {
+func (x *UpdateUserConsentRequest) GetClientVersion() int32 {
 	if x != nil {
 		return x.ClientVersion
 	}
-	return ""
+	return 0
 }
 
 func (x *UpdateUserConsentRequest) GetOptionalScopes() []string {
@@ -698,8 +698,8 @@ const file_auth_center_v1_user_user_proto_rawDesc = "" +
 	"\x05_data\"\x84\x01\n" +
 	"\x18UpdateUserConsentRequest\x12\x1a\n" +
 	"\bclientId\x18\x01 \x01(\tR\bclientId\x12$\n" +
-	"\rclientVersion\x18\x02 \x01(\tR\rclientVersion\x12&\n" +
-	"\x0eoptionalScopes\x18\x03 \x03(\tR\x0eoptionalScopes\"`\n" +
+	"\rclientVersion\x18\x02 \x01(\x05R\rclientVersion\x12&\n" +
+	"\x0eoptionalScopes\x18\x04 \x03(\tR\x0eoptionalScopes\"`\n" +
 	"\x16UpdateUserConsentReply\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x18\n" +

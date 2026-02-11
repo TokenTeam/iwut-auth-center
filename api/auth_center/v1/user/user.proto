@@ -108,8 +108,8 @@ message GetProfileKeysReply {
 
 message UpdateUserConsentRequest {
   string clientId = 1;
-  string clientVersion = 2;
-  repeated string optionalScopes = 3;
+  int32 clientVersion = 2;
+  repeated string optionalScopes = 4;
 }
 
 message UpdateUserConsentReply {

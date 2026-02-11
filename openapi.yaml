@@ -138,6 +138,11 @@ paths:
                   in: query
                   schema:
                     type: string
+                - name: InternalVersion
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
                 - name: Nonce
                   in: query
                   schema:
@@ -510,10 +515,23 @@ components:
         auth_center.v1.oauth2.GetUserProfileRequest:
             type: object
             properties:
+                scope:
+                    $ref: '#/components/schemas/auth_center.v1.oauth2.GetUserProfileRequest_Scope'
+                storage:
+                    $ref: '#/components/schemas/auth_center.v1.oauth2.GetUserProfileRequest_Storage'
+        auth_center.v1.oauth2.GetUserProfileRequest_Scope:
+            type: object
+            properties:
+                internalVersion:
+                    type: integer
+                    format: int32
                 scopeKeys:
                     type: array
                     items:
                         type: string
+        auth_center.v1.oauth2.GetUserProfileRequest_Storage:
+            type: object
+            properties:
                 storageKeys:
                     type: array
                     items:
@@ -658,7 +676,8 @@ components:
                 clientId:
                     type: string
                 clientVersion:
-                    type: string
+                    type: integer
+                    format: int32
                 optionalScopes:
                     type: array
                     items:

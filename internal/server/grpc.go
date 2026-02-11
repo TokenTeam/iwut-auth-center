@@ -23,7 +23,7 @@ func NewGRPCServer(c *conf.Server, authSvc *service.AuthService, userSvc *servic
 			tracing.Server(),
 			logging.Server(logger),
 			middleware.GetAuditInfoCollectorMiddleware(),
-			jwtCheck.GetCheckJwtMiddleware(),
+			jwtCheck.GetJwtInfoMiddleware(),
 		),
 	}
 	if c.Grpc.Network != "" {

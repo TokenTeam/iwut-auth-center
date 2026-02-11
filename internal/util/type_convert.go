@@ -25,6 +25,12 @@ func ConvertBSONValueToGOType(v any) (any, error) {
 		return t, nil
 	case bool:
 		return t, nil
+	case bson.D:
+		mp := make(map[string]any, len(t))
+		for _, kv := range t {
+			mp[kv.Key] = kv.Value
+		}
+		return mp, nil
 	default:
 		// 若需要，可在此增加对 primitive.Decimal128、[]interface{}、bson.M 等的支持
 		return nil, fmt.Errorf("unsupported bson type: %T", v)
@@ -63,4 +69,21 @@ func StringMapToStructpbValueMap(m map[string]*string) (map[string]*structpb.Val
 		}
 	}
 	return out, nil
+}
+
+func BsonMToStringMap(m bson.M) (map[string]string, map[string]any, error) {
+	if m == nil {
+		return nil, nil, nil
+	}
+	out := make(map[string]string, len(m))
+	notStringKeyValue := make(map[string]any, len(m))
+	for k, v := range m {
+		strVal, ok := v.(string)
+		if !ok {
+			notStringKeyValue[k] = v
+		} else {
+			out[k] = strVal
+		}
+	}
+	return out, notStringKeyValue, nil
 }

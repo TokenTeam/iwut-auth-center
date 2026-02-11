@@ -8,7 +8,7 @@ type UserRepo interface {
 	GetUserProfileById(ctx context.Context, userId string) (*UserProfile, error)
 	UpdateUserProfile(ctx context.Context, userId string, attrs map[string]string) error
 	GetUserProfileKeysById(ctx context.Context, userId string) (*UserProfileKeys, error)
-	UpdateUserConsent(ctx context.Context, userId string, clientId string, clientVersion string, optionalScopes []string) error
+	UpdateUserConsent(ctx context.Context, userId string, clientId string, clientVersion int32, optionalScopes []string) error
 }
 
 type UserUsecase struct {

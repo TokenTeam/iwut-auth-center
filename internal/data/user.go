@@ -476,7 +476,7 @@ func (r *userRepo) GetUserProfileKeysById(ctx context.Context, userId string) (*
 // UpdateUserConsent records or updates the user's consent for a client application.
 // Behavior:
 //   - Validates userId and that the user exists and is not deleted.
-//   - Fetches client info via appUsecase.Repo.GetClientInfo and verifies the client
+//   - Fetches client info via appUsecase.Repo.GetApplicationInfo and verifies the client
 //     exists and the provided clientVersion matches the client metadata.
 //   - Validates that each provided optional scope is allowed by the client's
 //     configured OptionalScope. If invalid, returns a BadRequest error.
@@ -492,7 +492,7 @@ func (r *userRepo) GetUserProfileKeysById(ctx context.Context, userId string) (*
 // Returns:
 //   - error: biz.UserNotFoundError if user missing; kratos BadRequest/InternalServer
 //     errors for invalid client/version or scope; wrapped DB errors for write failures.
-func (r *userRepo) UpdateUserConsent(ctx context.Context, userId string, clientId string, clientVersion string, optionalScopes []string) error {
+func (r *userRepo) UpdateUserConsent(ctx context.Context, userId string, clientId string, clientVersion int32, optionalScopes []string) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
 	uid, err := bson.ObjectIDFromHex(userId)
@@ -524,21 +524,21 @@ func (r *userRepo) UpdateUserConsent(ctx context.Context, userId string, clientI
 		return biz.UserHasBeenDeletedError
 	}
 
-	clientInfo, err := r.appUsecase.Repo.GetClientInfo(ctx, clientId)
+	// 这里err需要进一步细分
+	// 可预期的err 包括 用户不允许使用该应用 / 是否可使用该应用的该类型 / 版本不匹配
+	// 其中 版本不匹配时 需要检查 看能否自动升级... 以及和前端进行再协调
+	applicationInfo, err := r.appUsecase.Repo.GetUserApplicationVersionInfo(ctx, clientId, userId, clientVersion)
 	if err != nil {
 		l.Errorf("failed to get client info: %v", err)
 		return err
 	}
-	if clientInfo == nil {
+	if applicationInfo == nil {
 		l.Errorf("client not found: %s", clientId)
 		return kratosErrors.InternalServer("", "client not found with no error: "+clientId)
 	}
-	if clientInfo.Version != clientVersion {
-		l.Errorf("client version mismatch: %s != %s", clientInfo.Version, clientVersion)
-		return kratosErrors.BadRequest("", "client version mismatch: "+clientVersion)
-	}
-	scopeSet := make(map[string]struct{}, len(clientInfo.OptionalScope))
-	for _, v := range clientInfo.OptionalScope {
+
+	scopeSet := make(map[string]struct{}, len(applicationInfo.OptionalScope))
+	for _, v := range applicationInfo.OptionalScope {
 		scopeSet[v] = struct{}{}
 	}
 	for _, v := range optionalScopes {
@@ -549,13 +549,13 @@ func (r *userRepo) UpdateUserConsent(ctx context.Context, userId string, clientI
 	}
 
 	collection = r.userConsentsCollection
-	filter = bson.M{"user_id": userId, "client_id": clientId}
+	filter = bson.M{"user_id": userId, "client_id": clientId, "type": applicationInfo.Type}
 
 	update := bson.M{
 		"$set": bson.M{
 			"optional_scope": optionalScopes,
 			"granted_at":     time.Now(),
-			"agreed_version": clientInfo.Version,
+			"agreed_version": applicationInfo.InternalVersion,
 		},
 	}
 	opts := options.UpdateOne().SetUpsert(true)
