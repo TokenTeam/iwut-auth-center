@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
-	"iwut-auth-center/api/auth_center/v1/auth"
+	"iwut-auth-center/api/gen/go/auth_center/v1/auth"
 	"iwut-auth-center/internal/biz"
 	"iwut-auth-center/internal/biz/mail"
 	"iwut-auth-center/internal/conf"

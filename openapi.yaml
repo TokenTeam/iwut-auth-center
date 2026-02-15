@@ -6,50 +6,6 @@ info:
     title: ""
     version: 0.0.1
 paths:
-    /app/info:
-        get:
-            tags:
-                - App
-            operationId: App_GetApplicationInfo
-            parameters:
-                - name: clientId
-                  in: query
-                  schema:
-                    type: string
-                - name: appId
-                  in: query
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/app_center.v1.app.GetApplicationInfoReply'
-    /app/list:
-        get:
-            tags:
-                - App
-            operationId: App_GetAppList
-            parameters:
-                - name: page
-                  in: query
-                  schema:
-                    type: integer
-                    format: int32
-                - name: pageSize
-                  in: query
-                  schema:
-                    type: integer
-                    format: int32
-            responses:
-                "200":
-                    description: OK
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/app_center.v1.app.GetAppListReply'
     /auth/get-register-mail:
         get:
             tags:
@@ -370,57 +326,6 @@ paths:
                                 $ref: '#/components/schemas/auth_center.v1.user.UpdateProfileReply'
 components:
     schemas:
-        app_center.v1.app.GetAppListReply:
-            type: object
-            properties:
-                code:
-                    type: integer
-                    format: int32
-                message:
-                    type: string
-        app_center.v1.app.GetApplicationInfoReply:
-            type: object
-            properties:
-                code:
-                    type: integer
-                    format: int32
-                message:
-                    type: string
-                data:
-                    $ref: '#/components/schemas/app_center.v1.app.GetApplicationInfoReply_Application'
-                traceId:
-                    type: string
-        app_center.v1.app.GetApplicationInfoReply_Application:
-            type: object
-            properties:
-                clientId:
-                    type: string
-                clientSecret:
-                    type: string
-                stableVersion:
-                    type: integer
-                    format: int32
-                grayVersion:
-                    type: integer
-                    format: int32
-                betaVersion:
-                    type: integer
-                    format: int32
-                grayPercentage:
-                    type: number
-                    format: double
-                name:
-                    type: string
-                status:
-                    type: string
-                admin:
-                    type: string
-                collaborators:
-                    type: array
-                    items:
-                        type: string
-                id:
-                    type: string
         auth_center.v1.auth.GetResetUrlReply:
             type: object
             properties:
@@ -780,7 +685,6 @@ components:
         google.protobuf.Value:
             description: Represents a dynamically typed value which can be either null, a number, a string, a boolean, a recursive struct value, or a list of values.
 tags:
-    - name: App
     - name: Auth
     - name: OAuth2
     - name: User

@@ -3,7 +3,7 @@ package data
 import (
 	"context"
 	"fmt"
-	"iwut-auth-center/api/app_center/v1/app"
+	"iwut-auth-center/api/gen/go/app_center/v1/app"
 	"iwut-auth-center/internal/biz"
 	"iwut-auth-center/internal/conf"
 	"time"

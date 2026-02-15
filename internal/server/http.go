@@ -1,9 +1,9 @@
 package server
 
 import (
-	authpb "iwut-auth-center/api/auth_center/v1/auth"
-	oauth2pb "iwut-auth-center/api/auth_center/v1/oauth2"
-	userpb "iwut-auth-center/api/auth_center/v1/user"
+	authpb "iwut-auth-center/api/gen/go/auth_center/v1/auth"
+	oauth2pb "iwut-auth-center/api/gen/go/auth_center/v1/oauth2"
+	userpb "iwut-auth-center/api/gen/go/auth_center/v1/user"
 	"iwut-auth-center/internal/conf"
 	"iwut-auth-center/internal/middleware"
 	"iwut-auth-center/internal/service"

@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
-	"iwut-auth-center/api/auth_center/v1/user"
+	"iwut-auth-center/api/gen/go/auth_center/v1/user"
 	"iwut-auth-center/internal/biz"
 	"iwut-auth-center/internal/conf"
 	"iwut-auth-center/internal/util"
