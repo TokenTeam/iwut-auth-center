@@ -2,25 +2,60 @@ package data
 
 import (
 	"context"
+	"fmt"
+	"iwut-auth-center/api/app_center/v1/app"
 	"iwut-auth-center/internal/biz"
+	"iwut-auth-center/internal/conf"
 	"time"
 
 	"github.com/go-kratos/kratos/v2/log"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 type appRepo struct {
-	data *Data
-	log  *log.Helper
+	data      *Data
+	log       *log.Helper
+	grpcConn  *grpc.ClientConn
+	appClient app.AppClient
 }
 
-func NewAppRepo(data *Data, logger log.Logger) biz.AppRepo {
-	return &appRepo{
-		data: data,
-		log:  log.NewHelper(logger),
+// NewAppRepo creates an appRepo and establishes a gRPC connection to AppCenter.
+// Returns the repo, a cleanup func to close the connection, and an error.
+func NewAppRepo(data *Data, c *conf.Data, logger log.Logger) (biz.AppRepo, func(), error) {
+	l := log.NewHelper(logger)
+	addr := ""
+	if c != nil && c.GetApp() != nil {
+		addr = c.GetApp().GetUri()
 	}
+	if addr == "" {
+		return nil, nil, fmt.Errorf("app center uri is empty in config")
+	}
+
+	conn, err := grpc.NewClient(addr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithConnectParams(grpc.ConnectParams{MinConnectTimeout: 5 * time.Second}),
+	)
+	if err != nil {
+		l.Errorf("failed to create app center client %s: %v", addr, err)
+		return nil, nil, err
+	}
+
+	client := app.NewAppClient(conn)
+	repo := &appRepo{
+		data:      data,
+		log:       log.NewHelper(logger),
+		grpcConn:  conn,
+		appClient: client,
+	}
+	cleanup := func() {
+		_ = conn.Close()
+	}
+	return repo, cleanup, nil
 }
 
-// GetClientInfo retrieves client information for the given clientId.
+// GetApplicationInfo retrieves client information for the given clientId.
 // Behavior:
 //   - It first attempts to load the client information from Redis cache.
 //   - If the cache misses, it falls back to fetching the information from the App Center
@@ -179,31 +214,44 @@ func (r *appRepo) GetUserApplicationVersionInfo(ctx context.Context, clientId st
 //	return &client, nil
 //}
 
-// getClientInfoFromAppCenter is a placeholder function that should query the
-// external App Center service to retrieve client metadata when the cache misses.
-// Current implementation returns a stubbed example client and nil error.
-// Parameters:
-// - ctx: context for cancellation and deadlines.
-// - clientId: the identifier of the client application to fetch.
-// Returns:
-// - *biz.ApplicationInfo: the client info obtained from App Center or nil if not found.
-// - error: non-nil if the external call fails.
-func (r *appRepo) getClientInfoFromAppCenter(_ context.Context, clientId string) (*biz.ApplicationInfo, error) {
-	// TODO: implement the logic after app center is ready
-	return &biz.ApplicationInfo{
-		ClientId:       clientId,
-		ClientSecret:   "123456789abcdef",
-		StableVersion:  1,
-		GrayVersion:    2,
-		BetaVersion:    3,
-		GrayPercentage: 0.1,
-		Name:           "Test_App",
-		Status:         "PUBLISHED",
-		Admin:          "official",
-		Collaborators:  []string{},
-		Id:             "official.Test_App",
-	}, nil
+func (r *appRepo) getClientInfoFromAppCenter(ctx context.Context, clientId string) (*biz.ApplicationInfo, error) {
+	if r.appClient == nil {
+		return nil, fmt.Errorf("app center client is not initialized")
+	}
+	md := metadata.Pairs("x-auth-jwt-type", "service")
+	ctxWithMD := metadata.NewOutgoingContext(ctx, md)
+	req := &app.GetApplicationInfoRequest{ClientId: &clientId}
+	resp, err := r.appClient.GetApplicationInfo(ctxWithMD, req)
+	if err != nil {
+		return nil, err
+	}
+	// check business code
+	if resp == nil {
+		return nil, nil
+	}
+	if resp.GetCode()/100 != 2 {
+		return nil, fmt.Errorf("app center returned code=%d message=%s", resp.GetCode(), resp.GetMessage())
+	}
+	ad := resp.GetData()
+	if ad == nil {
+		return nil, nil
+	}
+	ai := &biz.ApplicationInfo{
+		ClientId:       ad.GetClientId(),
+		ClientSecret:   ad.GetClientSecret(),
+		StableVersion:  ad.GetStableVersion(),
+		GrayVersion:    ad.GetGrayVersion(),
+		BetaVersion:    ad.GetBetaVersion(),
+		GrayPercentage: ad.GetGrayPercentage(),
+		Name:           ad.GetName(),
+		Status:         ad.GetStatus(),
+		Admin:          ad.GetAdmin(),
+		Collaborators:  ad.GetCollaborators(),
+		Id:             ad.GetId(),
+	}
+	return ai, nil
 }
+
 func (r *appRepo) getClientVersionInfoFromAppCenter(_ context.Context, clientId string, internalVersion int32) (*biz.ApplicationVersionInfo, error) {
 	// TODO: implement the logic after app center is ready
 	return &biz.ApplicationVersionInfo{
@@ -222,6 +270,8 @@ func (r *appRepo) getClientVersionInfoFromAppCenter(_ context.Context, clientId 
 	}, nil
 }
 func (r *appRepo) getUserApplicationVersionInfoFromAppCenter(ctx context.Context, clientId string, userId string) (*biz.ApplicationVersionInfoList, error) {
+	// userId 参数目前未使用；标记为已使用以避免编译/静态检查警告
+	_ = userId
 	a, _ := r.getClientVersionInfoFromAppCenter(ctx, clientId, 1)
 	b, _ := r.getClientVersionInfoFromAppCenter(ctx, clientId, 2)
 	c, _ := r.getClientVersionInfoFromAppCenter(ctx, clientId, 3)
@@ -232,6 +282,8 @@ func (r *appRepo) getUserApplicationVersionInfoFromAppCenter(ctx context.Context
 	}, nil
 }
 func (r *appRepo) getClientVersionInfoWithInternalVersionFromAppCenter(ctx context.Context, clientId string, userId string, internalVersion int32) (*biz.ApplicationVersionInfo, error) {
+	// userId 参数目前未使用；标记为已使用以避免编译/静态检查警告
+	_ = userId
 	// userId 参数目前未使用，应当发送到AppCenter 进行校验
 	return r.getClientVersionInfoFromAppCenter(ctx, clientId, internalVersion)
 }

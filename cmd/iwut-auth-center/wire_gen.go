@@ -43,12 +43,18 @@ func wireApp(confServer *conf.Server, confData *conf.Data, jwt *conf.Jwt, confMa
 	auditUsecase := biz.NewAuditUsecase(auditRepo)
 	jwtUtil := util.NewJwtUtil(jwt)
 	authService := service.NewAuthService(authUsecase, usecase, auditUsecase, jwtUtil, jwt, confServer)
-	appRepo := data.NewAppRepo(dataData, logger)
+	appRepo, cleanup3, err := data.NewAppRepo(dataData, confData, logger)
+	if err != nil {
+		cleanup2()
+		cleanup()
+		return nil, nil, err
+	}
 	appUsecase := biz.NewAppUsecase(appRepo)
 	userRepo := data.NewUserRepo(dataData, confData, logger, appUsecase, sha256Util)
 	userUsecase := biz.NewUserUsecase(userRepo)
 	userService, err := service.NewUserService(userUsecase, authUsecase, auditUsecase, jwtUtil, jwt)
 	if err != nil {
+		cleanup3()
 		cleanup2()
 		cleanup()
 		return nil, nil, err
@@ -61,6 +67,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, jwt *conf.Jwt, confMa
 	httpServer := server.NewHTTPServer(confServer, authService, userService, oauth2Service, jwtCheckMiddleware, logger)
 	app := newApp(logger, grpcServer, httpServer)
 	return app, func() {
+		cleanup3()
 		cleanup2()
 		cleanup()
 	}, nil

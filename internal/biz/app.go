@@ -37,7 +37,7 @@ type ApplicationInfo struct {
 	StableVersion  int32    `json:"stable_version"`  // 稳定版本
 	GrayVersion    int32    `json:"gray_version"`    // 灰度版本
 	BetaVersion    int32    `json:"beta_version"`    // 测试版本
-	GrayPercentage float32  `json:"gray_percentage"` // 灰度版本用户占比，0-1
+	GrayPercentage float64  `json:"gray_percentage"` // 灰度版本用户占比，0-1
 	Name           string   `json:"name"`            // 仅允许字母、数字、下划线、中划线
 	Status         string   `json:"status"`          // DEVELOPING AUDITING PUBLISHED BANNED（由官方下架） HIDDEN（由用户下架） ...
 	Admin          string   `json:"admin"`           // 拥有人
