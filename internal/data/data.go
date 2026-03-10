@@ -19,7 +19,7 @@ import (
 )
 
 // ProviderSet is data providers.
-var ProviderSet = wire.NewSet(NewAppRepo, NewAuditRepo, NewAuthRepo, NewUserRepo, NewOauth2Repo, NewData)
+var ProviderSet = wire.NewSet(NewAuditRepo, NewAuthRepo, NewUserRepo, NewOauth2Repo, NewData)
 
 var (
 	RedisPrefixKey string
@@ -41,6 +41,13 @@ func NewData(c *conf.Data, logger log.Logger) (*Data, func(), error) {
 	defer cancel()
 	if err := ensureUserEmailUniqueIndex(ctx, mongoClient.Database(c.GetMongodb().GetDatabase()).Collection("user")); err != nil {
 		(log.NewHelper(logger)).Warnf("ensure email unique index failed: %v", err)
+	}
+	// 尝试创建 claim.developer_id 的唯一索引（使用 partial filter），失败时记录警告但不阻止启动
+	if err := ensureDeveloperIdUniqueIndex(ctx, mongoClient.Database(c.GetMongodb().GetDatabase()).Collection("user")); err != nil {
+		(log.NewHelper(logger)).Warnf("ensure developer id unique index failed: %v", err)
+	}
+	if err := ensureConsentUniqueIndex(ctx, mongoClient.Database(c.GetMongodb().GetDatabase()).Collection("user_consents")); err != nil {
+		(log.NewHelper(logger)).Warnf("ensure consent unique index failed: %v", err)
 	}
 	redisClient, err := initRedis(c)
 	if err != nil {
@@ -166,6 +173,43 @@ func ensureUserEmailUniqueIndex(ctx context.Context, col *mongo.Collection) erro
 
 	idx := mongo.IndexModel{
 		Keys:    bson.D{{Key: "email", Value: 1}},
+		Options: idxOpts,
+	}
+	_, err := col.Indexes().CreateOne(ctx, idx)
+	return err
+}
+
+func ensureDeveloperIdUniqueIndex(ctx context.Context, col *mongo.Collection) error {
+	idxOpts := options.Index()
+	idxOpts.SetUnique(true)
+	idxOpts.SetName("idx_developer_id_unique")
+	// Use partial filter so only documents that actually have claim.developer_id
+	// of type string are included in the unique index. $ne:null can be rewritten
+	// by the server into $not which is not allowed in partial indexes, so use
+	// $type to ensure the field exists and is a string.
+	idxOpts.SetPartialFilterExpression(bson.D{
+		{Key: "claim.developer_id", Value: bson.D{{Key: "$type", Value: "string"}}},
+	})
+
+	idx := mongo.IndexModel{
+		Keys:    bson.D{{Key: "claim.developer_id", Value: 1}},
+		Options: idxOpts,
+	}
+	_, err := col.Indexes().CreateOne(ctx, idx)
+	return err
+}
+
+func ensureConsentUniqueIndex(ctx context.Context, col *mongo.Collection) error {
+	idxOpts := options.Index()
+	idxOpts.SetUnique(true)
+	idxOpts.SetName("idx_user_consents_user_client_type_unique")
+
+	idx := mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "user_id", Value: 1},
+			{Key: "client_id", Value: 1},
+			{Key: "type", Value: 1},
+		},
 		Options: idxOpts,
 	}
 	_, err := col.Indexes().CreateOne(ctx, idx)

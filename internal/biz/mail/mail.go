@@ -41,7 +41,7 @@ func (m *Usecase) SendVerifyCodeMail(ctx context.Context, expireTime int32, capt
 	body = strings.ReplaceAll(body, "{{Info}}", "您正在进行验证操作，这是您验证帐户所需的令牌验证码")
 	body = strings.ReplaceAll(body, "{{Title}}", "验证码")
 	body = strings.ReplaceAll(body, "{{Captcha}}", captcha)
-	subject := "掌上吾理--用户验证 " + captcha
+	subject := "吾理经纬--用户验证 " + captcha
 	return m.SendEmail(ctx, subject, to, body)
 }
 
@@ -56,7 +56,7 @@ func (m *Usecase) SendResetPasswordMail(ctx context.Context, expireTime int32, u
 	body = strings.ReplaceAll(body, "{{Info}}", "您正在重置密码，这是您重置密码所需的重置链接")
 	body = strings.ReplaceAll(body, "{{Title}}", "链接")
 	body = strings.ReplaceAll(body, "{{Captcha}}", "<a href=\""+url+"\">点击跳转</a>")
-	subject := "掌上吾理--密码重置链接"
+	subject := "吾理经纬--密码重置链接"
 	return m.SendEmail(ctx, subject, to, body)
 }
 

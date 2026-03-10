@@ -162,24 +162,6 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/auth_center.v1.oauth2.AuthorizeReply'
-    /oauth2/revoke_authorization:
-        post:
-            tags:
-                - OAuth2
-            operationId: OAuth2_RevokeAuthorization
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/auth_center.v1.oauth2.RevokeAuthorizationRequest'
-                required: true
-            responses:
-                "200":
-                    description: OK
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/auth_center.v1.oauth2.RevokeAuthorizationReply'
     /oauth2/set_user_storage:
         post:
             tags:
@@ -251,6 +233,17 @@ paths:
             tags:
                 - User
             operationId: User_GetProfile
+            parameters:
+                - name: userId
+                  in: query
+                  schema:
+                    type: string
+                - name: keys
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        type: string
             responses:
                 "200":
                     description: OK
@@ -270,6 +263,42 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/auth_center.v1.user.GetProfileKeysReply'
+    /user/revoke_authorization:
+        post:
+            tags:
+                - User
+            operationId: User_RevokeAuthorization
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/auth_center.v1.user.RevokeAuthorizationRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/auth_center.v1.user.RevokeAuthorizationReply'
+    /user/set-developer-id:
+        post:
+            tags:
+                - User
+            operationId: User_SetUserDeveloperId
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/auth_center.v1.user.SetUserDeveloperIdRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/auth_center.v1.user.SetUserDeveloperIdReply'
     /user/update-consent:
         post:
             tags:
@@ -536,21 +565,6 @@ components:
                     type: array
                     items:
                         type: string
-        auth_center.v1.oauth2.RevokeAuthorizationReply:
-            type: object
-            properties:
-                code:
-                    type: integer
-                    format: int32
-                message:
-                    type: string
-                traceId:
-                    type: string
-        auth_center.v1.oauth2.RevokeAuthorizationRequest:
-            type: object
-            properties:
-                clientId:
-                    type: string
         auth_center.v1.oauth2.SetUserStorageReply:
             type: object
             properties:
@@ -615,12 +629,46 @@ components:
                     type: string
                 createdAt:
                     type: string
+                    format: date-time
                 updatedAt:
                     type: string
+                    format: date-time
                 attrs:
                     type: object
                     additionalProperties:
                         type: string
+        auth_center.v1.user.RevokeAuthorizationReply:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                traceId:
+                    type: string
+        auth_center.v1.user.RevokeAuthorizationRequest:
+            type: object
+            properties:
+                clientId:
+                    type: string
+                status:
+                    type: string
+        auth_center.v1.user.SetUserDeveloperIdReply:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                traceId:
+                    type: string
+        auth_center.v1.user.SetUserDeveloperIdRequest:
+            type: object
+            properties:
+                developerId:
+                    type: string
         auth_center.v1.user.UpdatePasswordReply:
             type: object
             properties:

@@ -8,8 +8,10 @@ import "google/protobuf/duration.proto";
 message Bootstrap {
   Server server = 1;
   Data data = 2;
-  Jwt jwt = 3;
-  Mail mail = 4;
+  Service service = 3;
+  Jwt jwt = 4;
+  Mail mail = 5;
+  Oauth2 oauth2 = 6;
 }
 
 message Server {
@@ -29,6 +31,7 @@ message Server {
   string version = 4;
   string frontend_url = 5;
   string jaeger_endpoint = 6;
+  string env = 7;
 }
 
 message Data {
@@ -58,13 +61,16 @@ message Data {
     google.protobuf.Duration connect_timeout = 6;
     Limitations limitations = 7;
   }
-  message App {
-    string uri = 1;
-  }
   Database database = 1;
   Redis redis = 2;
   MongoDB mongodb = 3;
-  App app = 4;
+}
+
+message Service {
+  message App {
+    string uri = 1;
+  }
+  App app = 1;
 }
 
 message Jwt {
@@ -86,4 +92,11 @@ message Mail {
   string password = 4;
   string from = 5;
   bool use_tls = 6;
+}
+
+message Oauth2 {
+  message Official {
+    string user_id = 1;
+  }
+  Official official = 1;
 }

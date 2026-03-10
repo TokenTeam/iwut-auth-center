@@ -14,7 +14,6 @@ import (
 	"github.com/go-redis/redis/v8"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type authRepo struct {
@@ -69,9 +68,9 @@ func (r *authRepo) CheckPasswordWithEmailAndGetUserIdAndVersion(ctx context.Cont
 	filter := bson.M{"email": email, "password": password}
 
 	var result struct {
-		UserId    bson.ObjectID `bson:"_id"`
-		Version   int           `bson:"version"`
-		DeletedAt *time.Time    `bson:"deleted_at"`
+		UserId    string     `bson:"uid"`
+		Version   int        `bson:"version"`
+		DeletedAt *time.Time `bson:"deleted_at"`
 	}
 	err := collection.FindOne(ctx, filter).Decode(&result)
 
@@ -81,26 +80,83 @@ func (r *authRepo) CheckPasswordWithEmailAndGetUserIdAndVersion(ctx context.Cont
 		}
 		l.Errorf("failed to find user: %v", err)
 		return "", -1, fmt.Errorf("failed to find user: %w", err)
-	} else if result.DeletedAt != nil {
-		// 30 天内可以恢复
-		if time.Since(*result.DeletedAt) < 30*24*time.Hour {
-			update := bson.M{
-				"$set": bson.M{
-					"deleted_at": nil,
-					"updated_at": time.Now(),
-				},
-			}
-			_, err = collection.UpdateOne(ctx, filter, update)
+	}
+	if result.DeletedAt != nil {
+		if success, err := r.TryRestoreDeletedUser(ctx, result.UserId, result.DeletedAt); err != nil || !success {
 			if err != nil {
-				l.Errorf("failed to restore deleted user: %v", err)
+				l.Error("failed to restore deleted user: %v", err)
 				return "", -1, fmt.Errorf("failed to restore deleted user: %w", err)
 			}
-		} else {
 			return "", -1, biz.UserHasBeenDeletedError
 		}
 	}
 
-	return result.UserId.Hex(), result.Version, nil
+	return result.UserId, result.Version, nil
+}
+
+func (r *authRepo) GetDeveloperIdByUserId(ctx context.Context, uid string) (*string, error) {
+	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	l.Debugf("GetDeveloperIdByUserId called with userId: %s", uid)
+	collection := r.userCollection
+	filter := bson.M{"uid": uid}
+
+	// Decode into a nested struct so we can read claim.developer_id correctly.
+	var result struct {
+		Claim struct {
+			DeveloperId *string `bson:"developer_id"`
+		} `bson:"claim"`
+		DeletedAt *time.Time `bson:"deleted_at"`
+	}
+	if err := collection.FindOne(ctx, filter).Decode(&result); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, biz.UserNotFoundError
+		}
+		l.Errorf("failed to find user: %v", err)
+		return nil, fmt.Errorf("failed to find user: %w", err)
+	}
+	if result.DeletedAt != nil {
+		if success, err := r.TryRestoreDeletedUser(ctx, uid, result.DeletedAt); err != nil || !success {
+			if err != nil {
+				l.Error("failed to restore deleted user: %v", err)
+				return nil, fmt.Errorf("failed to restore deleted user: %w", err)
+			}
+			return nil, biz.UserHasBeenDeletedError
+		}
+	}
+	return result.Claim.DeveloperId, nil
+}
+
+func (r *authRepo) TryRestoreDeletedUser(ctx context.Context, uid string, deletedAt *time.Time) (bool, error) {
+	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	l.Debugf("TryRestoreDeletedUser called with userId: %s", uid)
+	if deletedAt == nil {
+		return false, fmt.Errorf("deletedAt is nil")
+	}
+	// 30 天内可以恢复
+	if time.Since(*deletedAt) < 30*24*time.Hour {
+		filter := bson.M{"uid": uid}
+		update := bson.M{
+			"$set": bson.M{
+				"deleted_at": nil,
+				"updated_at": time.Now(),
+			},
+		}
+		_, err := r.userCollection.UpdateOne(ctx, filter, update)
+		if err != nil {
+			l.Errorf("failed to restore deleted user: %v", err)
+			return false, fmt.Errorf("failed to restore deleted user: %w", err)
+		}
+	} else {
+		return false, biz.UserHasBeenDeletedError
+	}
+	return true, nil
 }
 
 // TryInsertRegisterCaptcha attempts to record a registration captcha for an email
@@ -373,20 +429,28 @@ func (r *authRepo) CheckResetPasswordCaptchaUsable(ctx context.Context, email st
 func (r *authRepo) RegisterUser(ctx context.Context, email string, password string) (string, error) {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 	password = r.sha256Util.HashPassword(password)
-	filter := bson.M{"email": email}
-	update := bson.M{
-		"$setOnInsert": bson.M{
-			"email":      email,
-			"password":   password,
-			"created_at": time.Now(),
-			"updated_at": time.Now(),
-			"version":    0,
-		},
+	uid := util.MustUUIDv7String()
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	l.Debugf("RegisterUser called with email: %s", email)
+
+	// Build the document to insert. We use InsertOne so we only return the uid
+	// when an actual insert happened. Rely on DB unique constraint to prevent
+	// duplicates; catch duplicate-key error and return a friendly error.
+
+	doc := bson.M{
+		"uid":        uid,
+		"email":      email,
+		"password":   password,
+		"created_at": time.Now(),
+		"updated_at": time.Now(),
+		"version":    0,
 	}
-	opt := options.UpdateOne().SetUpsert(true)
-	res, err := r.userCollection.UpdateOne(ctx, filter, update, opt)
+
+	_, err := r.userCollection.InsertOne(ctx, doc)
 	if err != nil {
-		// 仍然可能因并发插入产生 duplicate-key（极端 race），需要检查 err 的 11000
+		// If duplicate key error (11000) occurs, map to UserAlreadyExistsError.
 		var we mongo.WriteException
 		if errors.As(err, &we) {
 			for _, e := range we.WriteErrors {
@@ -395,25 +459,12 @@ func (r *authRepo) RegisterUser(ctx context.Context, email string, password stri
 				}
 			}
 		}
-		l.Errorf("failed to upsert user: %v", err)
-		return "", fmt.Errorf("failed to upsert user: %w", err)
+		l.Errorf("failed to insert user: %v", err)
+		return "", fmt.Errorf("failed to insert user: %w", err)
 	}
 
-	// UpsertedID == nil：表示已经存在并被匹配（没有插入新文档）
-	if res.UpsertedID == nil {
-		return "", biz.UserAlreadyExistsError
-	}
-
-	var idStr string
-	switch id := res.UpsertedID.(type) {
-	case bson.ObjectID:
-		idStr = id.Hex()
-	case string:
-		idStr = id
-	default:
-		idStr = fmt.Sprintf("%v", id)
-	}
-	return idStr, nil
+	// Optionally, verify inserted id if needed. We return the generated uid.
+	return uid, nil
 }
 
 func (r *authRepo) ResetPassword(ctx context.Context, email string, newPassword string) error {
@@ -421,8 +472,8 @@ func (r *authRepo) ResetPassword(ctx context.Context, email string, newPassword 
 	newPassword = r.sha256Util.HashPassword(newPassword)
 	filter := bson.M{"email": email}
 	var result struct {
-		UserId  bson.ObjectID `bson:"_id"`
-		Version int           `bson:"version"`
+		UserId  string `bson:"uid"`
+		Version int    `bson:"version"`
 	}
 	err := r.userCollection.FindOne(ctx, filter).Decode(&result)
 	if err != nil {
@@ -448,7 +499,7 @@ func (r *authRepo) ResetPassword(ctx context.Context, email string, newPassword 
 	if res.MatchedCount == 0 {
 		return biz.UserNotFoundError
 	}
-	err = r.AddOrUpdateUserVersion(ctx, result.UserId.Hex(), result.Version, r.accessTokenLifeSpan)
+	err = r.AddOrUpdateUserVersion(ctx, result.UserId, result.Version, r.accessTokenLifeSpan)
 	if err != nil {
 		l.Errorf("AddOrUpdateUserVersion error: %v", err)
 		return fmt.Errorf("failed to update user version in redis: %w", err)
@@ -508,22 +559,22 @@ func (r *authRepo) AddOrUpdateUserVersion(ctx context.Context, userId string, ve
 // Returns:
 // - int: the cached or DB-derived version on success.
 // - error: non-nil on redis/mongo errors or when user is not found / deleted.
-func (r *authRepo) GetUserVersion(ctx context.Context, userId string, ttl time.Duration) (int, error) {
+func (r *authRepo) GetUserVersion(ctx context.Context, uid string, ttl time.Duration) (int, error) {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
-	key := GetRedisKey("user_version", userId)
+	key := GetRedisKey("user_version", uid)
 	val, err := r.data.redis.Get(ctx, key).Result()
 	if errors.Is(err, redis.Nil) {
 		// 该情况可能是服务器重启后缓存丢失导致的，理论上不应该发生
 		l.Errorf("Get user Version not found, which shouldn't be possible.")
 
 		collection := r.userCollection
-		filter := bson.M{"_id": userId}
+		filter := bson.M{"uid": uid}
 
 		var result struct {
 			Version   int        `bson:"version"`
 			DeletedAt *time.Time `bson:"deleted_at"`
 		}
-		err := collection.FindOne(ctx, filter).Decode(&result)
+		err = collection.FindOne(ctx, filter).Decode(&result)
 		if err != nil {
 			if errors.Is(err, mongo.ErrNoDocuments) {
 				return 1<<31 - 1, biz.UserNotFoundError
@@ -533,7 +584,7 @@ func (r *authRepo) GetUserVersion(ctx context.Context, userId string, ttl time.D
 		} else if result.DeletedAt != nil {
 			return 1<<31 - 1, biz.UserHasBeenDeletedError
 		}
-		err = r.AddOrUpdateUserVersion(ctx, userId, result.Version, ttl)
+		err = r.AddOrUpdateUserVersion(ctx, uid, result.Version, ttl)
 		if err != nil {
 			l.Errorf("AddOrUpdateUserVersion error: %v", err)
 		}

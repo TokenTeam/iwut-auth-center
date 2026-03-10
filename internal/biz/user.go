@@ -1,14 +1,20 @@
 package biz
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type UserRepo interface {
-	UpdateUserPassword(ctx context.Context, userId string, oldPassword string, newPassword string) error
-	DeleteUserAccount(ctx context.Context, userId string) error
-	GetUserProfileById(ctx context.Context, userId string) (*UserProfile, error)
-	UpdateUserProfile(ctx context.Context, userId string, attrs map[string]string) error
-	GetUserProfileKeysById(ctx context.Context, userId string) (*UserProfileKeys, error)
-	UpdateUserConsent(ctx context.Context, userId string, clientId string, clientVersion int32, optionalScopes []string) error
+	UpdateUserPassword(ctx context.Context, uid string, oldPassword string, newPassword string) error
+	DeleteUserAccount(ctx context.Context, uid string) error
+	GetUserProfileByIdWithFilter(ctx context.Context, uid string, keys []string) (*UserProfile, error)
+	UpdateUserProfile(ctx context.Context, uid string, attrs map[string]string) error
+	GetUserProfileKeysById(ctx context.Context, uid string) (*UserProfileKeys, error)
+	UpdateUserConsent(ctx context.Context, uid string, clientId string, clientVersion int32, status string, optionalScopes []string, doCheck bool) error
+	SetUserDeveloperId(ctx context.Context, uid string, developerId string) error
+	RevokeUserConsent(ctx context.Context, uid string, clientId string, status string) error
+	RemoveOAuthJTIsFormRedis(ctx context.Context, jtis []string) error
 }
 
 type UserUsecase struct {
@@ -18,8 +24,8 @@ type UserUsecase struct {
 type UserProfile struct {
 	UserId        string
 	Email         string
-	CreatedAt     int64
-	UpdatedAt     int64
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 	OfficialAttrs map[string]string
 }
 

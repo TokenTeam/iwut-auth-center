@@ -30,7 +30,7 @@ init:
 # generate internal proto
 config:
 	protoc --proto_path=./internal \
-	       --proto_path=./third_party \
+	       --proto_path=./api/third_party \
  	       --go_out=paths=source_relative:./internal \
 	       $(INTERNAL_PROTO_FILES)
 
@@ -49,6 +49,11 @@ api:
 # generate wire
 wire:
 	wire ./cmd/iwut-auth-center
+
+.PHONY: dev-build
+# build
+dev-build:
+	mkdir -p bin/ && go build -ldflags "-X main.Version=$(VERSION)" -gcflags "all=-N -l" -o ./bin/ ./...
 
 .PHONY: build
 # build

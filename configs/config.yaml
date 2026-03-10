@@ -6,9 +6,10 @@ server:
     addr: 0.0.0.0:9000
     timeout: 1s
   name: "${serverName:AuthCenter}"
-  version: "${serverVersion:1.0.0}"
+  version: "${serverVersion:1.0.2}"
   frontend_url: "${frontendUrl:http://localhost:3000}"
   jaeger_endpoint: "${jaegerEndpoint:localhost:4317}"
+  env: "${env:PROD}"
 data:
   database:
     driver: mysql
@@ -30,6 +31,7 @@ data:
         # per user per client (KB)
         official_mem_limit: ${mongoUserOfficialMemLimit:16}
         oauth2_mem_limit: ${mongoUserOAuthMemLimit:4096}
+service:
   app:
     uri: "${appUrl:localhost:9001}"
 
@@ -46,3 +48,6 @@ mail:
   port: 587
   username: "no-reply@tokenteam.net"
   password: "${mailPassword:test}"
+oauth2:
+  official:
+    user_id: "${officialUserId:019c8498-8af4-709e-aab1-09857a1ee91a}"

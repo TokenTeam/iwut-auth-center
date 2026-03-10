@@ -46,10 +46,15 @@ func (s *AuthService) PasswordLogin(ctx context.Context, in *auth.LoginRequest) 
 
 	successProcess, errorProcess := util.GetProcesses[*auth.LoginReply]("PasswordLogin", GetAuditInsertFunc(*s.auditUsecase))
 	userId, version, err := s.authUsecase.Repo.CheckPasswordWithEmailAndGetUserIdAndVersion(ctx, in.Email, in.Password)
+	if err != nil {
+		return nil, errorProcess(ctx, err, util.Audit{})
+	}
 
+	userDeveloperId, err := s.authUsecase.Repo.GetDeveloperIdByUserId(ctx, userId)
 	if err != nil {
 		return nil, errorProcess(ctx, err, util.Audit{UserID: &userId})
 	}
+
 	err = s.authUsecase.Repo.AddOrUpdateUserVersion(ctx, userId, version, s.refreshTokenLifeSpan)
 	if err != nil {
 		return nil, errorProcess(ctx, err, util.Audit{UserID: &userId})
@@ -58,6 +63,7 @@ func (s *AuthService) PasswordLogin(ctx context.Context, in *auth.LoginRequest) 
 		"uid":     userId,
 		"type":    "access",
 		"version": version,
+		"did":     userDeveloperId,
 	}, s.accessTokenLifeSpan)
 	if err != nil {
 		return nil, errorProcess(ctx, err, util.Audit{UserID: &userId})
@@ -66,6 +72,7 @@ func (s *AuthService) PasswordLogin(ctx context.Context, in *auth.LoginRequest) 
 		"uid":     userId,
 		"type":    "refresh",
 		"version": version,
+		"did":     userDeveloperId,
 	}, s.refreshTokenLifeSpan)
 	if err != nil {
 		return nil, errorProcess(ctx, err, util.Audit{UserID: &userId})

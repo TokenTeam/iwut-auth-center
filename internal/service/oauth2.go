@@ -21,18 +21,18 @@ type Oauth2Service struct {
 	oauth2.UnimplementedOAuth2Server
 	oauth2Usecase        *biz.Oauth2Usecase
 	auditUsecase         *biz.AuditUsecase
-	appUsecase           *biz.AppUsecase
+	appCenterUtil        *util.AppCenterUtil
 	jwtUtil              *util.JwtUtil
 	accessTokenLifeSpan  time.Duration
 	refreshTokenLifeSpan time.Duration
 }
 
 // NewOauth2Service constructs an Oauth2Service wiring usecases and JWT util.
-func NewOauth2Service(oauth2Usecase *biz.Oauth2Usecase, auditUsecase *biz.AuditUsecase, appUsecase *biz.AppUsecase, jwtUtil *util.JwtUtil, c *conf.Jwt) *Oauth2Service {
+func NewOauth2Service(oauth2Usecase *biz.Oauth2Usecase, auditUsecase *biz.AuditUsecase, appCenterUtil *util.AppCenterUtil, jwtUtil *util.JwtUtil, c *conf.Jwt) *Oauth2Service {
 	return &Oauth2Service{
 		oauth2Usecase:        oauth2Usecase,
 		auditUsecase:         auditUsecase,
-		appUsecase:           appUsecase,
+		appCenterUtil:        appCenterUtil,
 		jwtUtil:              jwtUtil,
 		accessTokenLifeSpan:  time.Duration(c.GetAccessTokenLifeSpan()) * time.Second,
 		refreshTokenLifeSpan: time.Duration(c.GetRefreshTokenLifeSpan()) * time.Second,
@@ -78,9 +78,10 @@ func (s *Oauth2Service) Authorize(ctx context.Context, in *oauth2.AuthorizeReque
 		CodeChallenge:       codeChallenge,
 		CodeChallengeMethod: codeChallengeMethod,
 		CreatedAt:           time.Now().Unix(),
+		Status:              "",
 	}
 
-	if ok, err := s.oauth2Usecase.Repo.CheckGetCodeRequest(ctx, codeInfo); !ok {
+	if ok, err := s.oauth2Usecase.Repo.CheckGetCodeAndSetTypeRequest(ctx, codeInfo); !ok {
 		if err != nil {
 			return nil, errorProcess(ctx, err)
 		}
@@ -146,7 +147,7 @@ func (s *Oauth2Service) GetToken(ctx context.Context, in *oauth2.GetTokenRequest
 		}, nil
 	}
 
-	clientInfo, err := s.appUsecase.Repo.GetApplicationInfo(ctx, codeInfo.ClientId)
+	clientInfo, err := s.appCenterUtil.GetApplicationInfo(ctx, codeInfo.ClientId)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
@@ -215,7 +216,7 @@ func (s *Oauth2Service) GetToken(ctx context.Context, in *oauth2.GetTokenRequest
 			ErrorDescription: stringPtr("failed to erase used authorization code"),
 		}, nil
 	}
-	err = s.oauth2Usecase.Repo.InsertJTIToUserConsents(ctx, codeInfo.UserId, clientInfo.ClientId, jti)
+	err = s.oauth2Usecase.Repo.InsertJTIToUserConsents(ctx, codeInfo.UserId, clientInfo.ClientId, jti, codeInfo.Status)
 	if err != nil {
 		return &oauth2.GetTokenReply{
 			Error:            stringPtr("internal_error"),
@@ -231,29 +232,6 @@ func (s *Oauth2Service) GetToken(ctx context.Context, in *oauth2.GetTokenRequest
 		ExpiresIn:    &expiresIn,
 		Scope:        stringPtr(codeInfo.Scope),
 	}, nil
-}
-
-// RevokeAuthorization revokes the authenticated user's consent for a client.
-// - Validates caller via JWT and delegates the revoke operation to oauth2 usecase repo.
-// - Returns RPC-level success or propagated errors and records audit.
-func (s *Oauth2Service) RevokeAuthorization(ctx context.Context, in *oauth2.RevokeAuthorizationRequest) (*oauth2.RevokeAuthorizationReply, error) {
-	successProcess, errorProcess := util.GetProcesses[*oauth2.RevokeAuthorizationReply]("RevokeAuthorization", GetAuditInsertFunc(*s.auditUsecase))
-	claim, err := s.jwtUtil.GetBaseAuthClaims(ctx)
-	if err != nil {
-		return nil, errorProcess(ctx, err)
-	}
-
-	err = s.oauth2Usecase.Repo.RevokeUserConsent(ctx, claim.Uid, in.GetClientId())
-	if err != nil {
-		return nil, errorProcess(ctx, err)
-	}
-	return successProcess(ctx, func(reqId string) *oauth2.RevokeAuthorizationReply {
-		return &oauth2.RevokeAuthorizationReply{
-			Code:    200,
-			Message: "revoke success",
-			TraceId: &reqId,
-		}
-	}), nil
 }
 
 // GetUserProfile returns the profile visible to the requesting OAuth client (azp from JWT).

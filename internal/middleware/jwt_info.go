@@ -27,6 +27,8 @@ func GetJwtTypeFromHeader(header transport.Header) util.JwtType {
 		return util.OfficialJwt
 	case "oauth":
 		return util.OAuthJwt
+	case "service":
+		return util.ServiceRequest
 	default:
 		return util.UnknownJwt
 	}
@@ -69,6 +71,14 @@ func (c *JwtCheckMiddleware) GetJwtInfoMiddleware() middleware.Middleware {
 				}
 				ctx = c.jwtUtil.WithTokenValue(ctx, &util.TokenValue{
 					OAuthClaims: oauthClaims,
+				})
+			case util.ServiceRequest:
+				serviceClaims, err := util.ServiceClaimsFromJSON(header.Get("X-Auth-Service-Claim"))
+				if err != nil {
+					return nil, errors.Unauthorized("", err.Error())
+				}
+				ctx = c.jwtUtil.WithTokenValue(ctx, &util.TokenValue{
+					ServiceClaims: serviceClaims,
 				})
 			}
 			return handler(ctx, req)

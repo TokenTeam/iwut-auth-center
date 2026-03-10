@@ -26,7 +26,7 @@ import (
 // Injectors from wire.go:
 
 // wireApp init kratos application.
-func wireApp(confServer *conf.Server, confData *conf.Data, jwt *conf.Jwt, confMail *conf.Mail, logger log.Logger) (*kratos.App, func(), error) {
+func wireApp(confServer *conf.Server, confData *conf.Data, jwt *conf.Jwt, confMail *conf.Mail, confService *conf.Service, oauth2 *conf.Oauth2, logger log.Logger) (*kratos.App, func(), error) {
 	dataData, cleanup, err := data.NewData(confData, logger)
 	if err != nil {
 		return nil, nil, err
@@ -43,14 +43,13 @@ func wireApp(confServer *conf.Server, confData *conf.Data, jwt *conf.Jwt, confMa
 	auditUsecase := biz.NewAuditUsecase(auditRepo)
 	jwtUtil := util.NewJwtUtil(jwt)
 	authService := service.NewAuthService(authUsecase, usecase, auditUsecase, jwtUtil, jwt, confServer)
-	appRepo, cleanup3, err := data.NewAppRepo(dataData, confData, logger)
+	appCenterUtil, cleanup3, err := util.NewAppCenterUtil(confService, logger)
 	if err != nil {
 		cleanup2()
 		cleanup()
 		return nil, nil, err
 	}
-	appUsecase := biz.NewAppUsecase(appRepo)
-	userRepo := data.NewUserRepo(dataData, confData, logger, appUsecase, sha256Util)
+	userRepo := data.NewUserRepo(dataData, confData, logger, appCenterUtil, sha256Util)
 	userUsecase := biz.NewUserUsecase(userRepo)
 	userService, err := service.NewUserService(userUsecase, authUsecase, auditUsecase, jwtUtil, jwt)
 	if err != nil {
@@ -59,9 +58,9 @@ func wireApp(confServer *conf.Server, confData *conf.Data, jwt *conf.Jwt, confMa
 		cleanup()
 		return nil, nil, err
 	}
-	oauth2Repo := data.NewOauth2Repo(dataData, confData, jwt, appUsecase, userUsecase, logger)
+	oauth2Repo := data.NewOauth2Repo(dataData, confData, oauth2, jwt, appCenterUtil, userUsecase, logger)
 	oauth2Usecase := biz.NewOauth2Usecase(oauth2Repo)
-	oauth2Service := service.NewOauth2Service(oauth2Usecase, auditUsecase, appUsecase, jwtUtil, jwt)
+	oauth2Service := service.NewOauth2Service(oauth2Usecase, auditUsecase, appCenterUtil, jwtUtil, jwt)
 	jwtCheckMiddleware := middleware.NewJwtInfoMiddleware(jwtUtil)
 	grpcServer := server.NewGRPCServer(confServer, authService, userService, oauth2Service, jwtCheckMiddleware, logger)
 	httpServer := server.NewHTTPServer(confServer, authService, userService, oauth2Service, jwtCheckMiddleware, logger)

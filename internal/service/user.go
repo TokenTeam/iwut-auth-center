@@ -11,6 +11,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type UserService struct {
@@ -88,14 +89,19 @@ func (s *UserService) DeleteAccount(ctx context.Context, _ *emptypb.Empty) (*use
 // GetProfile returns the authenticated user's profile information.
 // - Extracts user id from JWT and fetches profile from user usecase repo,
 // - Translates domain profile to RPC reply structure and returns it.
-func (s *UserService) GetProfile(ctx context.Context, _ *emptypb.Empty) (*user.GetProfileReply, error) {
+func (s *UserService) GetProfile(ctx context.Context, in *user.GetProfileRequest) (*user.GetProfileReply, error) {
 	successProcess, errorProcess := util.GetProcesses[*user.GetProfileReply]("GetProfile", GetAuditInsertFunc(*s.auditUsecase))
-
-	claim, err := s.jwtUtil.GetBaseAuthClaims(ctx)
+	uid := in.GetUserId()
+	_, err := s.jwtUtil.GetServiceClaims(ctx)
 	if err != nil {
-		return nil, errorProcess(ctx, err)
+		claim, err := s.jwtUtil.GetBaseAuthClaims(ctx)
+		if err != nil {
+			return nil, errorProcess(ctx, err)
+		}
+		uid = claim.Uid
 	}
-	userProfile, err := s.userUsecase.Repo.GetUserProfileById(ctx, claim.Uid)
+
+	userProfile, err := s.userUsecase.Repo.GetUserProfileByIdWithFilter(ctx, uid, in.GetKeys())
 	if err != nil {
 		return nil, errorProcess(ctx, err)
 	}
@@ -107,8 +113,8 @@ func (s *UserService) GetProfile(ctx context.Context, _ *emptypb.Empty) (*user.G
 			Data: &user.GetProfileReply_GetProfileReplyData{
 				UserId:    userProfile.UserId,
 				Email:     userProfile.Email,
-				CreatedAt: userProfile.CreatedAt,
-				UpdatedAt: userProfile.UpdatedAt,
+				CreatedAt: timestamppb.New(userProfile.CreatedAt),
+				UpdatedAt: timestamppb.New(userProfile.UpdatedAt),
 				Attrs:     userProfile.OfficialAttrs,
 			},
 			TraceId: reqId,
@@ -184,7 +190,7 @@ func (s *UserService) UpdateUserConsent(ctx context.Context, in *user.UpdateUser
 		return nil, errorProcess(ctx, err)
 	}
 
-	if err = s.userUsecase.Repo.UpdateUserConsent(ctx, claim.Uid, in.GetClientId(), in.GetClientVersion(), in.GetOptionalScopes()); err != nil {
+	if err = s.userUsecase.Repo.UpdateUserConsent(ctx, claim.Uid, in.GetClientId(), in.GetClientVersion(), "", in.GetOptionalScopes(), true); err != nil {
 		return nil, errorProcess(ctx, err)
 	}
 	return successProcess(ctx, func(reqId string) *user.UpdateUserConsentReply {
@@ -192,6 +198,48 @@ func (s *UserService) UpdateUserConsent(ctx context.Context, in *user.UpdateUser
 			Code:    200,
 			Message: "Updated successfully",
 			TraceId: reqId,
+		}
+	}), nil
+}
+
+func (s *UserService) SetUserDeveloperId(ctx context.Context, in *user.SetUserDeveloperIdRequest) (*user.SetUserDeveloperIdReply, error) {
+	successProcess, errorProcess := util.GetProcesses[*user.SetUserDeveloperIdReply]("SetUserDeveloperId", GetAuditInsertFunc(*s.auditUsecase))
+
+	claim, err := s.jwtUtil.GetBaseAuthClaims(ctx)
+	if err != nil {
+		return nil, errorProcess(ctx, err)
+	}
+	if err = s.userUsecase.Repo.SetUserDeveloperId(ctx, claim.Uid, in.GetDeveloperId()); err != nil {
+		return nil, errorProcess(ctx, err)
+	}
+	return successProcess(ctx, func(reqId string) *user.SetUserDeveloperIdReply {
+		return &user.SetUserDeveloperIdReply{
+			Code:    200,
+			Message: "Updated successfully",
+			TraceId: reqId,
+		}
+	}), nil
+}
+
+// RevokeAuthorization revokes the authenticated user's consent for a client.
+// - Validates caller via JWT and delegates the revoke operation to oauth2 usecase repo.
+// - Returns RPC-level success or propagated errors and records audit.
+func (s *UserService) RevokeAuthorization(ctx context.Context, in *user.RevokeAuthorizationRequest) (*user.RevokeAuthorizationReply, error) {
+	successProcess, errorProcess := util.GetProcesses[*user.RevokeAuthorizationReply]("RevokeAuthorization", GetAuditInsertFunc(*s.auditUsecase))
+	claim, err := s.jwtUtil.GetBaseAuthClaims(ctx)
+	if err != nil {
+		return nil, errorProcess(ctx, err)
+	}
+
+	err = s.userUsecase.Repo.RevokeUserConsent(ctx, claim.Uid, in.GetClientId(), in.GetStatus())
+	if err != nil {
+		return nil, errorProcess(ctx, err)
+	}
+	return successProcess(ctx, func(reqId string) *user.RevokeAuthorizationReply {
+		return &user.RevokeAuthorizationReply{
+			Code:    200,
+			Message: "revoke success",
+			TraceId: &reqId,
 		}
 	}), nil
 }

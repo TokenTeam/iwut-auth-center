@@ -14,6 +14,7 @@ import (
 	kratosErrors "github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-redis/redis/v8"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -22,19 +23,33 @@ import (
 type oauth2Repo struct {
 	data                       *Data
 	log                        *log.Helper
-	appUsecase                 *biz.AppUsecase
+	appCenterUtil              *util.AppCenterUtil
 	userUsecase                *biz.UserUsecase
 	userCollection             *mongo.Collection
 	userConsentsCollection     *mongo.Collection
 	refreshTokenLifeSpan       time.Duration
+	officialClientId           string
 	oauth2InfoMemoryLimitation int64
+}
+
+type userConsentRecord struct {
+	AgreedVersion int32    `bson:"agreed_version"`
+	OptionalScope []string `bson:"optional_scope"`
+	Type          string   `bson:"type"`
+}
+
+type resolvedUserConsentAccess struct {
+	Allowed                bool
+	ApplicationVersionInfo *util.ApplicationVersionInfo
+	BasicScope             []string
+	OptionalScope          []string
 }
 
 // NewOauth2Repo constructs an oauth2 repository backed by MongoDB and Redis.
 // It binds the `user` and `user_consents` collections and reads relevant
 // configuration (refresh token TTL and per-user storage memory limits).
 // It does not mutate DB schema or create indexes.
-func NewOauth2Repo(data *Data, c *conf.Data, jwtConf *conf.Jwt, appUsecase *biz.AppUsecase, userUsecase *biz.UserUsecase, logger log.Logger) biz.Oauth2Repo {
+func NewOauth2Repo(data *Data, c *conf.Data, co *conf.Oauth2, jwtConf *conf.Jwt, appCenterUtil *util.AppCenterUtil, userUsecase *biz.UserUsecase, logger log.Logger) biz.Oauth2Repo {
 	dbName := c.GetMongodb().GetDatabase()
 	usersCollection := data.mongo.Database(dbName).Collection("user")
 	userConsentsCollection := data.mongo.Database(dbName).Collection("user_consents")
@@ -42,28 +57,30 @@ func NewOauth2Repo(data *Data, c *conf.Data, jwtConf *conf.Jwt, appUsecase *biz.
 	return &oauth2Repo{
 		data:                       data,
 		log:                        log.NewHelper(logger),
-		appUsecase:                 appUsecase,
+		appCenterUtil:              appCenterUtil,
 		userUsecase:                userUsecase,
 		userCollection:             usersCollection,
 		userConsentsCollection:     userConsentsCollection,
 		refreshTokenLifeSpan:       time.Duration(jwtConf.GetRefreshTokenLifeSpan()) * time.Second,
+		officialClientId:           co.GetOfficial().GetUserId(),
 		oauth2InfoMemoryLimitation: c.GetMongodb().GetLimitations().GetUser().GetOauth2MemLimit(),
 	}
 }
 
-// CheckGetCodeRequest
+// CheckGetCodeAndSetTypeRequest
 // 简介：校验授权码请求的基本合法性与权限。
 // 行为说明：
 // - 验证 codeInfo.Scope 与 codeInfo.ResponseType 是否为支持的值。
-// - 调用 CheckUserPermission 验证用户对客户端的访问权限。
-// - 通过 appUsecase 获取客户端注册的 redirect_uri 列表，确保请求中的 redirect_uri 匹配其中之一。
+// - 调用 CheckUserPermissionAndGetApplicationVersionInfo 验证用户对客户端的访问权限。
+// - 通过 appCenterUtil 获取客户端注册的 redirect_uri 列表，确保请求中的 redirect_uri 匹配其中之一。
+// - 若检查成功，设置传入的codeInfo的Status
 // 参数：
 // - ctx: 上下文，用于超时和取消控制。
 // - codeInfo: *biz.CodeInfo，包含 userId、clientId、redirectUri、scope、responseType 等信息。
 // 返回值：
 // - bool: 请求合法且被允许时返回 true，否则返回 false。
 // - error: 发生错误或请求不合法时返回相应的 kratos 错误或封装后的内部错误。
-func (r *oauth2Repo) CheckGetCodeRequest(ctx context.Context, codeInfo *biz.CodeInfo) (bool, error) {
+func (r *oauth2Repo) CheckGetCodeAndSetTypeRequest(ctx context.Context, codeInfo *biz.CodeInfo) (bool, error) {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
 	userId := codeInfo.UserId
@@ -78,29 +95,27 @@ func (r *oauth2Repo) CheckGetCodeRequest(ctx context.Context, codeInfo *biz.Code
 		return false, kratosErrors.BadRequest("", "unsupported response_type")
 	}
 
-	l.Debugf("CheckGetCodeRequest userId: %s, codeInfo: %+v", userId, codeInfo)
+	l.Debugf("CheckGetCodeAndSetTypeRequest userId: %s, codeInfo: %+v", userId, codeInfo)
 
-	if ok, err := r.CheckUserPermission(ctx, userId, codeInfo.ClientId, codeInfo.InternalVersion); !ok {
+	ok, applicationVersionInfo, err := r.CheckUserPermissionAndGetApplicationVersionInfo(ctx, userId, codeInfo.ClientId, codeInfo.InternalVersion)
+	if !ok {
 		return false, err
 	}
-	//clientInfo, err := r.appUsecase.Repo.GetApplicationInfo(ctx, codeInfo.ClientId)
-
-	userApplicationVersionInfo, err := r.appUsecase.Repo.GetUserApplicationVersionInfo(ctx, codeInfo.ClientId, codeInfo.UserId, codeInfo.InternalVersion)
-	if err != nil {
-		l.Errorf("GetApplicationInfo failed: %v", err)
-		return false, err
-	}
-	if userApplicationVersionInfo == nil {
+	if applicationVersionInfo == nil {
 		return false, kratosErrors.BadRequest("", "invalid client_id or user_id")
 	}
-	if func(redirectUri []string) bool {
-		for _, url := range redirectUri {
-			if codeInfo.RedirectUri == url {
-				return true
-			}
-		}
-		return false
-	}(userApplicationVersionInfo.RedirectUri) {
+
+	applicationInfo, err := r.appCenterUtil.GetApplicationInfo(ctx, codeInfo.ClientId)
+	if err != nil {
+		l.Warnf("CheckGetCodeAndSetTypeRequest err: %+v", err)
+		return false, err
+	}
+	if applicationInfo == nil {
+		return false, kratosErrors.BadRequest("", "applicationInfo is nil")
+	}
+
+	if lo.Contains(applicationInfo.RedirectUri, codeInfo.RedirectUri) {
+		codeInfo.Status = applicationVersionInfo.Status
 		return true, nil
 	}
 
@@ -193,7 +208,7 @@ func (r *oauth2Repo) EraseCodeInfo(ctx context.Context, code string) error {
 // 行为说明：
 // - 从 user_consents 中读取当前 token_id 列表并在末尾追加新的 jti。
 // - 将该 jti 写入 Redis 的允许列表以便快速校验（AllowJTIs）。
-// - 若追加后列表长度超过上限（5），截断保留最新 5 个并将被截断的旧 JTI 移出 Redis（RemoveJTIsFormRedis）。
+// - 若追加后列表长度超过上限（5），截断保留最新 5 个并将被截断的旧 JTI 移出 Redis（RemoveOAuthJTIsFormRedis）。
 // - 将更新后的 token_id 列表写回 MongoDB（UpdateOne）。
 // 参数：
 // - ctx: 上下文，用于超时和取消控制。
@@ -202,21 +217,21 @@ func (r *oauth2Repo) EraseCodeInfo(ctx context.Context, code string) error {
 // - jti: 要追加的 token 标识符。
 // 返回值：
 // - error: 当找不到对应的 user_consents、Mongo/Redis 操作失败或其他内部错误时返回非 nil 错误，成功返回 nil。
-func (r *oauth2Repo) InsertJTIToUserConsents(ctx context.Context, userId string, clientId string, jti string) error {
+func (r *oauth2Repo) InsertJTIToUserConsents(ctx context.Context, uid string, clientId string, jti string, status string) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	l.Debugf("InsertJTIToUserConsents userId: %s, clientId: %s, jti: %s", userId, clientId, jti)
+	l.Debugf("InsertJTIToUserConsents userId: %s, clientId: %s, jti: %s", uid, clientId, jti)
 
 	collection := r.userConsentsCollection
 	filter := bson.M{
-		"user_id":   userId,
+		"user_id":   uid,
 		"client_id": clientId,
+		"type":      status,
 	}
 
-	// 先查出现有的 token_id 列表
 	var doc struct {
 		TokenID []string `bson:"token_id"`
 	}
@@ -260,73 +275,235 @@ func (r *oauth2Repo) InsertJTIToUserConsents(ctx context.Context, userId string,
 	}
 
 	if len(toBlock) > 0 {
-		if err := r.RemoveJTIsFormRedis(ctx, toBlock); err != nil {
-			l.Errorf("RemoveJTIsFormRedis error: %v", err)
+		if err := r.userUsecase.Repo.RemoveOAuthJTIsFormRedis(ctx, toBlock); err != nil {
+			l.Errorf("RemoveOAuthJTIsFormRedis error: %v", err)
 			return err
 		}
 	}
 	return nil
 }
 
-// RevokeUserConsent
-// 简介：原子性地撤销用户对某客户端的同意，清空 token_id 并从 Redis 中移除对应允许的 JTI。
-// 行为说明：
-// - 使用 FindOneAndUpdate 原子地读取并将 token_id 字段置为空，同时获取更新前的值。
-// - 若找到旧的 token_id 列表，则调用 RemoveJTIsFormRedis 将这些 JTI 从 Redis 允许列表中删除。
-// 参数：
-// - ctx: 上下文，用于超时和取消控制。
-// - userId: 用户标识（在 user_consents 中作为 user_id 存储）。
-// - clientId: 客户端标识（在 user_consents 中作为 client_id 存储）。
-// 返回值：
-// - error: 找不到 user_consents 时返回 NotFound；Mongo/Redis 等操作出错时返回相应错误，成功返回 nil。
-func (r *oauth2Repo) RevokeUserConsent(ctx context.Context, userId string, clientId string) error {
+func normalizeUniqueScopes(scopes []string) []string {
+	if len(scopes) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(scopes))
+	seen := make(map[string]struct{}, len(scopes))
+	for _, scope := range scopes {
+		if _, ok := seen[scope]; ok {
+			continue
+		}
+		seen[scope] = struct{}{}
+		result = append(result, scope)
+	}
+	return result
+}
+
+func intersectScopesByOrder(reference []string, granted []string) []string {
+	if len(reference) == 0 || len(granted) == 0 {
+		return nil
+	}
+	grantedSet := make(map[string]struct{}, len(granted))
+	for _, scope := range granted {
+		grantedSet[scope] = struct{}{}
+	}
+	result := make([]string, 0, len(reference))
+	seen := make(map[string]struct{}, len(reference))
+	for _, scope := range reference {
+		if _, ok := grantedSet[scope]; !ok {
+			continue
+		}
+		if _, ok := seen[scope]; ok {
+			continue
+		}
+		seen[scope] = struct{}{}
+		result = append(result, scope)
+	}
+	return result
+}
+
+func basicScopeCovered(grantedBasicScope []string, targetBasicScope []string) bool {
+	if len(targetBasicScope) == 0 {
+		return true
+	}
+	grantedSet := make(map[string]struct{}, len(grantedBasicScope))
+	for _, scope := range grantedBasicScope {
+		grantedSet[scope] = struct{}{}
+	}
+	for _, scope := range targetBasicScope {
+		if _, ok := grantedSet[scope]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func (r *oauth2Repo) loadUserConsentRecords(ctx context.Context, uid string, clientId string) ([]userConsentRecord, error) {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
-
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	l.Debugf("RevokeUserConsent userId: %s, clientId: %s", userId, clientId)
-
-	collection := r.userConsentsCollection
 	filter := bson.M{
-		"user_id":   userId,
+		"user_id":   uid,
 		"client_id": clientId,
 	}
+	cursor, err := r.userConsentsCollection.Find(ctx, filter)
+	if err != nil {
+		l.Errorf("loadUserConsentRecords Find error: %v", err)
+		return nil, err
+	}
+	defer func() { _ = cursor.Close(ctx) }()
 
-	// 原子地读取并清空 token_id，使用 FindOneAndUpdate 返回修改前的文档
-	update := bson.M{"$set": bson.M{"token_id": []string{}}}
-	opts := options.FindOneAndUpdate().SetReturnDocument(options.Before)
-	var oldDoc struct {
-		TokenID []string `bson:"token_id"`
-	}
-	res := collection.FindOneAndUpdate(ctx, filter, update, opts)
-	if err := res.Err(); err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			l.Errorf("RevokeUserConsent FindOneAndUpdate no document: %v", err)
-			return kratosErrors.NotFound("404", "user consent not found")
+	consents := make([]userConsentRecord, 0, 2)
+	for cursor.Next(ctx) {
+		var consent userConsentRecord
+		if err := cursor.Decode(&consent); err != nil {
+			l.Errorf("loadUserConsentRecords Decode error: %v", err)
+			return nil, err
 		}
-		l.Errorf("RevokeUserConsent FindOneAndUpdate error: %v", err)
-		return err
+		consents = append(consents, consent)
 	}
-	if err := res.Decode(&oldDoc); err != nil {
-		l.Errorf("RevokeUserConsent decode error: %v", err)
-		return err
+	if err := cursor.Err(); err != nil {
+		l.Errorf("loadUserConsentRecords cursor error: %v", err)
+		return nil, err
+	}
+	return consents, nil
+}
+
+func (r *oauth2Repo) resolveTestConsentAccess(target *util.ApplicationVersionInfo, consents []userConsentRecord) (*resolvedUserConsentAccess, error) {
+	for _, consent := range consents {
+		if consent.Type != "TEST" || consent.AgreedVersion != target.InternalVersion {
+			continue
+		}
+		return &resolvedUserConsentAccess{
+			Allowed:                true,
+			ApplicationVersionInfo: target,
+			BasicScope:             normalizeUniqueScopes(target.BasicScope),
+			OptionalScope:          intersectScopesByOrder(target.OptionalScope, consent.OptionalScope),
+		}, nil
+	}
+	return nil, kratosErrors.NotFound("", "user consent not found for this version")
+}
+
+func (r *oauth2Repo) resolveStableGreyConsentAccess(ctx context.Context, clientId string, target *util.ApplicationVersionInfo, consents []userConsentRecord) (*resolvedUserConsentAccess, error) {
+	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
+
+	stableGreyConsents := make([]userConsentRecord, 0, len(consents))
+	for _, consent := range consents {
+		if consent.Type == "STABLE" || consent.Type == "GREY" {
+			stableGreyConsents = append(stableGreyConsents, consent)
+		}
+	}
+	if len(stableGreyConsents) == 0 {
+		return nil, kratosErrors.NotFound("", "user consent not found")
 	}
 
-	// 从 Redis 中删除对应的 allowed_tokens 键（如果有）
-	if len(oldDoc.TokenID) > 0 {
-		if err := r.RemoveJTIsFormRedis(ctx, oldDoc.TokenID); err != nil {
-			l.Errorf("RevokeUserConsent RemoveJTIsFormRedis error: %v", err)
-			return err
+	for _, consent := range stableGreyConsents {
+		if consent.AgreedVersion != target.InternalVersion {
+			continue
+		}
+		return &resolvedUserConsentAccess{
+			Allowed:                true,
+			ApplicationVersionInfo: target,
+			BasicScope:             normalizeUniqueScopes(target.BasicScope),
+			OptionalScope:          intersectScopesByOrder(target.OptionalScope, consent.OptionalScope),
+		}, nil
+	}
+
+	var bestCompatibleConsent *userConsentRecord
+	for i := range stableGreyConsents {
+		consent := &stableGreyConsents[i]
+		consentVersionInfo, err := r.appCenterUtil.GetApplicationVersionInfo(ctx, clientId, consent.AgreedVersion)
+		if err != nil {
+			l.Errorf("resolveStableGreyConsentAccess GetApplicationVersionInfo error: %v", err)
+			return nil, err
+		}
+		if consentVersionInfo == nil {
+			l.Warnf("resolveStableGreyConsentAccess skip missing version info for clientId: %s, agreedVersion: %d", clientId, consent.AgreedVersion)
+			continue
+		}
+		if !basicScopeCovered(consentVersionInfo.BasicScope, target.BasicScope) {
+			continue
+		}
+		if bestCompatibleConsent == nil || consent.AgreedVersion > bestCompatibleConsent.AgreedVersion {
+			bestCompatibleConsent = consent
 		}
 	}
-	return nil
+	if bestCompatibleConsent == nil {
+		return nil, kratosErrors.Forbidden("", "client version outdated")
+	}
+
+	return &resolvedUserConsentAccess{
+		Allowed:                true,
+		ApplicationVersionInfo: target,
+		BasicScope:             normalizeUniqueScopes(target.BasicScope),
+		OptionalScope:          intersectScopesByOrder(target.OptionalScope, bestCompatibleConsent.OptionalScope),
+	}, nil
+}
+
+func (r *oauth2Repo) resolveUserConsentAccess(ctx context.Context, uid string, clientId string, internalVersion int32) (*resolvedUserConsentAccess, error) {
+	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
+
+	allowed, applicationVersionInfo, err := r.appCenterUtil.GetApplicationVersionInfoWithUserCheck(ctx, clientId, uid, internalVersion)
+	if err != nil {
+		l.Errorf("resolveUserConsentAccess GetApplicationVersionInfoWithUserCheck failed: %v", err)
+		return nil, err
+	}
+	if applicationVersionInfo == nil {
+		return nil, kratosErrors.BadRequest("", "invalid client_id")
+	}
+	if !allowed {
+		return &resolvedUserConsentAccess{
+			Allowed:                false,
+			ApplicationVersionInfo: applicationVersionInfo,
+		}, biz.UserPermissionDeniedError
+	}
+	if applicationVersionInfo.Status != "STABLE" && applicationVersionInfo.Status != "GREY" && applicationVersionInfo.Status != "TEST" {
+		return nil, kratosErrors.BadRequest("", "an application with invalid status trying to access user official profile")
+	}
+
+	consents, err := r.loadUserConsentRecords(ctx, uid, clientId)
+	if err != nil {
+		return nil, err
+	}
+
+	switch applicationVersionInfo.Status {
+	case "TEST":
+		return r.resolveTestConsentAccess(applicationVersionInfo, consents)
+	case "STABLE", "GREY":
+		return r.resolveStableGreyConsentAccess(ctx, clientId, applicationVersionInfo, consents)
+	default:
+		return nil, kratosErrors.BadRequest("", "an application with invalid status trying to access user official profile")
+	}
+}
+
+func (r *oauth2Repo) scopeIntersection(requestScopes []string, appBasicScope []string, userAllowedOptionalScope []string) []string {
+	readableScope := make(map[string]struct{})
+	for _, s := range appBasicScope {
+		if strings.HasPrefix(s, "read__") {
+			readableScope[s[6:]] = struct{}{}
+		}
+	}
+	for _, s := range userAllowedOptionalScope {
+		if strings.HasPrefix(s, "read__") {
+			readableScope[s[6:]] = struct{}{}
+		}
+	}
+	readScopes := make([]string, 0, len(requestScopes))
+	seen := make(map[string]any)
+	for _, s := range requestScopes {
+		if _, ok := seen[s]; ok || s == "password" {
+			continue
+		}
+		if _, ok := readableScope[s]; ok {
+			readScopes = append(readScopes, s)
+			seen[s] = nil
+		}
+	}
+	return readScopes
 }
 
 // GetUserOfficialProfile 返回客户端可读取的“官方”用户资料字段（非 per-client storage）。
 //
 // 行为说明：
-// - 加载 client 的用户/版本信息（通过 appUsecase.Repo.GetUserApplicationVersionInfo），并校验 client 与用户的关联性。
+// - 加载 client 的用户/版本信息（通过 appCenterUtil.Repo.GetApplicationVersionInfoWithUserCheck），并校验 client 与用户的关联性。
 // - 从 user_consents 中读取该 user 对该 client 的同意信息（包括 optional_scope 与 agreed_version）。
 // - 计算可读取的官方 scope：client 的 BasicScope 与用户同意的 OptionalScope 的并集（只保留以 "read__" 前缀定义的 scope 并去掉前缀）。
 // - 验证请求的 scopes 都在可读取集合内；若请求 scope 未被授予，则返回 Forbidden（权限不足）。
@@ -349,133 +526,59 @@ func (r *oauth2Repo) RevokeUserConsent(ctx context.Context, userId string, clien
 //   - Mongo/Redis 等内部错误或 BSON 到 Go 类型转换失败 -> Wrapped error
 //
 // 注意与实现要点：
-// - 函数依赖 appUsecase 与 userConsentsCollection 来校验权限与同意版本。
+// - 函数依赖 appCenterUtil 与 userConsentsCollection 来校验权限与同意版本。
 // - 投影字段使用了 mongo.Aggregate，减少从 DB 拉取的字段。
 // - 该函数只返回“官方”字段（由 client 的 BasicScope/OptionalScope 控制），不处理 per-client 的 storage key。
-func (r *oauth2Repo) GetUserOfficialProfile(ctx context.Context, userId string, clientId string, internalVersion int32, scopes []string) (map[string]any, error) {
+func (r *oauth2Repo) GetUserOfficialProfile(ctx context.Context, uid string, clientId string, internalVersion int32, scopes []string) (map[string]any, error) {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	l.Debugf("GetUserOfficialProfile userId: %s, clientId: %s, internalVersion: %d", userId, clientId, internalVersion)
+	l.Debugf("GetUserOfficialProfile uid: %s, clientId: %s, internalVersion: %d", uid, clientId, internalVersion)
 
-	userApplicationVersionInfo, err := r.appUsecase.Repo.GetUserApplicationVersionInfo(ctx, clientId, userId, internalVersion)
+	resolvedAccess, err := r.resolveUserConsentAccess(ctx, uid, clientId, internalVersion)
 	if err != nil {
-		l.Errorf("GetUserOfficialProfile GetUserApplicationVersionInfo failed: %v", err)
 		return nil, err
 	}
-	if userApplicationVersionInfo == nil {
-		// 该情况实际不应该出现 如果返回nil 那么请求应该会返回一个错误
-		return nil, kratosErrors.NotFound("404", "client version or user not found")
+	if resolvedAccess == nil || !resolvedAccess.Allowed || resolvedAccess.ApplicationVersionInfo == nil {
+		return nil, biz.UserPermissionDeniedError
 	}
-	collection := r.userConsentsCollection
-	filter := bson.M{
-		"user_id":   userId,
-		"client_id": clientId,
-		"type":      userApplicationVersionInfo.Type,
+
+	readScopes := r.scopeIntersection(scopes, resolvedAccess.BasicScope, resolvedAccess.OptionalScope)
+
+	// 如果没有可读字段，则返回空 map
+	if len(readScopes) == 0 {
+		return map[string]any{}, nil
 	}
-	var result struct {
-		OptionalScope []string `bson:"optional_scope"`
-		AgreedVersion int32    `bson:"agreed_version"`
-	}
-	err = collection.FindOne(ctx, filter).Decode(&result)
+
+	// 调用 user.usecase 来获取用户 profile，然后根据 readScopes 填充 officialScope
+	userProfile, err := r.userUsecase.Repo.GetUserProfileByIdWithFilter(ctx, uid, readScopes)
 	if err != nil {
-		l.Errorf("GetUserOfficialProfile FindOne error: %v", err)
-		return nil, err
-	}
-	if userApplicationVersionInfo.InternalVersion != result.AgreedVersion {
-		// TODO 此处应有自动升级策略  检测相关Scope是否是包含关系 若是 则用户同意版本 = max(用户同意版本，请求版本) 否则 报错
-		l.Errorf("GetUserOfficialProfile AgreedVersion error: %v", result.AgreedVersion)
-		return nil, kratosErrors.Forbidden("", "client version outdated")
-	}
-
-	// 在此处计算可读 scopes：先取并集 clientInfo.BasicScope（程序必要） U result.OptionalScope
-	// readableScope 语义 所有可以被读取的 官方scope集合
-	readableScope := make(map[string]struct{})
-	for _, s := range userApplicationVersionInfo.BasicScope {
-		if strings.HasPrefix(s, "read__") {
-			readableScope[s[6:]] = struct{}{}
-		}
-	}
-	for _, s := range result.OptionalScope {
-		if strings.HasPrefix(s, "read__") {
-			readableScope[s[6:]] = struct{}{}
-		}
-	}
-	// 做交集 — 遍历 scopes（请求的数据键集合）并检查是否在 readableScope 中
-	var readScopes []string
-	seen := make(map[string]struct{})
-	for _, s := range scopes {
-		if _, ok := readableScope[s]; ok {
-			// 存在 去重
-			if _, dup := seen[s]; !dup {
-				readScopes = append(readScopes, s)
-				seen[s] = struct{}{}
-			}
-		} else {
-			// 不存在 报错
-			l.Errorf("GetUserProfile scope '%s' not granted", s)
-			return nil, kratosErrors.Forbidden("", fmt.Sprintf("permission denied for scope '%s'", s))
-		}
-	}
-
-	// 关键键检查 理论不可能
-	if _, ok := seen["password"]; ok {
-		l.Errorf("GetUserProfile try to read sensitive scope 'password'")
-		return nil, kratosErrors.Forbidden("", "permission denied for scope 'password'")
-	}
-
-	uid, err := bson.ObjectIDFromHex(userId)
-	if err != nil {
-		l.Errorf("invalid userId format: %s", userId)
-		return nil, fmt.Errorf("invalid userId format: %s", userId)
-	}
-
-	proj := bson.D{}
-	for _, s := range readScopes {
-		proj = append(proj, bson.E{Key: s, Value: 1})
-	}
-	pipeline := mongo.Pipeline{
-		{{"$match", bson.D{{"_id", uid}}}},
-		{{"$project", proj}},
-	}
-
-	cur, err := r.userCollection.Aggregate(ctx, pipeline)
-	if err != nil {
-		l.Errorf("GetUserOfficialProfile aggregate err: %v", err)
-		return nil, err
-	}
-	defer func() { _ = cur.Close(ctx) }()
-
-	if !cur.Next(ctx) {
-		if err := cur.Err(); err != nil {
-			l.Errorf("GetUserOfficialProfile cursor error: %v", err)
-			return nil, err
-		}
-		// 用户不存在
-		return nil, biz.UserNotFoundError
-	}
-	var doc bson.M
-	if err := cur.Decode(&doc); err != nil {
-		l.Errorf("GetUserOfficialProfile decode user doc error: %v", err)
+		l.Errorf("GetUserOfficialProfile GetUserProfileById error: %v", err)
 		return nil, err
 	}
 
 	officialScope := map[string]any{}
-	for _, k := range scopes {
-		// check if k in doc
-		if val, ok := doc[k]; ok {
-			conv, err := util.ConvertBSONValueToGOType(val)
-			if err != nil {
-				l.Errorf("GetUserOfficialProfile scope '%s' has unsupported type: %v", k, err)
-				return nil, kratosErrors.InternalServer("", fmt.Sprintf("scope '%s' has unsupported type", k))
+	for _, k := range readScopes {
+		switch k {
+		case "uid":
+			officialScope[k] = userProfile.UserId
+		case "email":
+			officialScope[k] = userProfile.Email
+		case "created_at":
+			officialScope[k] = userProfile.CreatedAt
+		case "updated_at":
+			officialScope[k] = userProfile.UpdatedAt
+		default:
+			if v, ok := userProfile.OfficialAttrs[k]; ok {
+				officialScope[k] = v
+			} else {
+				officialScope[k] = nil
 			}
-			officialScope[k] = conv
-		} else {
-			officialScope[k] = nil
 		}
 	}
+
 	return officialScope, nil
 }
 
@@ -494,15 +597,15 @@ func (r *oauth2Repo) GetUserOfficialProfile(ctx context.Context, userId string, 
 // 返回值：
 // - map[string]*string: key 为原始 storage key，value 为该字段的字符串指针（不存在或为 null 时为 nil）。
 // - error: 找不到用户/未授权/DB 或转换错误时返回相应错误。
-func (r *oauth2Repo) GetUserProfile(ctx context.Context, userId string, clientId string, storageKeys []string) (map[string]*string, error) {
+func (r *oauth2Repo) GetUserProfile(ctx context.Context, uid string, clientId string, storageKeys []string) (map[string]*string, error) {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	l.Debugf("GetUserProfile userId: %s, clientId: %s", userId, clientId)
+	l.Debugf("GetUserProfile userId: %s, clientId: %s", uid, clientId)
 
-	applicationInfo, err := r.appUsecase.Repo.GetApplicationInfo(ctx, clientId)
+	applicationInfo, err := r.appCenterUtil.GetApplicationInfo(ctx, clientId)
 	if err != nil {
 		l.Errorf("GetApplicationInfo failed: %v", err)
 		return nil, err
@@ -512,36 +615,37 @@ func (r *oauth2Repo) GetUserProfile(ctx context.Context, userId string, clientId
 	}
 
 	filter := bson.M{
-		"user_id":   userId,
+		"user_id":   uid,
 		"client_id": clientId,
 	}
-
+	// 此处FindOne实际上会随机返回多条中的一条 但是没关系 只要存在一条 就说明用户已经授权
 	err = r.userConsentsCollection.FindOne(ctx, filter, options.FindOne().SetProjection(bson.M{"_id": 1})).Err()
 	if errors.Is(err, mongo.ErrNoDocuments) {
-		l.Errorf("GetUserProfile user consent not found for userId: %s, clientId: %s", userId, clientId)
+		l.Errorf("GetUserProfile user consent not found for userId: %s, clientId: %s", uid, clientId)
 		return nil, kratosErrors.NotFound("404", "user consent not found")
 	} else if err != nil {
 		l.Errorf("GetUserProfile FindOne error: %v", err)
 		return nil, err
 	}
 
-	// convert userId to ObjectID for querying user collection
-	uid, err := bson.ObjectIDFromHex(userId)
-	if err != nil {
-		l.Errorf("invalid userId format: %s", userId)
-		return nil, fmt.Errorf("invalid userId format: %s", userId)
-	}
-
-	// --- 新版：直接从 userCollection 中按 readableScopes 投影字段 ---
-	// 始终包含 _id 以便返回 UserId
 	proj := bson.D{}
 	for _, s := range storageKeys {
-		proj = append(proj, bson.E{Key: applicationInfo.Id + "." + s, Value: 1})
+		if !util.IsASCIIAlphaNumDashUnderscore(s) {
+			return nil, kratosErrors.BadRequest("", fmt.Sprintf("invalid storage key '%s'", s))
+		}
+		if splits := strings.Split(applicationInfo.Id, "."); len(splits) == 2 && splits[0] != "" &&
+			(!strings.HasPrefix(splits[0], ".") || !strings.HasPrefix(splits[0], "$")) &&
+			splits[1] != "" {
+			proj = append(proj, bson.E{Key: applicationInfo.Id + "." + s, Value: 1})
+		} else {
+			l.Errorf("GetUserProfile invalid application id: %s", applicationInfo.Id)
+			return nil, kratosErrors.InternalServer("", "invalid application id")
+		}
 	}
 
 	userColl := r.userCollection
 	pipeline := mongo.Pipeline{
-		{{"$match", bson.D{{"_id", uid}}}},
+		{{"$match", bson.D{{"uid", uid}}}},
 		{{"$project", proj}},
 	}
 
@@ -580,7 +684,7 @@ func (r *oauth2Repo) GetUserProfile(ctx context.Context, userId string, clientId
 				conv, err := util.ConvertBSONValueToGOType(val)
 				if err != nil {
 					l.Errorf("GetUserProfile storage key '%s' has unsupported type: %v", errorKey, err)
-					return nil, kratosErrors.InternalServer("", fmt.Sprintf("storage key '%s' is invalid", k))
+					return nil, kratosErrors.InternalServer("", fmt.Sprintf("storage key '%s' has unsupported type", k))
 				}
 				if conv == nil {
 					return nil, nil
@@ -627,14 +731,8 @@ func (r *oauth2Repo) GetUserProfile(ctx context.Context, userId string, clientId
 // - storageKeyValues: 要写入或更新的键->值映射（键为纯 key，不含 applicationId 前缀）。
 // 返回值：
 // - error: 参数非法、超出配额、未授权或 DB 写入出错时返回对应错误，成功返回 nil。
-func (r *oauth2Repo) SetUserProfile(ctx context.Context, userId string, clientId string, storageKeyValues map[string]string) error {
+func (r *oauth2Repo) SetUserProfile(ctx context.Context, uid string, clientId string, storageKeyValues map[string]string) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
-
-	uid, err := bson.ObjectIDFromHex(userId)
-	if err != nil {
-		l.Errorf("invalid userId format: %s", userId)
-		return fmt.Errorf("invalid userId format: %s", userId)
-	}
 
 	if len(storageKeyValues) > 1000 {
 		l.Errorf("too many storage keys to set: %d", len(storageKeyValues))
@@ -644,8 +742,8 @@ func (r *oauth2Repo) SetUserProfile(ctx context.Context, userId string, clientId
 	var totalLength int64
 	totalLength = 0
 	for k, v := range storageKeyValues {
-		if k == "" || strings.ContainsAny(k, ".$") || strings.IndexByte(k, 0) != -1 {
-			l.Errorf("invalid storage key: '%s': must be non-empty and cannot contain '.', '$', or null byte", k)
+		if !util.IsASCIIAlphaNumDashUnderscore(k) {
+			l.Infof("invalid storage key: '%s': must be non-empty and only ascii character, number, dash, underscore are allowed.", k)
 			return kratosErrors.BadRequest("", fmt.Sprintf("invalid storage key '%s'", k))
 		}
 		totalLength += int64(len(k) + len(v))
@@ -659,9 +757,9 @@ func (r *oauth2Repo) SetUserProfile(ctx context.Context, userId string, clientId
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	l.Debugf("SetUserProfile userId: %s clientId: %s", userId, clientId)
+	l.Debugf("SetUserProfile userId: %s clientId: %s", uid, clientId)
 
-	applicationInfo, err := r.appUsecase.Repo.GetApplicationInfo(ctx, clientId)
+	applicationInfo, err := r.appCenterUtil.GetApplicationInfo(ctx, clientId)
 	if err != nil {
 		l.Errorf("GetApplicationInfo failed: %v", err)
 		return err
@@ -671,13 +769,13 @@ func (r *oauth2Repo) SetUserProfile(ctx context.Context, userId string, clientId
 	}
 
 	filter := bson.M{
-		"user_id":   userId,
+		"user_id":   uid,
 		"client_id": clientId,
 	}
-
+	// 此处FindOne实际上会随机返回多条中的一条 但是没关系 只要存在一条 就说明用户已经授权 应用是在上传自己的数据
 	err = r.userConsentsCollection.FindOne(ctx, filter, options.FindOne().SetProjection(bson.M{"_id": 1})).Err()
 	if errors.Is(err, mongo.ErrNoDocuments) {
-		l.Errorf("SetUserProfile user consent not found for userId: %s, clientId: %s", userId, clientId)
+		l.Errorf("SetUserProfile user consent not found for userId: %s, clientId: %s", uid, clientId)
 		return kratosErrors.NotFound("404", "user consent not found")
 	} else if err != nil {
 		l.Errorf("SetUserProfile FindOne error: %v", err)
@@ -685,14 +783,14 @@ func (r *oauth2Repo) SetUserProfile(ctx context.Context, userId string, clientId
 	}
 
 	filter = bson.M{
-		"_id": uid,
+		"uid": uid,
 	}
 
 	var doc bson.M
 	err = r.userCollection.FindOne(ctx, filter, options.FindOne().SetProjection(bson.M{applicationInfo.Id: 1})).Decode(&doc)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			l.Errorf("SetUserProfile user not found for userId: %s", userId)
+			l.Errorf("SetUserProfile user not found for userId: %s", uid)
 			return biz.UserNotFoundError
 		}
 		l.Errorf("SetUserProfile FindOne error: %v", err)
@@ -736,7 +834,7 @@ func (r *oauth2Repo) SetUserProfile(ctx context.Context, userId string, clientId
 	}
 
 	userColl := r.userCollection
-	_, err = userColl.UpdateOne(ctx, bson.M{"_id": uid}, bson.M{"$set": update})
+	_, err = userColl.UpdateOne(ctx, bson.M{"uid": uid}, bson.M{"$set": update})
 	if err != nil {
 		l.Errorf("SetUserProfile update user error: %v", err)
 		return err
@@ -791,89 +889,78 @@ func (r *oauth2Repo) AllowJTIs(ctx context.Context, jtis []string) error {
 // - jtis: 要删除的 JTI 列表。
 // 返回值：
 // - error: Redis 删除失败时返回错误，成功返回 nil。
-func (r *oauth2Repo) RemoveJTIsFormRedis(ctx context.Context, jtis []string) error {
-	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
-
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	l.Debugf("RemoveJTIsFormRedis jtis: %+v", jtis)
-
-	pipe := r.data.redis.Pipeline()
-	for _, id := range jtis {
-		if id == "" {
-			continue
-		}
-		key := GetRedisKey("allowed_tokens", id)
-		pipe.Del(ctx, key)
-	}
-	_, err := pipe.Exec(ctx)
-	return err
-}
-
-// CheckUserPermission
-// 简介：检查并确保用户对指定客户端具有操作权限（或在条件下自动创建同意记录）。
-// 行为说明：
-// - 通过 appUsecase.Repo.GetUserApplicationVersionInfo 加载客户端与版本信息。
-// - 在 user_consents 中查找 (user_id, client_id) 的同意记录：
-//   - 若存在则检查 agreed_version 是否与客户端 internalVersion 匹配，否则返回 Forbidden。
-//   - 若不存在且客户端有 optional scopes：若该客户端不是官方（非 "official." 前缀），则拒绝；否则自动创建空的同意记录（调用 userUsecase.Repo.UpdateUserConsent）。
+//func (r *oauth2Repo) RemoveJTIsFormRedis(ctx context.Context, jtis []string) error {
+//	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 //
+//	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+//	defer cancel()
+//	l.Debugf("RemoveOAuthJTIsFormRedis jtis: %+v", jtis)
+//
+//	pipe := r.data.redis.Pipeline()
+//	for _, id := range jtis {
+//		if id == "" {
+//			continue
+//		}
+//		key := GetRedisKey("allowed_tokens", id)
+//		pipe.Del(ctx, key)
+//	}
+//	_, err := pipe.Exec(ctx)
+//	return err
+//}
+
+//func (r *oauth2Repo) getApplicationAdmin(ctx context.Context, clientId string) (string, error) {
+//	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
+//
+//	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+//	defer cancel()
+//
+//	l.Debugf("getApplicationAdmin clientId: %s", clientId)
+//	applicationInfo, err := r.appCenterUtil.GetApplicationInfo(ctx, clientId)
+//	if err != nil {
+//		l.Errorf("getApplicationAdmin GetApplicationInfo failed: %v", err)
+//		return "", err
+//	}
+//	if applicationInfo == nil {
+//		return "", kratosErrors.BadRequest("", "invalid client_id")
+//	}
+//	return applicationInfo.Admin, nil
+//}
+
+// CheckUserPermissionAndGetApplicationVersionInfo
+// 简介：检查用户对指定客户端版本的访问权限，并返回目标版本信息。
+// 行为说明：
+// - 通过 appCenterUtil.GetApplicationVersionInfoWithUserCheck 加载目标版本并校验用户基础访问资格。
+// - 统一读取 user_consents，并复用与 GetUserOfficialProfile 相同的 consent 解析逻辑。
+// - TEST 分支要求存在同版本 TEST consent。
+// - STABLE/GREY 分支采用兼容模式：若旧 consent 对应版本的 BasicScope 覆盖目标版本的 BasicScope，则允许访问；不升级 DB；返回目标版本的 BasicScope 与目标 OptionalScope 和 consent OptionalScope 的交集。
 // 参数：
 // - ctx: 上下文。
 // - userId: 用户标识。
 // - clientId: 客户端标识。
-// - internalVersion: 客户端的内部版本号，用于与用户已同意的版本比对。
+// - internalVersion: 目标客户端内部版本号。
 // 返回值：
-// - bool: 若用户被允许则返回 true（包含自动创建成功的情形）。
-// - error: 无权限、无效客户端或 DB 访问错误时返回相应错误。
-func (r *oauth2Repo) CheckUserPermission(ctx context.Context, userId string, clientId string, internalVersion int32) (bool, error) {
+// - bool: 用户是否被允许访问该版本。
+// - *util.ApplicationVersionInfo: 目标版本信息；若已能解析到版本，即使权限不足也会尽量返回。
+// - error: 版本不存在、consent 缺失、权限不足或内部错误时返回相应错误。
+func (r *oauth2Repo) CheckUserPermissionAndGetApplicationVersionInfo(ctx context.Context, userId string, clientId string, internalVersion int32) (bool, *util.ApplicationVersionInfo, error) {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	l.Debugf("CheckUserPermission userId: %s, clientId: %s", userId, clientId)
+	l.Debugf("CheckUserPermissionAndGetApplicationVersionInfo userId: %s, clientId: %s", userId, clientId)
 
-	applicationInfo, err := r.appUsecase.Repo.GetUserApplicationVersionInfo(ctx, clientId, userId, internalVersion)
+	resolvedAccess, err := r.resolveUserConsentAccess(ctx, userId, clientId, internalVersion)
 	if err != nil {
-		l.Errorf("GetApplicationInfo failed: %v", err)
-		return false, err
-	}
-	if applicationInfo == nil {
-		return false, kratosErrors.BadRequest("", "invalid client_id")
-	}
-	collection := r.userConsentsCollection
-	filter := map[string]interface{}{
-		"user_id":   userId,
-		"client_id": clientId,
-	}
-	var result struct {
-		Scope         []string `bson:"optional_scope"`
-		AgreedVersion int32    `bson:"agreed_version"`
-	}
-	err = collection.FindOne(ctx, filter).Decode(&result)
-	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			if applicationInfo.OptionalScope != nil && len(applicationInfo.OptionalScope) > 0 {
-				// 这里 applicationInfo.Id 是否为官方的判断其实有点惊险(?) 但我感觉没问题
-				if !strings.HasPrefix(applicationInfo.Id, "official.") {
-					return false, biz.UserPermissionDeniedError
-				}
-			}
-			err = r.userUsecase.Repo.UpdateUserConsent(ctx, userId, clientId, applicationInfo.InternalVersion, []string{})
-			if err != nil {
-				l.Errorf("auto-create user consent error: %v", err)
-				return false, err
-			}
-		} else {
-			l.Errorf("failed to find user consent: %v", err)
-			return false, err
+		if resolvedAccess != nil {
+			return false, resolvedAccess.ApplicationVersionInfo, err
 		}
-	} else if applicationInfo.InternalVersion != result.AgreedVersion {
-		// TODO 此处应有自动升级策略  检测相关Scope是否是包含关系 若是 则用户同意版本 = max(用户同意版本，请求版本) 否则 报错
-		return false, kratosErrors.Forbidden("", "client version outdated")
+		return false, nil, err
 	}
-	return true, nil
+	if resolvedAccess == nil || resolvedAccess.ApplicationVersionInfo == nil {
+		return false, nil, kratosErrors.InternalServer("", "resolve user consent access failed")
+	}
+	return resolvedAccess.Allowed, resolvedAccess.ApplicationVersionInfo, nil
 }
 
 // 这里的缓存方案需要仔细考虑 一方面 其有效减少了向AppCenter的请求 但另一方面 在一定程度上 其破坏了数据的一致性 让结构不那么干净

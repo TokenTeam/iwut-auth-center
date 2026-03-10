@@ -7,6 +7,7 @@ import (
 
 type AuthRepo interface {
 	CheckPasswordWithEmailAndGetUserIdAndVersion(ctx context.Context, email, password string) (string, int, error)
+	GetDeveloperIdByUserId(ctx context.Context, userId string) (*string, error)
 	TryInsertRegisterCaptcha(ctx context.Context, email string, captcha string, ttl time.Duration) error
 	TryInsertResetPasswordCaptcha(ctx context.Context, email string, captcha string, ttl time.Duration) error
 	CheckRegisterCaptchaUsable(ctx context.Context, email string, captcha string, ttl time.Duration) error

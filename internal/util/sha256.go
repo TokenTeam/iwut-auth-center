@@ -13,16 +13,8 @@ type Sha256Util struct {
 	salt string
 }
 
-var (
-	Sha256UtilInstance *Sha256Util
-)
-
 func NewSha256Util(c *conf.Jwt) *Sha256Util {
-	if Sha256UtilInstance != nil {
-		return Sha256UtilInstance
-	}
-	Sha256UtilInstance = &Sha256Util{salt: c.GetSalt()}
-	return Sha256UtilInstance
+	return &Sha256Util{salt: c.GetSalt()}
 }
 
 // HashPassword 该函数逻辑试图与之前的 C# iwut-Auth 保持一致 但是仍需更多测试 因为我还不清楚传入的secret是怎样的 即kotlin段对密码进行了何种处理

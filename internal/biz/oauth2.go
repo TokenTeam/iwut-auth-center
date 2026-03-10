@@ -7,13 +7,12 @@ import (
 type Oauth2Repo interface {
 	SetCodeInfo(ctx context.Context, code string, codeInfo *CodeInfo) error
 	GetCodeInfo(ctx context.Context, code string) (*CodeInfo, error)
-	CheckGetCodeRequest(ctx context.Context, codeInfo *CodeInfo) (bool, error)
+	CheckGetCodeAndSetTypeRequest(ctx context.Context, codeInfo *CodeInfo) (bool, error)
 	EraseCodeInfo(ctx context.Context, code string) error
-	InsertJTIToUserConsents(ctx context.Context, userId string, clientId string, jti string) error
-	RevokeUserConsent(ctx context.Context, userId string, clientId string) error
-	GetUserOfficialProfile(ctx context.Context, userId string, clientId string, internalVersion int32, scopes []string) (map[string]any, error)
-	GetUserProfile(ctx context.Context, userId string, clientId string, storageKeys []string) (map[string]*string, error)
-	SetUserProfile(ctx context.Context, userId string, clientId string, storageKeyValues map[string]string) error
+	InsertJTIToUserConsents(ctx context.Context, uid string, clientId string, jti string, status string) error
+	GetUserOfficialProfile(ctx context.Context, uid string, clientId string, internalVersion int32, scopes []string) (map[string]any, error)
+	GetUserProfile(ctx context.Context, uid string, clientId string, storageKeys []string) (map[string]*string, error)
+	SetUserProfile(ctx context.Context, uid string, clientId string, storageKeyValues map[string]string) error
 }
 
 type Oauth2Usecase struct {
@@ -35,6 +34,7 @@ type CodeInfo struct {
 	CodeChallenge       string `json:"code_challenge"`
 	CodeChallengeMethod string `json:"code_challenge_method"`
 	CreatedAt           int64  `json:"created_at"`
+	Status              string `json:"status"`
 }
 
 type Oauth2UserProfile struct {
