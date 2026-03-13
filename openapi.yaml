@@ -216,6 +216,29 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/auth_center.v1.oauth2.GetUserProfileReply'
+    /user/claims:
+        get:
+            tags:
+                - User
+            operationId: User_GetClaims
+            parameters:
+                - name: userId
+                  in: query
+                  schema:
+                    type: string
+                - name: keys
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/auth_center.v1.user.GetClaimsReply'
     /user/delete-account:
         get:
             tags:
@@ -585,6 +608,18 @@ components:
                     type: string
                 traceId:
                     type: string
+        auth_center.v1.user.GetClaimsReply:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                data:
+                    type: object
+                traceId:
+                    type: string
         auth_center.v1.user.GetProfileKeysReply:
             type: object
             properties:
@@ -635,8 +670,6 @@ components:
                     format: date-time
                 attrs:
                     type: object
-                    additionalProperties:
-                        type: string
         auth_center.v1.user.RevokeAuthorizationReply:
             type: object
             properties:

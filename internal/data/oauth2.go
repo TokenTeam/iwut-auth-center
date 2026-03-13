@@ -553,7 +553,7 @@ func (r *oauth2Repo) GetUserOfficialProfile(ctx context.Context, uid string, cli
 	}
 
 	// 调用 user.usecase 来获取用户 profile，然后根据 readScopes 填充 officialScope
-	userProfile, err := r.userUsecase.Repo.GetUserProfileByIdWithFilter(ctx, uid, readScopes)
+	userProfile, err := r.userUsecase.Repo.GetUserProfileWithFilter(ctx, uid, readScopes)
 	if err != nil {
 		l.Errorf("GetUserOfficialProfile GetUserProfileById error: %v", err)
 		return nil, err

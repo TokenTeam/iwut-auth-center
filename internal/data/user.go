@@ -7,6 +7,7 @@ import (
 	"iwut-auth-center/internal/biz"
 	"iwut-auth-center/internal/conf"
 	"iwut-auth-center/internal/util"
+	"strings"
 	"time"
 
 	kratosErrors "github.com/go-kratos/kratos/v2/errors"
@@ -14,6 +15,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 type userRepo struct {
@@ -158,7 +160,7 @@ func (r *userRepo) DeleteUserAccount(ctx context.Context, uid string) error {
 	return nil
 }
 
-// GetUserProfileByIdWithFilter is an extended version of GetUserProfileById that allows filtering official attributes by a provided list of keys.
+// GetUserProfileWithFilter is an extended version of GetUserProfileById that allows filtering official attributes by a provided list of keys.
 // Behavior:
 //   - Accepts an additional parameter `keys` which is a list of official attribute keys to include in the result.
 //   - When `keys` is provided, only includes those keys in the OfficialAttrs map of the returned UserProfile.
@@ -171,13 +173,13 @@ func (r *userRepo) DeleteUserAccount(ctx context.Context, uid string) error {
 // Returns:
 // - *biz.UserProfile: populated profile with filtered official attributes when the user exists.
 // - error: biz.UserNotFoundError if the user doesn't exist; wrapped errors for DB/decoding issues.
-func (r *userRepo) GetUserProfileByIdWithFilter(ctx context.Context, uid string, keys []string) (*biz.UserProfile, error) {
+func (r *userRepo) GetUserProfileWithFilter(ctx context.Context, uid string, keys []string) (*biz.UserProfile, error) {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	l.Debugf("GetUserProfileByIdWithFilter called with UserId: %s", uid)
+	l.Debugf("GetUserProfileWithFilter called with UserId: %s", uid)
 
 	collection := r.userCollection
 
@@ -195,16 +197,9 @@ func (r *userRepo) GetUserProfileByIdWithFilter(ctx context.Context, uid string,
 
 func (r *userRepo) parseDocToUserProfile(uid string, doc bson.M, keys []string) (*biz.UserProfile, error) {
 	l := log.NewHelper(log.WithContext(context.Background(), r.log.Logger()))
-	var filterKeys map[string]any
-	if keys != nil {
-		filterKeys = make(map[string]any, len(keys))
-		for _, k := range keys {
-			filterKeys[k] = nil
-		}
-	}
 
 	userProfile := biz.UserProfile{
-		OfficialAttrs: map[string]string{},
+		OfficialAttrs: map[string]any{},
 	}
 
 	if userIdVal, ok := doc["uid"].(string); ok {
@@ -228,37 +223,76 @@ func (r *userRepo) parseDocToUserProfile(uid string, doc bson.M, keys []string) 
 		return nil, fmt.Errorf("invalid updated_at format in db")
 	}
 
-	// Extract profile fields. profile may be absent or not an object.
-	if profileRaw, ok := doc["profile"]; ok {
-		// If profile exists it MUST be bson.D per new requirement; otherwise return internal error
-		if profileRaw == nil {
-			// present but nil, treat as empty
-		} else if profD, ok := profileRaw.(bson.D); ok {
-			if filterKeys == nil {
-				for _, kv := range profD {
-					if strVal, ok := kv.Value.(string); ok {
-						userProfile.OfficialAttrs[kv.Key] = strVal
-					} else {
-						log.Warnf("profile field has unexpected type for user %s: %T", uid, profileRaw)
-					}
-				}
-			} else {
-				for _, kv := range profD {
-					if strVal, ok := kv.Value.(string); ok {
-						if _, needed := filterKeys[kv.Key]; needed {
-							userProfile.OfficialAttrs[kv.Key] = strVal
-						}
-					} else {
-						log.Warnf("profile field has unexpected type for user %s: %T", uid, profileRaw)
-					}
-				}
-			}
-		} else {
-			l.Errorf("profile field has unexpected type for user %s: %T", uid, profileRaw)
-			return nil, kratosErrors.InternalServer("", fmt.Sprintf("invalid profile type for user %s: %T", uid, profileRaw))
-		}
+	if _, ok := doc["profile"]; !ok {
+		return &userProfile, nil
 	}
+	profileMap, err := util.ConvertBSONValueToGOType(doc["profile"])
+	if err != nil {
+		l.Errorf("failed to convert profile to type: %v", err)
+		return nil, fmt.Errorf("failed to convert profile to type: %w", err)
+	}
+	if profileMap == nil {
+		return &userProfile, nil
+	}
+	if _, ok := profileMap.(map[string]any); !ok {
+		return nil, fmt.Errorf("profile field has unexpected type for user %s: %T", uid, profileMap)
+	}
+	if keys == nil {
+		userProfile.OfficialAttrs = profileMap.(map[string]any)
+		return &userProfile, nil
+	}
+
+	src := profileMap.(map[string]any)
+	dst := map[string]any{}
+
+	for _, key := range keys {
+		parts := strings.Split(key, ".")
+		val, found, err := getByPath(src, parts)
+		if err != nil {
+			return nil, fmt.Errorf("invalid key %q: %w", key, err)
+		}
+		if !found {
+			continue // 或者 setByPath(dst, parts, nil)，看你业务语义
+		}
+		setByPath(dst, parts, val)
+	}
+	userProfile.OfficialAttrs = dst
+
 	return &userProfile, nil
+}
+func getByPath(root map[string]any, parts []string) (any, bool, error) {
+	cur := root
+	for i, p := range parts {
+		v, ok := cur[p]
+		if !ok {
+			return nil, false, nil
+		}
+		if i == len(parts)-1 {
+			return v, true, nil
+		}
+		next, ok := v.(map[string]any)
+		if !ok {
+			return nil, false, fmt.Errorf("key %q is not an object", strings.Join(parts[:i+1], "."))
+		}
+		cur = next
+	}
+	return nil, false, nil
+}
+
+func setByPath(root map[string]any, parts []string, v any) {
+	cur := root
+	for i, p := range parts {
+		if i == len(parts)-1 {
+			cur[p] = v
+			return
+		}
+		next, ok := cur[p].(map[string]any)
+		if !ok || next == nil {
+			next = map[string]any{}
+			cur[p] = next
+		}
+		cur = next
+	}
 }
 
 // UpdateUserProfile updates/sets official__* attributes on the user document.
@@ -275,24 +309,15 @@ func (r *userRepo) parseDocToUserProfile(uid string, doc bson.M, keys []string) 
 // Returns:
 //   - error: biz.UserNotFoundError if user missing; biz.OfficialInfoMemoryLimitationExceededError
 //     if the attrs exceed configured limit; wrapped DB errors for other failures.
-func (r *userRepo) UpdateUserProfile(ctx context.Context, uid string, attrs map[string]string) error {
+func (r *userRepo) UpdateUserProfile(ctx context.Context, uid string, attrs *structpb.Struct) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
-	if count, err := func(m map[string]string) (int, error) {
-		total := 0
-		for k, v := range m {
-			total += len(k) + len(v)
-			if !util.IsASCIIAlphaNumDashUnderscore(k) {
-				return 0, kratosErrors.BadRequest("", "invalid key format: "+k)
-			}
-		}
-		return total, nil
-	}(attrs); int64(count) > r.officialInfoMemoryLimitation || err != nil {
-		if err != nil {
-			l.Errorf("invalid attrs: %v", err)
-			return err
-		}
-		l.Errorf("official info memory limitation exceeded: %d > %d", count, r.officialInfoMemoryLimitation)
+	attrsMap, length, err := util.StructToAnyMap(attrs)
+	if err != nil {
+		return err
+	}
+	if length > r.officialInfoMemoryLimitation {
+		l.Errorf("official info memory limitation exceeded: %d > %d", length, r.officialInfoMemoryLimitation)
 		return biz.OfficialInfoMemoryLimitationExceededError
 	}
 
@@ -301,22 +326,25 @@ func (r *userRepo) UpdateUserProfile(ctx context.Context, uid string, attrs map[
 
 	l.Debugf("UpdateUserProfile called with UserId: %s", uid)
 
-	if err := r.UserExists(ctx, uid); err != nil {
-		return err
-	}
-
 	set := bson.M{
 		"updated_at": time.Now(),
 	}
-	for k, v := range attrs {
-		set["profile."+k] = v
+	for k, v := range attrsMap {
+		switch v.(type) {
+		case map[string]any:
+			return kratosErrors.BadRequest("", fmt.Sprintf("nested objects are not allowed in official attributes: key %q has object value", k))
+		case []any:
+			return kratosErrors.BadRequest("", fmt.Sprintf("array values are not allowed in official attributes: key %q has array value", k))
+		default:
+			set["profile."+k] = v
+		}
 	}
 	update := bson.M{
 		"$set": set,
 	}
 	collection := r.userCollection
 	filter := bson.M{"uid": uid}
-	_, err := collection.UpdateOne(ctx, filter, update)
+	err = collection.FindOneAndUpdate(ctx, filter, update).Err()
 	if err != nil {
 		l.Errorf("failed to update user profile: %v", err)
 		return fmt.Errorf("failed to update user profile: %w", err)
@@ -324,7 +352,7 @@ func (r *userRepo) UpdateUserProfile(ctx context.Context, uid string, attrs map[
 	return nil
 }
 
-// GetUserProfileKeysById returns the list of keys under `official__*` for a user.
+// GetUserProfileKeys returns the list of keys under `official__*` for a user.
 // Behavior:
 //   - Uses an aggregation pipeline to extract the document's keys that start with
 //     the prefix "official__" and returns those keys with the prefix removed.
@@ -338,13 +366,13 @@ func (r *userRepo) UpdateUserProfile(ctx context.Context, uid string, attrs map[
 // Returns:
 // - *biz.UserProfileKeys: contains BaseKeys and any ExtraProfileKeys found.
 // - error: biz.UserNotFoundError when not found; wrapped errors for DB failures.
-func (r *userRepo) GetUserProfileKeysById(ctx context.Context, uid string) (*biz.UserProfileKeys, error) {
+func (r *userRepo) GetUserProfileKeys(ctx context.Context, uid string) (*biz.UserProfileKeys, error) {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	l.Debugf("GetUserProfileKeysById called with UserId: %s", uid)
+	l.Debugf("GetUserProfileKeys called with UserId: %s", uid)
 
 	collection := r.userCollection
 	// Read the `profile` sub-document and return its keys. If profile is missing
@@ -378,6 +406,56 @@ func (r *userRepo) GetUserProfileKeysById(ctx context.Context, uid string) (*biz
 		BaseKeys:         []string{"userId", "email", "created_at", "updated_at"},
 		ExtraProfileKeys: res,
 	}, nil
+}
+
+func (r *userRepo) GetUserClaimsWithFilter(ctx context.Context, uid string, keys []string) (map[string]any, error) {
+	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	l.Debugf("GetUserClaimsWithFilter called with UserId: %s", uid)
+
+	collection := r.userCollection
+	var doc bson.M
+	proj := options.FindOne().SetProjection(bson.M{"claim": 1})
+	if err := collection.FindOne(ctx, bson.M{"uid": uid}, proj).Decode(&doc); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, biz.UserNotFoundError
+		}
+		l.Errorf("failed to find user claims: %v", err)
+		return nil, fmt.Errorf("aggregate error: %w", err)
+	}
+	ans := make(map[string]any, len(keys))
+	for _, key := range keys {
+		ans[key] = nil
+	}
+	valueParse := func(value any) any {
+		if val, ok := value.(bson.DateTime); ok {
+			return val.Time().Format(time.RFC3339Nano)
+		}
+		return value
+	}
+	if claim, ok := doc["claim"]; ok {
+		if claim == nil {
+			// present but nil, treat as empty
+		} else if profD, ok := claim.(bson.D); ok {
+			if keys == nil {
+				for _, kv := range profD {
+					ans[kv.Key] = valueParse(kv.Value)
+				}
+			} else {
+				for _, kv := range profD {
+					if _, needed := ans[kv.Key]; needed {
+						ans[kv.Key] = valueParse(kv.Value)
+					}
+				}
+			}
+		} else {
+			l.Errorf("invalid profile type for user %s: %T", uid, claim)
+			return nil, kratosErrors.InternalServer("invalid profile type for user: %s", uid)
+		}
+	}
+	return ans, nil
 }
 
 // UpdateUserConsent records or updates the user's consent for a client application.
@@ -534,6 +612,9 @@ func (r *userRepo) SetUserDeveloperId(ctx context.Context, uid string, developer
 		} else {
 			l.Errorf("missing developer_id_updated_at for user with existing developerId: %s", uid)
 		}
+	} else {
+		// TODO 拒绝为非开发者更新id
+		// 添加某种审核机制
 	}
 
 	update := bson.M{

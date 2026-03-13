@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"iwut-auth-center/api/gen/go/auth_center/v1/user"
 	"iwut-auth-center/internal/biz"
 	"iwut-auth-center/internal/conf"
@@ -23,7 +22,7 @@ type UserService struct {
 	refreshTokenLifeSpan time.Duration
 }
 
-// NewUserService constructs a UserService with required usecases and JWT util.
+// NewUserService constructs a UserService with required usecase and JWT util.
 func NewUserService(userUsecase *biz.UserUsecase, authUsecase *biz.AuthUsecase, auditUsecase *biz.AuditUsecase, jwtUtil *util.JwtUtil, c *conf.Jwt) (*UserService, error) {
 	return &UserService{userUsecase: userUsecase, authUsecase: authUsecase, auditUsecase: auditUsecase, jwtUtil: jwtUtil,
 		refreshTokenLifeSpan: time.Duration(c.GetRefreshTokenLifeSpan()) * time.Second,
@@ -101,7 +100,12 @@ func (s *UserService) GetProfile(ctx context.Context, in *user.GetProfileRequest
 		uid = claim.Uid
 	}
 
-	userProfile, err := s.userUsecase.Repo.GetUserProfileByIdWithFilter(ctx, uid, in.GetKeys())
+	userProfile, err := s.userUsecase.Repo.GetUserProfileWithFilter(ctx, uid, in.GetKeys())
+	if err != nil {
+		return nil, errorProcess(ctx, err)
+	}
+
+	attrs, err := structpb.NewStruct(userProfile.OfficialAttrs)
 	if err != nil {
 		return nil, errorProcess(ctx, err)
 	}
@@ -115,7 +119,7 @@ func (s *UserService) GetProfile(ctx context.Context, in *user.GetProfileRequest
 				Email:     userProfile.Email,
 				CreatedAt: timestamppb.New(userProfile.CreatedAt),
 				UpdatedAt: timestamppb.New(userProfile.UpdatedAt),
-				Attrs:     userProfile.OfficialAttrs,
+				Attrs:     attrs,
 			},
 			TraceId: reqId,
 		}
@@ -132,14 +136,7 @@ func (s *UserService) UpdateProfile(ctx context.Context, in *structpb.Struct) (*
 	if err != nil {
 		return nil, errorProcess(ctx, err)
 	}
-	attrs := make(map[string]string)
-	for key, value := range in.GetFields() {
-		attrs[key] = value.GetStringValue()
-		if attrs[key] == "" {
-			fmt.Printf("attrs[%s] is empty\n", key)
-		}
-	}
-	if err = s.userUsecase.Repo.UpdateUserProfile(ctx, claim.Uid, attrs); err != nil {
+	if err = s.userUsecase.Repo.UpdateUserProfile(ctx, claim.Uid, in); err != nil {
 		return nil, errorProcess(ctx, err)
 	}
 
@@ -162,7 +159,7 @@ func (s *UserService) GetProfileKeys(ctx context.Context, _ *emptypb.Empty) (*us
 	if err != nil {
 		return nil, errorProcess(ctx, err)
 	}
-	result, err := s.userUsecase.Repo.GetUserProfileKeysById(ctx, claim.Uid)
+	result, err := s.userUsecase.Repo.GetUserProfileKeys(ctx, claim.Uid)
 	if err != nil {
 		return nil, errorProcess(ctx, err)
 	}
@@ -178,6 +175,39 @@ func (s *UserService) GetProfileKeys(ctx context.Context, _ *emptypb.Empty) (*us
 			TraceId: reqId,
 		}
 	}), nil
+}
+
+func (s *UserService) GetClaims(ctx context.Context, in *user.GetClaimsRequest) (*user.GetClaimsReply, error) {
+	successProcess, errorProcess := util.GetProcesses[*user.GetClaimsReply]("GetClaims", GetAuditInsertFunc(*s.auditUsecase))
+	uid := in.GetUserId()
+	_, err := s.jwtUtil.GetServiceClaims(ctx)
+	if err != nil {
+		claim, err := s.jwtUtil.GetBaseAuthClaims(ctx)
+		if err != nil {
+			return nil, errorProcess(ctx, err)
+		}
+		uid = claim.Uid
+	}
+
+	userClaims, err := s.userUsecase.Repo.GetUserClaimsWithFilter(ctx, uid, in.GetKeys())
+	if err != nil {
+		return nil, errorProcess(ctx, err)
+	}
+
+	claims, err := structpb.NewStruct(userClaims)
+	if err != nil {
+		return nil, errorProcess(ctx, err)
+	}
+
+	return successProcess(ctx, func(reqId string) *user.GetClaimsReply {
+		return &user.GetClaimsReply{
+			Code:    200,
+			Message: "Queried successfully",
+			Data:    claims,
+			TraceId: reqId,
+		}
+	}), nil
+
 }
 
 // UpdateUserConsent records the user's consent choices for a client application.
