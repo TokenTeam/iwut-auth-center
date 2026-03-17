@@ -2,15 +2,15 @@ package data
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	v1 "iwut-auth-center/api/gen/go/auth_center/v1/error_reason"
 	"iwut-auth-center/internal/biz"
 	"iwut-auth-center/internal/conf"
 	"iwut-auth-center/internal/util"
 	"strings"
 	"time"
 
-	kratosErrors "github.com/go-kratos/kratos/v2/errors"
+	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -57,7 +57,7 @@ func NewUserRepo(data *Data, c *conf.Data, logger log.Logger, appCenterUtil *uti
 // - userId: hex string representation of MongoDB ObjectID.
 // - oldPassword/newPassword: plain-text passwords.
 // Returns:
-//   - error: biz.UserNotFoundError when credentials don't match; biz.UserHasBeenDeletedError
+//   - error: v1.ErrorReason_USER_NOT_FOUND when credentials don't match; v1.ErrorReason_USER_DELETED
 //     when the user is soft-deleted; wrapped errors for other failures.
 //
 // Edge cases:
@@ -84,12 +84,12 @@ func (r *userRepo) UpdateUserPassword(ctx context.Context, uid string, oldPasswo
 	err := collection.FindOne(ctx, filter).Decode(&result)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return biz.UserNotFoundError
+			return errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
 		}
 		l.Errorf("failed to find user: %v", err)
 		return fmt.Errorf("failed to find user: %w", err)
 	} else if result.DeletedAt != nil {
-		return biz.UserHasBeenDeletedError
+		return errors.New(410, string(v1.ErrorReason_USER_DELETED), "user has been deleted")
 	}
 	update := bson.M{
 		"$set": bson.M{
@@ -116,7 +116,7 @@ func (r *userRepo) UpdateUserPassword(ctx context.Context, uid string, oldPasswo
 // - ctx: context for cancellation/timeouts.
 // - userId: hex string of the user's ObjectID.
 // Returns:
-//   - error: biz.UserNotFoundError if user doesn't exist; biz.UserHasBeenDeletedError
+//   - error: v1.ErrorReason_USER_NOT_FOUND if user doesn't exist; v1.ErrorReason_USER_DELETED
 //     if already deleted; wrapped errors on DB failures.
 func (r *userRepo) DeleteUserAccount(ctx context.Context, uid string) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
@@ -136,12 +136,12 @@ func (r *userRepo) DeleteUserAccount(ctx context.Context, uid string) error {
 	err := collection.FindOne(ctx, filter).Decode(&result)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return biz.UserNotFoundError
+			return errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
 		}
 		l.Errorf("failed to find user: %v", err)
 		return fmt.Errorf("failed to find user: %w", err)
 	} else if result.DeletedAt != nil {
-		return biz.UserHasBeenDeletedError
+		return errors.New(410, string(v1.ErrorReason_USER_DELETED), "user has been deleted")
 	}
 
 	now := time.Now()
@@ -172,7 +172,7 @@ func (r *userRepo) DeleteUserAccount(ctx context.Context, uid string) error {
 // - keys: optional list of official attribute keys to include; if nil, includes all.
 // Returns:
 // - *biz.UserProfile: populated profile with filtered official attributes when the user exists.
-// - error: biz.UserNotFoundError if the user doesn't exist; wrapped errors for DB/decoding issues.
+// - error: v1.ErrorReason_USER_NOT_FOUND if the user doesn't exist; wrapped errors for DB/decoding issues.
 func (r *userRepo) GetUserProfileWithFilter(ctx context.Context, uid string, keys []string) (*biz.UserProfile, error) {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
@@ -187,7 +187,7 @@ func (r *userRepo) GetUserProfileWithFilter(ctx context.Context, uid string, key
 	proj := options.FindOne().SetProjection(bson.M{"profile": 1, "uid": 1, "email": 1, "created_at": 1, "updated_at": 1})
 	if err := collection.FindOne(ctx, bson.M{"uid": uid}, proj).Decode(&doc); err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return nil, biz.UserNotFoundError
+			return nil, errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
 		}
 		l.Errorf("failed to find user profile: %v", err)
 		return nil, fmt.Errorf("failed to find user profile: %w", err)
@@ -307,7 +307,7 @@ func setByPath(root map[string]any, parts []string, v any) {
 // - userId: hex string of the user's ObjectID.
 // - attrs: map of key->value which will be stored under fields prefixed by `official__`.
 // Returns:
-//   - error: biz.UserNotFoundError if user missing; biz.OfficialInfoMemoryLimitationExceededError
+//   - error: v1.ErrorReason_USER_NOT_FOUND if user missing; v1.ErrorReason_OFFICIAL_INFO_MEMORY_LIMITATION_EXCEEDED
 //     if the attrs exceed configured limit; wrapped DB errors for other failures.
 func (r *userRepo) UpdateUserProfile(ctx context.Context, uid string, attrs *structpb.Struct) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
@@ -318,7 +318,7 @@ func (r *userRepo) UpdateUserProfile(ctx context.Context, uid string, attrs *str
 	}
 	if length > r.officialInfoMemoryLimitation {
 		l.Errorf("official info memory limitation exceeded: %d > %d", length, r.officialInfoMemoryLimitation)
-		return biz.OfficialInfoMemoryLimitationExceededError
+		return errors.New(413, string(v1.ErrorReason_OFFICIAL_INFO_MEMORY_LIMITATION_EXCEEDED), "official info memory limitation exceeded")
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -332,9 +332,9 @@ func (r *userRepo) UpdateUserProfile(ctx context.Context, uid string, attrs *str
 	for k, v := range attrsMap {
 		switch v.(type) {
 		case map[string]any:
-			return kratosErrors.BadRequest("", fmt.Sprintf("nested objects are not allowed in official attributes: key %q has object value", k))
+			return errors.BadRequest(string(v1.ErrorReason_INVALID_STRUCTURE), fmt.Sprintf("nested objects are not allowed in official attributes: key %q has object value", k))
 		case []any:
-			return kratosErrors.BadRequest("", fmt.Sprintf("array values are not allowed in official attributes: key %q has array value", k))
+			return errors.BadRequest(string(v1.ErrorReason_INVALID_STRUCTURE), fmt.Sprintf("array values are not allowed in official attributes: key %q has array value", k))
 		default:
 			set["profile."+k] = v
 		}
@@ -358,14 +358,14 @@ func (r *userRepo) UpdateUserProfile(ctx context.Context, uid string, attrs *str
 //     the prefix "official__" and returns those keys with the prefix removed.
 //   - Returns a structure containing BaseKeys (fixed list) and ExtraProfileKeys
 //     (derived from the document).
-//   - If the user doesn't exist, returns biz.UserNotFoundError.
+//   - If the user doesn't exist, returns v1.ErrorReason_USER_NOT_FOUND.
 //
 // Parameters:
 // - ctx: context for cancellation/timeouts.
 // - userId: hex string of the user's ObjectID.
 // Returns:
 // - *biz.UserProfileKeys: contains BaseKeys and any ExtraProfileKeys found.
-// - error: biz.UserNotFoundError when not found; wrapped errors for DB failures.
+// - error: v1.ErrorReason_USER_NOT_FOUND when not found; wrapped errors for DB failures.
 func (r *userRepo) GetUserProfileKeys(ctx context.Context, uid string) (*biz.UserProfileKeys, error) {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
@@ -383,7 +383,7 @@ func (r *userRepo) GetUserProfileKeys(ctx context.Context, uid string) (*biz.Use
 	proj := options.FindOne().SetProjection(bson.M{"profile": 1})
 	if err := collection.FindOne(ctx, bson.M{"uid": uid}, proj).Decode(&doc); err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return nil, biz.UserNotFoundError
+			return nil, errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
 		}
 		l.Errorf("failed to find user profile keys: %v", err)
 		return nil, fmt.Errorf("aggregate error: %w", err)
@@ -399,7 +399,7 @@ func (r *userRepo) GetUserProfileKeys(ctx context.Context, uid string) (*biz.Use
 		}
 	} else {
 		l.Errorf("profile field has unexpected type for user %s: %T", uid, doc.Profile)
-		return nil, kratosErrors.InternalServer("", fmt.Sprintf("invalid profile type for user %s: %T", uid, doc.Profile))
+		return nil, fmt.Errorf("profile field has unexpected type for user %s: %T", uid, doc.Profile)
 	}
 
 	return &biz.UserProfileKeys{
@@ -420,7 +420,7 @@ func (r *userRepo) GetUserClaimsWithFilter(ctx context.Context, uid string, keys
 	proj := options.FindOne().SetProjection(bson.M{"claim": 1})
 	if err := collection.FindOne(ctx, bson.M{"uid": uid}, proj).Decode(&doc); err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return nil, biz.UserNotFoundError
+			return nil, errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
 		}
 		l.Errorf("failed to find user claims: %v", err)
 		return nil, fmt.Errorf("aggregate error: %w", err)
@@ -452,7 +452,7 @@ func (r *userRepo) GetUserClaimsWithFilter(ctx context.Context, uid string, keys
 			}
 		} else {
 			l.Errorf("invalid profile type for user %s: %T", uid, claim)
-			return nil, kratosErrors.InternalServer("invalid profile type for user: %s", uid)
+			return nil, errors.InternalServer("invalid profile type for user: %s", uid)
 		}
 	}
 	return ans, nil
@@ -475,7 +475,7 @@ func (r *userRepo) GetUserClaimsWithFilter(ctx context.Context, uid string, keys
 // - clientVersion: version string to validate against the client's metadata.
 // - optionalScopes: list of optional scopes the user agreed to.
 // Returns:
-//   - error: biz.UserNotFoundError if user missing; kratos BadRequest/InternalServer
+//   - error: v1.ErrorReason_USER_NOT_FOUND if user missing; kratos BadRequest/InternalServer
 //     errors for invalid client/version or scope; wrapped DB errors for write failures.
 func (r *userRepo) UpdateUserConsent(ctx context.Context, uid string, clientId string, clientVersion int32, status string, optionalScopes []string, doCheck bool) error {
 
@@ -508,7 +508,7 @@ func (r *userRepo) UpdateUserConsent(ctx context.Context, uid string, clientId s
 		}
 		if applicationVersionInfo == nil {
 			l.Errorf("client not found: %s", clientId)
-			return kratosErrors.InternalServer("", "client not found with no error: "+clientId)
+			return fmt.Errorf("client not found: %s with no error", clientId)
 		}
 		if !allowed {
 			l.Errorf("user %s is not allowed to use client %s", uid, clientId)
@@ -520,7 +520,7 @@ func (r *userRepo) UpdateUserConsent(ctx context.Context, uid string, clientId s
 		for _, v := range optionalScopes {
 			if _, ok := scopeSet[v]; !ok {
 				l.Errorf("invalid optional scope: %s", v)
-				return kratosErrors.BadRequest("", "invalid optional scope: "+v)
+				return errors.BadRequest(string(v1.ErrorReason_INVALID_SCOPE), "invalid optional scope: "+v)
 			}
 		}
 		status = applicationVersionInfo.Status
@@ -573,14 +573,14 @@ func (r *userRepo) SetUserDeveloperId(ctx context.Context, uid string, developer
 
 	if developerId == "" {
 		l.Errorf("developerId cannot be empty")
-		return kratosErrors.BadRequest("", "developerId cannot be empty")
+		return errors.BadRequest(string(v1.ErrorReason_INVALID_DEVELOPER_ID), "developerId cannot be empty")
 	}
 	for c := range developerId {
 		if !((developerId[c] >= 'a' && developerId[c] <= 'z') || (developerId[c] >= 'A' && developerId[c] <= 'Z') ||
 			(developerId[c] >= '0' && developerId[c] <= '9') ||
 			developerId[c] == '-' || developerId[c] == '_') {
 			l.Errorf("invalid developerId format: %s", developerId)
-			return kratosErrors.BadRequest("", "invalid developerId format: "+developerId)
+			return errors.BadRequest(string(v1.ErrorReason_INVALID_DEVELOPER_ID), "invalid developerId format: "+developerId)
 		}
 	}
 
@@ -600,14 +600,14 @@ func (r *userRepo) SetUserDeveloperId(ctx context.Context, uid string, developer
 	err := r.userCollection.FindOne(ctx, filter).Decode(&result)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return biz.UserNotFoundError
+			return errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
 		}
 	}
 	if result.DeveloperId != nil {
 		if result.LastUpdateDeveloperId != nil {
 			if time.Since(*result.LastUpdateDeveloperId) < 30*24*time.Hour {
 				l.Infof("developerId can only be updated once every 30 days")
-				return kratosErrors.BadRequest("", "developerId can only be updated once every 30 days")
+				return errors.BadRequest(string(v1.ErrorReason_UPDATE_DEVELOPER_ID_TOO_FREQUENTLY), "developerId can only be updated once every 30 days")
 			}
 		} else {
 			l.Errorf("missing developer_id_updated_at for user with existing developerId: %s", uid)
@@ -627,13 +627,23 @@ func (r *userRepo) SetUserDeveloperId(ctx context.Context, uid string, developer
 	_, err = r.userCollection.UpdateOne(ctx, bson.M{"uid": uid}, update)
 	if err != nil {
 		if isDuplicateKeyError(err) {
-			// 返回业务友好错误（你可以定义 biz.DeveloperIdAlreadyExistsError）
-			return kratosErrors.New(409, "", "developer id already in use")
+			return errors.New(409, string(v1.ErrorReason_DEVELOPER_ID_ALREADY_EXIST), "developer id already in use")
 		}
 		l.Errorf("failed to set user developer id: %v", err)
 		return fmt.Errorf("failed to set user developer id: %w", err)
 	}
 	return nil
+}
+func isDuplicateKeyError(err error) bool {
+	var mongoErr mongo.WriteException
+	if errors.As(err, &mongoErr) {
+		for _, we := range mongoErr.WriteErrors {
+			if we.Code == 11000 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // RevokeUserConsent
@@ -662,7 +672,7 @@ func (r *userRepo) RevokeUserConsent(ctx context.Context, userId string, clientI
 
 	// 校验 status
 	if status != "TEST" && status != "STABLE" && status != "GREY" {
-		return kratosErrors.BadRequest("400", "invalid status, must be one of: TEST, STABLE, GREY")
+		return errors.BadRequest("400", "invalid status, must be one of: TEST, STABLE, GREY")
 	}
 
 	collection := r.userConsentsCollection
@@ -688,7 +698,7 @@ func (r *userRepo) RevokeUserConsent(ctx context.Context, userId string, clientI
 		if err := res.Err(); err != nil {
 			if errors.Is(err, mongo.ErrNoDocuments) {
 				l.Errorf("RevokeUserConsent TEST FindOneAndUpdate no document: %v", err)
-				return kratosErrors.NotFound("404", "user consent not found")
+				return errors.NotFound("404", "user consent not found")
 			}
 			l.Errorf("RevokeUserConsent TEST FindOneAndUpdate error: %v", err)
 			return err
@@ -728,7 +738,7 @@ func (r *userRepo) RevokeUserConsent(ctx context.Context, userId string, clientI
 		return err
 	}
 	if len(oldDocs) == 0 {
-		return kratosErrors.NotFound("404", "user consent not found")
+		return errors.NotFound("404", "user consent not found")
 	}
 
 	// 收集所有需要删除的 JTI
@@ -761,18 +771,6 @@ func (r *userRepo) RevokeUserConsent(ctx context.Context, userId string, clientI
 	return nil
 }
 
-func isDuplicateKeyError(err error) bool {
-	var mongoErr mongo.WriteException
-	if errors.As(err, &mongoErr) {
-		for _, we := range mongoErr.WriteErrors {
-			if we.Code == 11000 {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 func (r *userRepo) UserExists(ctx context.Context, uid string) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
@@ -787,12 +785,12 @@ func (r *userRepo) UserExists(ctx context.Context, uid string) error {
 	err := collection.FindOne(ctx, filter).Decode(&result)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return biz.UserNotFoundError
+			return errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
 		}
 		l.Errorf("failed to find user: %v", err)
 		return fmt.Errorf("failed to find user: %w", err)
 	} else if result.DeletedAt != nil {
-		return biz.UserHasBeenDeletedError
+		return errors.New(410, string(v1.ErrorReason_USER_DELETED), "user has been deleted")
 	}
 	return nil
 }

@@ -3,15 +3,15 @@ package data
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
+	v1 "iwut-auth-center/api/gen/go/auth_center/v1/error_reason"
 	"iwut-auth-center/internal/biz"
 	"iwut-auth-center/internal/conf"
 	"iwut-auth-center/internal/util"
 	"strings"
 	"time"
 
-	kratosErrors "github.com/go-kratos/kratos/v2/errors"
+	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-redis/redis/v8"
 	"github.com/samber/lo"
@@ -88,11 +88,11 @@ func (r *oauth2Repo) CheckGetCodeAndSetTypeRequest(ctx context.Context, codeInfo
 	defer cancel()
 
 	if codeInfo.Scope != "read" {
-		return false, kratosErrors.BadRequest("", "unsupported scope")
+		return false, errors.BadRequest(string(v1.ErrorReason_INVALID_SCOPE), "unsupported scope")
 	}
 
 	if codeInfo.ResponseType != "code" {
-		return false, kratosErrors.BadRequest("", "unsupported response_type")
+		return false, errors.BadRequest(string(v1.ErrorReason_INVALID_RESPONSE_TYPE), "unsupported response_type")
 	}
 
 	l.Debugf("CheckGetCodeAndSetTypeRequest userId: %s, codeInfo: %+v", userId, codeInfo)
@@ -102,7 +102,7 @@ func (r *oauth2Repo) CheckGetCodeAndSetTypeRequest(ctx context.Context, codeInfo
 		return false, err
 	}
 	if applicationVersionInfo == nil {
-		return false, kratosErrors.BadRequest("", "invalid client_id or user_id")
+		return false, fmt.Errorf("CheckGetCodeAndSetTypeRequest CheckUserPermissionAndGetApplicationVersionInfo returned nil applicationVersionInfo for clientId: %s, internalVersion: %d", codeInfo.ClientId, codeInfo.InternalVersion)
 	}
 
 	applicationInfo, err := r.appCenterUtil.GetApplicationInfo(ctx, codeInfo.ClientId)
@@ -111,7 +111,7 @@ func (r *oauth2Repo) CheckGetCodeAndSetTypeRequest(ctx context.Context, codeInfo
 		return false, err
 	}
 	if applicationInfo == nil {
-		return false, kratosErrors.BadRequest("", "applicationInfo is nil")
+		return false, fmt.Errorf("CheckGetCodeAndSetTypeRequest GetApplicationInfo returned nil for clientId: %s", codeInfo.ClientId)
 	}
 
 	if lo.Contains(applicationInfo.RedirectUri, codeInfo.RedirectUri) {
@@ -119,7 +119,7 @@ func (r *oauth2Repo) CheckGetCodeAndSetTypeRequest(ctx context.Context, codeInfo
 		return true, nil
 	}
 
-	return false, kratosErrors.BadRequest("", "redirect_uri mismatch")
+	return false, errors.BadRequest(string(v1.ErrorReason_REDIRECT_URI_MISMATCH), "redirect_uri mismatch")
 }
 
 // SetCodeInfo
@@ -239,7 +239,7 @@ func (r *oauth2Repo) InsertJTIToUserConsents(ctx context.Context, uid string, cl
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			l.Errorf("FindOne error: %v", err)
-			return kratosErrors.NotFound("404", "user consent not found")
+			return errors.NotFound("404", "user consent not found")
 		}
 		l.Errorf("InsertJTIToUserConsents FindOne error: %v", err)
 		return err
@@ -379,7 +379,7 @@ func (r *oauth2Repo) resolveTestConsentAccess(target *util.ApplicationVersionInf
 			OptionalScope:          intersectScopesByOrder(target.OptionalScope, consent.OptionalScope),
 		}, nil
 	}
-	return nil, kratosErrors.NotFound("", "user consent not found for this version")
+	return nil, errors.Forbidden(string(v1.ErrorReason_USER_DENIED), "user consent not found for this version")
 }
 
 func (r *oauth2Repo) resolveStableGreyConsentAccess(ctx context.Context, clientId string, target *util.ApplicationVersionInfo, consents []userConsentRecord) (*resolvedUserConsentAccess, error) {
@@ -392,7 +392,7 @@ func (r *oauth2Repo) resolveStableGreyConsentAccess(ctx context.Context, clientI
 		}
 	}
 	if len(stableGreyConsents) == 0 {
-		return nil, kratosErrors.NotFound("", "user consent not found")
+		return nil, errors.Forbidden(string(v1.ErrorReason_USER_DENIED), "user consent not found")
 	}
 
 	for _, consent := range stableGreyConsents {
@@ -427,7 +427,7 @@ func (r *oauth2Repo) resolveStableGreyConsentAccess(ctx context.Context, clientI
 		}
 	}
 	if bestCompatibleConsent == nil {
-		return nil, kratosErrors.Forbidden("", "client version outdated")
+		return nil, errors.Forbidden(string(v1.ErrorReason_USER_DENIED), "user client version outdated")
 	}
 
 	return &resolvedUserConsentAccess{
@@ -447,16 +447,16 @@ func (r *oauth2Repo) resolveUserConsentAccess(ctx context.Context, uid string, c
 		return nil, err
 	}
 	if applicationVersionInfo == nil {
-		return nil, kratosErrors.BadRequest("", "invalid client_id")
+		return nil, fmt.Errorf("resolveUserConsentAccess GetApplicationVersionInfoWithUserCheck returned nil applicationVersionInfo for clientId: %s, internalVersion: %d", clientId, internalVersion)
 	}
 	if !allowed {
 		return &resolvedUserConsentAccess{
 			Allowed:                false,
 			ApplicationVersionInfo: applicationVersionInfo,
-		}, biz.UserPermissionDeniedError
+		}, errors.Forbidden(string(v1.ErrorReason_PERMISSION_DENIED), "user permission denied")
 	}
 	if applicationVersionInfo.Status != "STABLE" && applicationVersionInfo.Status != "GREY" && applicationVersionInfo.Status != "TEST" {
-		return nil, kratosErrors.BadRequest("", "an application with invalid status trying to access user official profile")
+		return nil, errors.BadRequest(string(v1.ErrorReason_INVALID_APPLICATION_VERSION_STATUS), "an application with invalid status trying to access user official profile")
 	}
 
 	consents, err := r.loadUserConsentRecords(ctx, uid, clientId)
@@ -470,7 +470,7 @@ func (r *oauth2Repo) resolveUserConsentAccess(ctx context.Context, uid string, c
 	case "STABLE", "GREY":
 		return r.resolveStableGreyConsentAccess(ctx, clientId, applicationVersionInfo, consents)
 	default:
-		return nil, kratosErrors.BadRequest("", "an application with invalid status trying to access user official profile")
+		return nil, errors.BadRequest(string(v1.ErrorReason_INVALID_APPLICATION_VERSION_STATUS), "an application with invalid status trying to access user official profile")
 	}
 }
 
@@ -542,7 +542,7 @@ func (r *oauth2Repo) GetUserOfficialProfile(ctx context.Context, uid string, cli
 		return nil, err
 	}
 	if resolvedAccess == nil || !resolvedAccess.Allowed || resolvedAccess.ApplicationVersionInfo == nil {
-		return nil, biz.UserPermissionDeniedError
+		return nil, errors.Forbidden(string(v1.ErrorReason_PERMISSION_DENIED), "user permission denied")
 	}
 
 	readScopes := r.scopeIntersection(scopes, resolvedAccess.BasicScope, resolvedAccess.OptionalScope)
@@ -611,7 +611,7 @@ func (r *oauth2Repo) GetUserProfile(ctx context.Context, uid string, clientId st
 		return nil, err
 	}
 	if applicationInfo == nil {
-		return nil, kratosErrors.BadRequest("", "get application info failed")
+		return nil, fmt.Errorf("GetApplicationInfo returned nil for clientId: %s", clientId)
 	}
 
 	filter := bson.M{
@@ -622,7 +622,7 @@ func (r *oauth2Repo) GetUserProfile(ctx context.Context, uid string, clientId st
 	err = r.userConsentsCollection.FindOne(ctx, filter, options.FindOne().SetProjection(bson.M{"_id": 1})).Err()
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		l.Errorf("GetUserProfile user consent not found for userId: %s, clientId: %s", uid, clientId)
-		return nil, kratosErrors.NotFound("404", "user consent not found")
+		return nil, errors.NotFound("404", "user consent not found")
 	} else if err != nil {
 		l.Errorf("GetUserProfile FindOne error: %v", err)
 		return nil, err
@@ -631,7 +631,7 @@ func (r *oauth2Repo) GetUserProfile(ctx context.Context, uid string, clientId st
 	proj := bson.D{}
 	for _, s := range storageKeys {
 		if !util.IsASCIIAlphaNumDashUnderscore(s) {
-			return nil, kratosErrors.BadRequest("", fmt.Sprintf("invalid storage key '%s'", s))
+			return nil, errors.BadRequest(string(v1.ErrorReason_INVALID_KEY_NAME), fmt.Sprintf("invalid storage key '%s'", s))
 		}
 		if splits := strings.Split(applicationInfo.Id, "."); len(splits) == 2 && splits[0] != "" &&
 			(!strings.HasPrefix(splits[0], ".") || !strings.HasPrefix(splits[0], "$")) &&
@@ -639,7 +639,7 @@ func (r *oauth2Repo) GetUserProfile(ctx context.Context, uid string, clientId st
 			proj = append(proj, bson.E{Key: applicationInfo.Id + "." + s, Value: 1})
 		} else {
 			l.Errorf("GetUserProfile invalid application id: %s", applicationInfo.Id)
-			return nil, kratosErrors.InternalServer("", "invalid application id")
+			return nil, errors.InternalServer(string(v1.ErrorReason_INVALID_APP_ID), "invalid application id")
 		}
 	}
 
@@ -662,7 +662,7 @@ func (r *oauth2Repo) GetUserProfile(ctx context.Context, uid string, clientId st
 			return nil, err
 		}
 		// 用户不存在
-		return nil, biz.UserNotFoundError
+		return nil, errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
 	}
 
 	var doc bson.M
@@ -684,7 +684,7 @@ func (r *oauth2Repo) GetUserProfile(ctx context.Context, uid string, clientId st
 				conv, err := util.ConvertBSONValueToGOType(val)
 				if err != nil {
 					l.Errorf("GetUserProfile storage key '%s' has unsupported type: %v", errorKey, err)
-					return nil, kratosErrors.InternalServer("", fmt.Sprintf("storage key '%s' has unsupported type", k))
+					return nil, fmt.Errorf("storage key '%s' has unsupported type", key)
 				}
 				if conv == nil {
 					return nil, nil
@@ -700,7 +700,7 @@ func (r *oauth2Repo) GetUserProfile(ctx context.Context, uid string, clientId st
 					}
 				} else {
 					l.Errorf("GetUserProfile storage key '%s' is invalid type: %T", errorKey, conv)
-					return nil, kratosErrors.InternalServer("", fmt.Sprintf("storage key '%s' is invalid", k))
+					return nil, fmt.Errorf("storage key '%s' is invalid", k)
 				}
 			}
 		}
@@ -736,7 +736,7 @@ func (r *oauth2Repo) SetUserProfile(ctx context.Context, uid string, clientId st
 
 	if len(storageKeyValues) > 1000 {
 		l.Errorf("too many storage keys to set: %d", len(storageKeyValues))
-		return kratosErrors.BadRequest("", "too many storage keys to set")
+		return errors.BadRequest(string(v1.ErrorReason_TOO_MANY_KEYS), "too many storage keys to set")
 	}
 
 	var totalLength int64
@@ -744,14 +744,14 @@ func (r *oauth2Repo) SetUserProfile(ctx context.Context, uid string, clientId st
 	for k, v := range storageKeyValues {
 		if !util.IsASCIIAlphaNumDashUnderscore(k) {
 			l.Infof("invalid storage key: '%s': must be non-empty and only ascii character, number, dash, underscore are allowed.", k)
-			return kratosErrors.BadRequest("", fmt.Sprintf("invalid storage key '%s'", k))
+			return errors.BadRequest(string(v1.ErrorReason_INVALID_KEY_NAME), fmt.Sprintf("invalid storage key '%s'", k))
 		}
 		totalLength += int64(len(k) + len(v))
 	}
 
 	if totalLength > r.oauth2InfoMemoryLimitation {
 		l.Errorf("oauth info memory limitation exceeded: %d > %d", totalLength, r.oauth2InfoMemoryLimitation)
-		return biz.OAuth2InfoMemoryLimitationExceededError
+		return errors.New(413, string(v1.ErrorReason_OAUTH2_INFO_MEMORY_LIMITATION_EXCEEDED), "oauth2 info memory limitation exceeded")
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -765,7 +765,7 @@ func (r *oauth2Repo) SetUserProfile(ctx context.Context, uid string, clientId st
 		return err
 	}
 	if applicationInfo == nil {
-		return kratosErrors.BadRequest("", "get client info failed")
+		return fmt.Errorf("GetApplicationInfo returned nil for clientId: %s", clientId)
 	}
 
 	filter := bson.M{
@@ -776,7 +776,7 @@ func (r *oauth2Repo) SetUserProfile(ctx context.Context, uid string, clientId st
 	err = r.userConsentsCollection.FindOne(ctx, filter, options.FindOne().SetProjection(bson.M{"_id": 1})).Err()
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		l.Errorf("SetUserProfile user consent not found for userId: %s, clientId: %s", uid, clientId)
-		return kratosErrors.NotFound("404", "user consent not found")
+		return errors.NotFound("404", "user consent not found")
 	} else if err != nil {
 		l.Errorf("SetUserProfile FindOne error: %v", err)
 		return err
@@ -791,7 +791,7 @@ func (r *oauth2Repo) SetUserProfile(ctx context.Context, uid string, clientId st
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			l.Errorf("SetUserProfile user not found for userId: %s", uid)
-			return biz.UserNotFoundError
+			return errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
 		}
 		l.Errorf("SetUserProfile FindOne error: %v", err)
 		return err
@@ -814,7 +814,7 @@ func (r *oauth2Repo) SetUserProfile(ctx context.Context, uid string, clientId st
 
 	if len(existedKeyValue) > 1000 {
 		l.Errorf("too many storage keys to set: %d", len(existedKeyValue))
-		return kratosErrors.BadRequest("", "too many storage keys to set")
+		return errors.BadRequest(string(v1.ErrorReason_TOO_MANY_KEYS), "too many storage keys to set")
 	}
 
 	totalLength = 0
@@ -824,7 +824,7 @@ func (r *oauth2Repo) SetUserProfile(ctx context.Context, uid string, clientId st
 
 	if totalLength > r.oauth2InfoMemoryLimitation {
 		l.Errorf("oauth info memory limitation exceeded: %d > %d", totalLength, r.oauth2InfoMemoryLimitation)
-		return biz.OAuth2InfoMemoryLimitationExceededError
+		return errors.New(413, string(v1.ErrorReason_OAUTH2_INFO_MEMORY_LIMITATION_EXCEEDED), "oauth2 info memory limitation exceeded")
 	}
 
 	update := bson.M{}
@@ -908,24 +908,6 @@ func (r *oauth2Repo) AllowJTIs(ctx context.Context, jtis []string) error {
 //	return err
 //}
 
-//func (r *oauth2Repo) getApplicationAdmin(ctx context.Context, clientId string) (string, error) {
-//	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
-//
-//	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-//	defer cancel()
-//
-//	l.Debugf("getApplicationAdmin clientId: %s", clientId)
-//	applicationInfo, err := r.appCenterUtil.GetApplicationInfo(ctx, clientId)
-//	if err != nil {
-//		l.Errorf("getApplicationAdmin GetApplicationInfo failed: %v", err)
-//		return "", err
-//	}
-//	if applicationInfo == nil {
-//		return "", kratosErrors.BadRequest("", "invalid client_id")
-//	}
-//	return applicationInfo.Admin, nil
-//}
-
 // CheckUserPermissionAndGetApplicationVersionInfo
 // 简介：检查用户对指定客户端版本的访问权限，并返回目标版本信息。
 // 行为说明：
@@ -958,7 +940,7 @@ func (r *oauth2Repo) CheckUserPermissionAndGetApplicationVersionInfo(ctx context
 		return false, nil, err
 	}
 	if resolvedAccess == nil || resolvedAccess.ApplicationVersionInfo == nil {
-		return false, nil, kratosErrors.InternalServer("", "resolve user consent access failed")
+		return false, nil, fmt.Errorf("CheckUserPermissionAndGetApplicationVersionInfo resolveUserConsentAccess returned nil applicationVersionInfo for userId: %s, clientId: %s, internalVersion: %d", userId, clientId, internalVersion)
 	}
 	return resolvedAccess.Allowed, resolvedAccess.ApplicationVersionInfo, nil
 }

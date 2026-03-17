@@ -3,6 +3,7 @@ package util
 import (
 	"context"
 	"errors"
+	v1 "iwut-auth-center/api/gen/go/auth_center/v1/error_reason"
 	"time"
 
 	kratosErrors "github.com/go-kratos/kratos/v2/errors"
@@ -40,7 +41,7 @@ func GetErrorProcess(funcName string, writeIntoAudit func(ctx context.Context, a
 		} else {
 			errorMessage = err.Error()
 			returnCode = 500
-			errNew := kratosErrors.InternalServer("", errorMessage)
+			errNew := kratosErrors.InternalServer(string(v1.ErrorReason_UNKNOWN_ERROR), errorMessage)
 			errNew.Metadata = map[string]string{"traceId": traceID}
 			err = errNew
 		}

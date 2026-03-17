@@ -2,14 +2,15 @@ package data
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	v1 "iwut-auth-center/api/gen/go/auth_center/v1/error_reason"
 	"iwut-auth-center/internal/biz"
 	"iwut-auth-center/internal/conf"
 	"iwut-auth-center/internal/util"
 	"strconv"
 	"time"
 
+	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-redis/redis/v8"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -41,11 +42,11 @@ func NewAuthRepo(data *Data, c *conf.Data, cj *conf.Jwt, logger log.Logger, sha2
 // Behavior:
 //   - The provided plain password is hashed with the repo's sha256 util before
 //     querying the MongoDB `user` collection for a document matching {email, password}.
-//   - If no document is found, it returns biz.UserNotFoundError.
+//   - If no document is found, it returns v1.ErrorReason_USER_NOT_FOUND.
 //   - If a matching user has a deleted_at timestamp, attempt to restore the user
 //     when the deletion is within a 30-day recovery window by clearing deleted_at
 //     and updating updated_at; if restore fails return an error. If the deletion is
-//     older than 30 days, return biz.UserHasBeenDeletedError.
+//     older than 30 days, return v1.ErrorReason_USER_DELETED.
 //
 // Parameters:
 // - ctx: context for cancellation and timeouts.
@@ -76,7 +77,7 @@ func (r *authRepo) CheckPasswordWithEmailAndGetUserIdAndVersion(ctx context.Cont
 
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return "", -1, biz.UserNotFoundError
+			return "", -1, errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
 		}
 		l.Errorf("failed to find user: %v", err)
 		return "", -1, fmt.Errorf("failed to find user: %w", err)
@@ -87,7 +88,7 @@ func (r *authRepo) CheckPasswordWithEmailAndGetUserIdAndVersion(ctx context.Cont
 				l.Error("failed to restore deleted user: %v", err)
 				return "", -1, fmt.Errorf("failed to restore deleted user: %w", err)
 			}
-			return "", -1, biz.UserHasBeenDeletedError
+			return "", -1, errors.New(410, string(v1.ErrorReason_USER_DELETED), "user has been deleted")
 		}
 	}
 
@@ -113,7 +114,7 @@ func (r *authRepo) GetDeveloperIdByUserId(ctx context.Context, uid string) (*str
 	}
 	if err := collection.FindOne(ctx, filter).Decode(&result); err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return nil, biz.UserNotFoundError
+			return nil, errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
 		}
 		l.Errorf("failed to find user: %v", err)
 		return nil, fmt.Errorf("failed to find user: %w", err)
@@ -124,7 +125,7 @@ func (r *authRepo) GetDeveloperIdByUserId(ctx context.Context, uid string) (*str
 				l.Error("failed to restore deleted user: %v", err)
 				return nil, fmt.Errorf("failed to restore deleted user: %w", err)
 			}
-			return nil, biz.UserHasBeenDeletedError
+			return nil, errors.New(410, string(v1.ErrorReason_USER_DELETED), "user has been deleted")
 		}
 	}
 	return result.Claim.DeveloperId, nil
@@ -154,7 +155,7 @@ func (r *authRepo) TryRestoreDeletedUser(ctx context.Context, uid string, delete
 			return false, fmt.Errorf("failed to restore deleted user: %w", err)
 		}
 	} else {
-		return false, biz.UserHasBeenDeletedError
+		return false, errors.New(410, string(v1.ErrorReason_USER_DELETED), "user has been deleted")
 	}
 	return true, nil
 }
@@ -163,12 +164,12 @@ func (r *authRepo) TryRestoreDeletedUser(ctx context.Context, uid string, delete
 // in Redis sorted set and enforces rate limiting.
 // Behavior:
 //   - Checks MongoDB user collection to ensure the email is not already registered;
-//     if registered returns biz.UserAlreadyExistsError.
+//     if registered returns v1.ErrorReason_USER_ALREADY_EXISTS.
 //   - Uses a Redis sorted set (key: register_captcha:<email>) where members are
 //     captcha codes and score is the Unix timestamp when inserted.
 //   - Retrieves the most recent score to enforce a minimum interval (1 minute)
 //     between captcha requests for the same email; if too frequent returns
-//     biz.AskingCaptchaTooFrequentlyError.
+//     v1.ErrorReason_CAPTCHA_REQUEST_TOO_FREQUENTLY.
 //   - Adds the new captcha as a member with current timestamp score, trims old
 //     entries older than ttl via ZRemRangeByScore, and sets the key's TTL.
 //
@@ -196,7 +197,7 @@ func (r *authRepo) TryInsertRegisterCaptcha(ctx context.Context, email string, c
 		return fmt.Errorf("failed to count documents: %w", err)
 	}
 	if count > 0 {
-		return biz.UserAlreadyExistsError
+		return errors.Conflict(string(v1.ErrorReason_USER_ALREADY_EXISTS), "user already exists")
 	}
 
 	key := GetRedisKey("register_captcha", email)
@@ -211,7 +212,7 @@ func (r *authRepo) TryInsertRegisterCaptcha(ctx context.Context, email string, c
 	if len(zs) > 0 {
 		lastTs := int64(zs[0].Score)
 		if time.Unix(now, 0).Sub(time.Unix(lastTs, 0)) < time.Minute {
-			return biz.AskingCaptchaTooFrequentlyError
+			return errors.New(429, string(v1.ErrorReason_CAPTCHA_REQUEST_TOO_FREQUENTLY), "asking captcha too frequently")
 		}
 	}
 
@@ -240,12 +241,12 @@ func (r *authRepo) TryInsertRegisterCaptcha(ctx context.Context, email string, c
 // TryInsertResetPasswordCaptcha attempts to record a password reset captcha for an email
 // in Redis sorted set and enforces rate limiting.
 // Behavior:
-//   - Checks MongoDB user collection to ensure the email exists; if not, returns biz.UserNotFoundError.
+//   - Checks MongoDB user collection to ensure the email exists; if not, returns v1.ErrorReason_USER_NOT_FOUND.
 //   - Uses a Redis sorted set (key: reset_password_captcha:<email>) where members are
 //     captcha codes and score is the Unix timestamp when inserted.
 //   - Retrieves the most recent score to enforce a minimum interval (1 minute)
 //     between captcha requests for the same email; if too frequent returns
-//     biz.AskingCaptchaTooFrequentlyError.
+//     v1.ErrorReason_CAPTCHA_REQUEST_TOO_FREQUENTLY.
 //   - Adds the new captcha as a member with current timestamp score, trims old
 //     entries older than ttl via ZRemRangeByScore, and sets the key's TTL.
 //
@@ -273,7 +274,7 @@ func (r *authRepo) TryInsertResetPasswordCaptcha(ctx context.Context, email stri
 		return fmt.Errorf("failed to count documents: %w", err)
 	}
 	if count == 0 {
-		return biz.UserNotFoundError
+		return errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
 	}
 
 	key := GetRedisKey("reset_password_captcha", email)
@@ -288,7 +289,7 @@ func (r *authRepo) TryInsertResetPasswordCaptcha(ctx context.Context, email stri
 	if len(zs) > 0 {
 		lastTs := int64(zs[0].Score)
 		if time.Unix(now, 0).Sub(time.Unix(lastTs, 0)) < time.Minute {
-			return biz.AskingCaptchaTooFrequentlyError
+			return errors.New(429, string(v1.ErrorReason_CAPTCHA_REQUEST_TOO_FREQUENTLY), "asking captcha too frequently")
 		}
 	}
 
@@ -319,7 +320,7 @@ func (r *authRepo) TryInsertResetPasswordCaptcha(ctx context.Context, email stri
 // Behavior:
 //   - Trims old entries older than ttl from the Redis sorted set to keep the set clean.
 //   - Uses ZRank to check presence of the code; if Redis returns Nil it indicates
-//     the code is not present and biz.CaptchaNotUsableError is returned.
+//     the code is not present and INVALID_CAPTCHA is returned.
 //   - Other Redis errors are wrapped and returned.
 //
 // Parameters:
@@ -345,7 +346,7 @@ func (r *authRepo) CheckRegisterCaptchaUsable(ctx context.Context, email string,
 
 	_, err := r.data.redis.ZRank(ctx, key, code).Result()
 	if errors.Is(err, redis.Nil) {
-		return biz.CaptchaNotUsableError
+		return errors.BadRequest(string(v1.ErrorReason_INVALID_CAPTCHA), "captcha not usable")
 	} else if err != nil {
 		l.Errorf("ZRank error: %v", err)
 		return fmt.Errorf("redis zrank error: %w", err)
@@ -365,7 +366,7 @@ func (r *authRepo) CheckRegisterCaptchaUsable(ctx context.Context, email string,
 // Behavior:
 //   - Trims old entries older than ttl from the Redis sorted set to keep the set clean.
 //   - Uses ZRank to check presence of the code; if Redis returns Nil it indicates
-//     the code is not present and biz.CaptchaNotUsableError is returned.
+//     the code is not present and INVALID_CAPTCHA is returned.
 //   - Other Redis errors are wrapped and returned.
 //
 // Parameters:
@@ -391,7 +392,7 @@ func (r *authRepo) CheckResetPasswordCaptchaUsable(ctx context.Context, email st
 
 	_, err := r.data.redis.ZRank(ctx, key, code).Result()
 	if errors.Is(err, redis.Nil) {
-		return biz.CaptchaNotUsableError
+		return errors.BadRequest(string(v1.ErrorReason_INVALID_CAPTCHA), "captcha not usable")
 	} else if err != nil {
 		l.Errorf("ZRank error: %v", err)
 		return fmt.Errorf("redis zrank error: %w", err)
@@ -410,7 +411,7 @@ func (r *authRepo) CheckResetPasswordCaptchaUsable(ctx context.Context, email st
 // Behavior:
 //   - Hashes the provided password using the repo's sha256 util before storing.
 //   - Checks for existing users with the same email and returns
-//     biz.UserAlreadyExistsError if present.
+//     v1.ErrorReason_USER_ALREADY_EXISTS if present.
 //   - Inserts a new document with created_at, updated_at and Version = 0.
 //   - Converts the MongoDB InsertedID into a string (hex when ObjectID).
 //
@@ -455,7 +456,7 @@ func (r *authRepo) RegisterUser(ctx context.Context, email string, password stri
 		if errors.As(err, &we) {
 			for _, e := range we.WriteErrors {
 				if e.Code == 11000 {
-					return "", biz.UserAlreadyExistsError
+					return "", errors.Conflict(string(v1.ErrorReason_USER_ALREADY_EXISTS), "user already exists")
 				}
 			}
 		}
@@ -478,7 +479,7 @@ func (r *authRepo) ResetPassword(ctx context.Context, email string, newPassword 
 	err := r.userCollection.FindOne(ctx, filter).Decode(&result)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return biz.UserNotFoundError
+			return errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
 		}
 		l.Errorf("failed to find user: %v", err)
 		return fmt.Errorf("failed to find user: %w", err)
@@ -497,7 +498,7 @@ func (r *authRepo) ResetPassword(ctx context.Context, email string, newPassword 
 		return fmt.Errorf("failed to update user password: %w", err)
 	}
 	if res.MatchedCount == 0 {
-		return biz.UserNotFoundError
+		return errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
 	}
 	err = r.AddOrUpdateUserVersion(ctx, result.UserId, result.Version, r.accessTokenLifeSpan)
 	if err != nil {
@@ -538,8 +539,8 @@ func (r *authRepo) AddOrUpdateUserVersion(ctx context.Context, userId string, ve
 // - Attempts to GET user_version:<userId> from Redis.
 // - If the key is missing (redis.Nil):
 //   - Query the MongoDB `user` collection for the document with _id == userId.
-//   - If the user is not found, return biz.UserNotFoundError and a sentinel int.
-//   - If the user has a deleted_at timestamp, return biz.UserHasBeenDeletedError.
+//   - If the user is not found, return v1.ErrorReason_USER_NOT_FOUND and a sentinel int.
+//   - If the user has a deleted_at timestamp, return v1.ErrorReason_USER_DELETED.
 //   - Otherwise, update the Redis cache with the found version using AddOrUpdateUserVersion.
 //
 // - If Redis returns another error, wrap and return it.
@@ -577,12 +578,12 @@ func (r *authRepo) GetUserVersion(ctx context.Context, uid string, ttl time.Dura
 		err = collection.FindOne(ctx, filter).Decode(&result)
 		if err != nil {
 			if errors.Is(err, mongo.ErrNoDocuments) {
-				return 1<<31 - 1, biz.UserNotFoundError
+				return 1<<31 - 1, errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
 			}
 			l.Errorf("failed to find user: %v", err)
 			return 1<<31 - 1, fmt.Errorf("failed to find user: %w", err)
 		} else if result.DeletedAt != nil {
-			return 1<<31 - 1, biz.UserHasBeenDeletedError
+			return 1<<31 - 1, errors.New(410, string(v1.ErrorReason_USER_DELETED), "user has been deleted")
 		}
 		err = r.AddOrUpdateUserVersion(ctx, uid, result.Version, ttl)
 		if err != nil {
