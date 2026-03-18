@@ -28,7 +28,6 @@ type oauth2Repo struct {
 	userCollection             *mongo.Collection
 	userConsentsCollection     *mongo.Collection
 	refreshTokenLifeSpan       time.Duration
-	officialClientId           string
 	oauth2InfoMemoryLimitation int64
 }
 
@@ -49,7 +48,7 @@ type resolvedUserConsentAccess struct {
 // It binds the `user` and `user_consents` collections and reads relevant
 // configuration (refresh token TTL and per-user storage memory limits).
 // It does not mutate DB schema or create indexes.
-func NewOauth2Repo(data *Data, c *conf.Data, co *conf.Oauth2, jwtConf *conf.Jwt, appCenterUtil *util.AppCenterUtil, userUsecase *biz.UserUsecase, logger log.Logger) biz.Oauth2Repo {
+func NewOauth2Repo(data *Data, c *conf.Data, jwtConf *conf.Jwt, appCenterUtil *util.AppCenterUtil, userUsecase *biz.UserUsecase, logger log.Logger) biz.Oauth2Repo {
 	dbName := c.GetMongodb().GetDatabase()
 	usersCollection := data.mongo.Database(dbName).Collection("user")
 	userConsentsCollection := data.mongo.Database(dbName).Collection("user_consents")
@@ -62,7 +61,6 @@ func NewOauth2Repo(data *Data, c *conf.Data, co *conf.Oauth2, jwtConf *conf.Jwt,
 		userCollection:             usersCollection,
 		userConsentsCollection:     userConsentsCollection,
 		refreshTokenLifeSpan:       time.Duration(jwtConf.GetRefreshTokenLifeSpan()) * time.Second,
-		officialClientId:           co.GetOfficial().GetUserId(),
 		oauth2InfoMemoryLimitation: c.GetMongodb().GetLimitations().GetUser().GetOauth2MemLimit(),
 	}
 }
@@ -474,30 +472,17 @@ func (r *oauth2Repo) resolveUserConsentAccess(ctx context.Context, uid string, c
 	}
 }
 
-func (r *oauth2Repo) scopeIntersection(requestScopes []string, appBasicScope []string, userAllowedOptionalScope []string) []string {
-	readableScope := make(map[string]struct{})
-	for _, s := range appBasicScope {
-		if strings.HasPrefix(s, "read__") {
-			readableScope[s[6:]] = struct{}{}
-		}
+func (r *oauth2Repo) scopeIntersection(scopes ...[]string) []string {
+	if len(scopes) == 0 {
+		return nil
 	}
-	for _, s := range userAllowedOptionalScope {
-		if strings.HasPrefix(s, "read__") {
-			readableScope[s[6:]] = struct{}{}
-		}
+	scope := scopes[0]
+	for i := 1; i < len(scopes); i++ {
+		lo.Intersect(scope, scopes[i])
 	}
-	readScopes := make([]string, 0, len(requestScopes))
-	seen := make(map[string]any)
-	for _, s := range requestScopes {
-		if _, ok := seen[s]; ok || s == "password" {
-			continue
-		}
-		if _, ok := readableScope[s]; ok {
-			readScopes = append(readScopes, s)
-			seen[s] = nil
-		}
-	}
-	return readScopes
+	return lo.Map(scope, func(s string, _ int) string {
+		return s[6:]
+	})
 }
 
 // GetUserOfficialProfile 返回客户端可读取的“官方”用户资料字段（非 per-client storage）。
@@ -532,7 +517,7 @@ func (r *oauth2Repo) scopeIntersection(requestScopes []string, appBasicScope []s
 func (r *oauth2Repo) GetUserOfficialProfile(ctx context.Context, uid string, clientId string, internalVersion int32, scopes []string) (map[string]any, error) {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	l.Debugf("GetUserOfficialProfile uid: %s, clientId: %s, internalVersion: %d", uid, clientId, internalVersion)
@@ -545,7 +530,7 @@ func (r *oauth2Repo) GetUserOfficialProfile(ctx context.Context, uid string, cli
 		return nil, errors.Forbidden(string(v1.ErrorReason_PERMISSION_DENIED), "user permission denied")
 	}
 
-	readScopes := r.scopeIntersection(scopes, resolvedAccess.BasicScope, resolvedAccess.OptionalScope)
+	readScopes := r.scopeIntersection(scopes, resolvedAccess.BasicScope)
 
 	// 如果没有可读字段，则返回空 map
 	if len(readScopes) == 0 {
@@ -677,38 +662,37 @@ func (r *oauth2Repo) GetUserProfile(ctx context.Context, uid string, clientId st
 		var errorKey string
 		if len(keys) > 0 {
 			errorKey = keys[len(keys)-1]
+		} else {
+			errorKey = key
 		}
-		errorKey = key
+		conv := &doc
 		for i, k := range keys {
-			if val, ok := doc[k]; ok {
-				conv, err := util.ConvertBSONValueToGOType(val)
-				if err != nil {
-					l.Errorf("GetUserProfile storage key '%s' has unsupported type: %v", errorKey, err)
-					return nil, fmt.Errorf("storage key '%s' has unsupported type", key)
+			if i == len(keys)-1 {
+				if s, ok := (*conv)[k].(string); ok {
+					return &s, nil
 				}
-				if conv == nil {
-					return nil, nil
-				} else if s, ok := conv.(map[string]any); ok {
-					if i < len(keys)-1 {
-						doc = s
-					} else {
-						return nil, nil
-					}
-				} else if s, ok := conv.(string); ok {
-					if i == len(keys)-1 {
-						return &s, nil
-					}
-				} else {
-					l.Errorf("GetUserProfile storage key '%s' is invalid type: %T", errorKey, conv)
-					return nil, fmt.Errorf("storage key '%s' is invalid", k)
-				}
+				return nil, fmt.Errorf("key %s is not a string", errorKey)
+			}
+			if mp, ok := (*conv)[k].(map[string]any); ok {
+				conv = &mp
+				continue
+			} else {
+				return nil, fmt.Errorf("key %s is not a map", errorKey)
 			}
 		}
 		return nil, nil
 	}
+	conv, err := util.ConvertBSONValueToGOType(doc)
+	if err != nil {
+		l.Errorf("GetUserProfile ConvertBSONValueToGOType error: %v", err)
+		return nil, err
+	}
+	if _, ok := conv.(map[string]any); !ok {
+		return nil, fmt.Errorf("GetUserProfile ConvertBSONValueToGOType error: %v", conv)
+	}
 	for _, k := range storageKeys {
 		fullKey := applicationInfo.Id + "." + k
-		val, err := getter(fullKey, doc)
+		val, err := getter(fullKey, conv.(map[string]any))
 		if err != nil {
 			return nil, err
 		}

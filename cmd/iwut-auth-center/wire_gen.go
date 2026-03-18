@@ -26,7 +26,7 @@ import (
 // Injectors from wire.go:
 
 // wireApp init kratos application.
-func wireApp(confServer *conf.Server, confData *conf.Data, jwt *conf.Jwt, confMail *conf.Mail, confService *conf.Service, oauth2 *conf.Oauth2, logger log.Logger) (*kratos.App, func(), error) {
+func wireApp(confServer *conf.Server, confData *conf.Data, jwt *conf.Jwt, confMail *conf.Mail, confService *conf.Service, logger log.Logger) (*kratos.App, func(), error) {
 	dataData, cleanup, err := data.NewData(confData, logger)
 	if err != nil {
 		return nil, nil, err
@@ -58,7 +58,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, jwt *conf.Jwt, confMa
 		cleanup()
 		return nil, nil, err
 	}
-	oauth2Repo := data.NewOauth2Repo(dataData, confData, oauth2, jwt, appCenterUtil, userUsecase, logger)
+	oauth2Repo := data.NewOauth2Repo(dataData, confData, jwt, appCenterUtil, userUsecase, logger)
 	oauth2Usecase := biz.NewOauth2Usecase(oauth2Repo)
 	oauth2Service := service.NewOauth2Service(oauth2Usecase, auditUsecase, appCenterUtil, jwtUtil, jwt)
 	jwtCheckMiddleware := middleware.NewJwtInfoMiddleware(jwtUtil)

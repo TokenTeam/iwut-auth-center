@@ -11,7 +11,6 @@ message Bootstrap {
   Service service = 3;
   Jwt jwt = 4;
   Mail mail = 5;
-  Oauth2 oauth2 = 6;
 }
 
 message Server {
@@ -92,11 +91,4 @@ message Mail {
   string password = 4;
   string from = 5;
   bool use_tls = 6;
-}
-
-message Oauth2 {
-  message Official {
-    string user_id = 1;
-  }
-  Official official = 1;
 }

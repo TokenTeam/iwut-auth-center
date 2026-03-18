@@ -48,6 +48,4 @@ mail:
   port: 587
   username: "no-reply@tokenteam.net"
   password: "${mailPassword:test}"
-oauth2:
-  official:
-    user_id: "${officialUserId:019c8498-8af4-709e-aab1-09857a1ee91a}"
+  

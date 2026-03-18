@@ -214,7 +214,7 @@ func main() {
 
 	logger := newLogger(&bc)
 
-	app, cleanup, err := wireApp(bc.Server, bc.Data, bc.Jwt, bc.Mail, bc.Service, bc.Oauth2, logger)
+	app, cleanup, err := wireApp(bc.Server, bc.Data, bc.Jwt, bc.Mail, bc.Service, logger)
 	if err != nil {
 		panic(err)
 	}
