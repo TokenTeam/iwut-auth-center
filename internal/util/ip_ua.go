@@ -12,10 +12,19 @@ type IpUAValue struct {
 
 // 获取ctx中的 ip UA 作为 审计信息
 
-func RequestIpUAFrom(ctx context.Context) *IpUAValue {
+func RequestIpFrom(ctx context.Context) *string {
 	if v := ctx.Value(IpUA{}); v != nil {
 		if s, ok := v.(IpUAValue); ok {
-			return &s
+			return &(s.Ip)
+		}
+	}
+	return nil
+}
+
+func RequestUAFrom(ctx context.Context) *string {
+	if v := ctx.Value(IpUA{}); v != nil {
+		if s, ok := v.(IpUAValue); ok {
+			return &(s.UA)
 		}
 	}
 	return nil

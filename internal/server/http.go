@@ -75,9 +75,9 @@ func NewHTTPServer(c *conf.Server, authSvc *service.AuthService, userSvc *servic
 		http.Middleware(
 			recovery.Recovery(),
 			tracing.Server(),
-			logging.Server(logger),
 			middleware.GetAuditInfoCollectorMiddleware(),
 			jwtCheck.GetJwtInfoMiddleware(),
+			logging.Server(logger),
 		),
 		http.ErrorEncoder(CreatedErrorEncoder),
 	}

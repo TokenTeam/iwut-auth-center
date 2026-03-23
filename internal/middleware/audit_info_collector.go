@@ -18,6 +18,7 @@ import (
 func GetAuditInfoCollectorMiddleware() middleware.Middleware {
 	return func(handler middleware.Handler) middleware.Handler {
 		return func(ctx context.Context, req interface{}) (interface{}, error) {
+			ctx = util.WithRequestAudit(ctx)
 			tr, ok := transport.FromServerContext(ctx)
 			if !ok || tr == nil {
 				return nil, errors.InternalServer("500", "transport not found in context")

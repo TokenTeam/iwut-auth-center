@@ -20,7 +20,7 @@ import (
 type Oauth2Service struct {
 	oauth2.UnimplementedOAuth2Server
 	oauth2Usecase        *biz.Oauth2Usecase
-	auditUsecase         *biz.AuditUsecase
+	auditUsecase         *string
 	appCenterUtil        *util.AppCenterUtil
 	jwtUtil              *util.JwtUtil
 	accessTokenLifeSpan  time.Duration
@@ -28,10 +28,9 @@ type Oauth2Service struct {
 }
 
 // NewOauth2Service constructs an Oauth2Service wiring usecases and JWT util.
-func NewOauth2Service(oauth2Usecase *biz.Oauth2Usecase, auditUsecase *biz.AuditUsecase, appCenterUtil *util.AppCenterUtil, jwtUtil *util.JwtUtil, c *conf.Jwt) *Oauth2Service {
+func NewOauth2Service(oauth2Usecase *biz.Oauth2Usecase, appCenterUtil *util.AppCenterUtil, jwtUtil *util.JwtUtil, c *conf.Jwt) *Oauth2Service {
 	return &Oauth2Service{
 		oauth2Usecase:        oauth2Usecase,
-		auditUsecase:         auditUsecase,
 		appCenterUtil:        appCenterUtil,
 		jwtUtil:              jwtUtil,
 		accessTokenLifeSpan:  time.Duration(c.GetAccessTokenLifeSpan()) * time.Second,
@@ -43,7 +42,7 @@ func NewOauth2Service(oauth2Usecase *biz.Oauth2Usecase, auditUsecase *biz.AuditU
 // - Validates incoming parameters (scope/response_type/PKCE arguments) and user permission via oauth2 usecase,
 // - Generates an authorization code, caches its associated metadata, and returns a redirect URI containing the code.
 func (s *Oauth2Service) Authorize(ctx context.Context, in *oauth2.AuthorizeRequest) (*oauth2.AuthorizeReply, error) {
-	successProcess, errorProcess := util.GetProcesses[*oauth2.AuthorizeReply]("Authorize", GetAuditInsertFunc(*s.auditUsecase))
+	successProcess, errorProcess := util.GetProcesses[*oauth2.AuthorizeReply]()
 
 	claim, err := s.jwtUtil.GetBaseAuthClaims(ctx)
 	if err != nil {
@@ -237,7 +236,7 @@ func (s *Oauth2Service) GetToken(ctx context.Context, in *oauth2.GetTokenRequest
 // GetUserProfile returns the profile visible to the requesting OAuth client (azp from JWT).
 // - Extracts OAuth claims, delegates profile assembly to oauth2 usecase repo, converts maps to structpb and returns them.
 func (s *Oauth2Service) GetUserProfile(ctx context.Context, in *oauth2.GetUserProfileRequest) (*oauth2.GetUserProfileReply, error) {
-	successProcess, errorProcess := util.GetProcesses[*oauth2.GetUserProfileReply]("GetUserProfile", GetAuditInsertFunc(*s.auditUsecase))
+	successProcess, errorProcess := util.GetProcesses[*oauth2.GetUserProfileReply]()
 	claim, err := s.jwtUtil.GetOAuthClaims(ctx)
 	if err != nil {
 		return nil, errorProcess(ctx, err)
@@ -282,7 +281,7 @@ func (s *Oauth2Service) GetUserProfile(ctx context.Context, in *oauth2.GetUserPr
 // SetUserStorage updates namespaced storage keys for the authenticated OAuth client (azp).
 // - Parses incoming structpb to map[string]string and delegates persistence to oauth2 usecase repo.
 func (s *Oauth2Service) SetUserStorage(ctx context.Context, in *structpb.Struct) (*oauth2.SetUserStorageReply, error) {
-	successProcess, errorProcess := util.GetProcesses[*oauth2.SetUserStorageReply]("SetUserStorage", GetAuditInsertFunc(*s.auditUsecase))
+	successProcess, errorProcess := util.GetProcesses[*oauth2.SetUserStorageReply]()
 	claim, err := s.jwtUtil.GetOAuthClaims(ctx)
 	if err != nil {
 		return nil, errorProcess(ctx, err)

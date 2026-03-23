@@ -17,14 +17,15 @@ type UserService struct {
 	user.UnimplementedUserServer
 	userUsecase          *biz.UserUsecase
 	authUsecase          *biz.AuthUsecase
-	auditUsecase         *biz.AuditUsecase
+	auditUsecase         *string
 	jwtUtil              *util.JwtUtil
 	refreshTokenLifeSpan time.Duration
 }
 
 // NewUserService constructs a UserService with required usecase and JWT util.
-func NewUserService(userUsecase *biz.UserUsecase, authUsecase *biz.AuthUsecase, auditUsecase *biz.AuditUsecase, jwtUtil *util.JwtUtil, c *conf.Jwt) (*UserService, error) {
-	return &UserService{userUsecase: userUsecase, authUsecase: authUsecase, auditUsecase: auditUsecase, jwtUtil: jwtUtil,
+func NewUserService(userUsecase *biz.UserUsecase, authUsecase *biz.AuthUsecase, jwtUtil *util.JwtUtil, c *conf.Jwt) (*UserService, error) {
+	s := "123"
+	return &UserService{userUsecase: userUsecase, authUsecase: authUsecase, jwtUtil: jwtUtil, auditUsecase: &s,
 		refreshTokenLifeSpan: time.Duration(c.GetRefreshTokenLifeSpan()) * time.Second,
 	}, nil
 }
@@ -35,7 +36,7 @@ func NewUserService(userUsecase *biz.UserUsecase, authUsecase *biz.AuthUsecase, 
 // - Bumps cached user version via auth usecase to invalidate previous refresh tokens,
 // - Returns RPC-level success or propagated errors.
 func (s *UserService) UpdatePassword(ctx context.Context, in *user.UpdatePasswordRequest) (*user.UpdatePasswordReply, error) {
-	successProcess, errorProcess := util.GetProcesses[*user.UpdatePasswordReply]("UpdatePassword", GetAuditInsertFunc(*s.auditUsecase))
+	successProcess, errorProcess := util.GetProcesses[*user.UpdatePasswordReply]()
 
 	claim, err := s.jwtUtil.GetBaseAuthClaims(ctx)
 	if err != nil {
@@ -63,7 +64,7 @@ func (s *UserService) UpdatePassword(ctx context.Context, in *user.UpdatePasswor
 // - Updates cached user version to invalidate tokens,
 // - Returns RPC-level result and audit info.
 func (s *UserService) DeleteAccount(ctx context.Context, _ *emptypb.Empty) (*user.DeleteAccountReply, error) {
-	successProcess, errorProcess := util.GetProcesses[*user.DeleteAccountReply]("DeleteAccount", GetAuditInsertFunc(*s.auditUsecase))
+	successProcess, errorProcess := util.GetProcesses[*user.DeleteAccountReply]()
 
 	claim, err := s.jwtUtil.GetBaseAuthClaims(ctx)
 	if err != nil {
@@ -89,7 +90,8 @@ func (s *UserService) DeleteAccount(ctx context.Context, _ *emptypb.Empty) (*use
 // - Extracts user id from JWT and fetches profile from user usecase repo,
 // - Translates domain profile to RPC reply structure and returns it.
 func (s *UserService) GetProfile(ctx context.Context, in *user.GetProfileRequest) (*user.GetProfileReply, error) {
-	successProcess, errorProcess := util.GetProcesses[*user.GetProfileReply]("GetProfile", GetAuditInsertFunc(*s.auditUsecase))
+	successProcess, errorProcess := util.GetProcesses[*user.GetProfileReply]()
+
 	uid := in.GetUserId()
 	_, err := s.jwtUtil.GetServiceClaims(ctx)
 	if err != nil {
@@ -130,7 +132,7 @@ func (s *UserService) GetProfile(ctx context.Context, in *user.GetProfileRequest
 // - Converts incoming structpb to a string map and delegates to user usecase repo,
 // - Returns RPC-level success or propagated errors.
 func (s *UserService) UpdateProfile(ctx context.Context, in *structpb.Struct) (*user.UpdateProfileReply, error) {
-	successProcess, errorProcess := util.GetProcesses[*user.UpdateProfileReply]("UpdateProfile", GetAuditInsertFunc(*s.auditUsecase))
+	successProcess, errorProcess := util.GetProcesses[*user.UpdateProfileReply]()
 
 	claim, err := s.jwtUtil.GetBaseAuthClaims(ctx)
 	if err != nil {
@@ -153,7 +155,7 @@ func (s *UserService) UpdateProfile(ctx context.Context, in *structpb.Struct) (*
 // - Delegates to user usecase repo to list base and extra keys (official__*),
 // - Returns them in the RPC response.
 func (s *UserService) GetProfileKeys(ctx context.Context, _ *emptypb.Empty) (*user.GetProfileKeysReply, error) {
-	successProcess, errorProcess := util.GetProcesses[*user.GetProfileKeysReply]("GetProfileKeys", GetAuditInsertFunc(*s.auditUsecase))
+	successProcess, errorProcess := util.GetProcesses[*user.GetProfileKeysReply]()
 
 	claim, err := s.jwtUtil.GetBaseAuthClaims(ctx)
 	if err != nil {
@@ -178,7 +180,7 @@ func (s *UserService) GetProfileKeys(ctx context.Context, _ *emptypb.Empty) (*us
 }
 
 func (s *UserService) GetClaims(ctx context.Context, in *user.GetClaimsRequest) (*user.GetClaimsReply, error) {
-	successProcess, errorProcess := util.GetProcesses[*user.GetClaimsReply]("GetClaims", GetAuditInsertFunc(*s.auditUsecase))
+	successProcess, errorProcess := util.GetProcesses[*user.GetClaimsReply]()
 	uid := in.GetUserId()
 	_, err := s.jwtUtil.GetServiceClaims(ctx)
 	if err != nil {
@@ -213,7 +215,7 @@ func (s *UserService) GetClaims(ctx context.Context, in *user.GetClaimsRequest) 
 // UpdateUserConsent records the user's consent choices for a client application.
 // - Validates the caller via JWT, then delegates validation and persistence to user usecase repo.
 func (s *UserService) UpdateUserConsent(ctx context.Context, in *user.UpdateUserConsentRequest) (*user.UpdateUserConsentReply, error) {
-	successProcess, errorProcess := util.GetProcesses[*user.UpdateUserConsentReply]("UpdateUserConsent", GetAuditInsertFunc(*s.auditUsecase))
+	successProcess, errorProcess := util.GetProcesses[*user.UpdateUserConsentReply]()
 
 	claim, err := s.jwtUtil.GetBaseAuthClaims(ctx)
 	if err != nil {
@@ -233,7 +235,7 @@ func (s *UserService) UpdateUserConsent(ctx context.Context, in *user.UpdateUser
 }
 
 func (s *UserService) SetUserDeveloperId(ctx context.Context, in *user.SetUserDeveloperIdRequest) (*user.SetUserDeveloperIdReply, error) {
-	successProcess, errorProcess := util.GetProcesses[*user.SetUserDeveloperIdReply]("SetUserDeveloperId", GetAuditInsertFunc(*s.auditUsecase))
+	successProcess, errorProcess := util.GetProcesses[*user.SetUserDeveloperIdReply]()
 
 	claim, err := s.jwtUtil.GetBaseAuthClaims(ctx)
 	if err != nil {
@@ -255,7 +257,7 @@ func (s *UserService) SetUserDeveloperId(ctx context.Context, in *user.SetUserDe
 // - Validates caller via JWT and delegates the revoke operation to oauth2 usecase repo.
 // - Returns RPC-level success or propagated errors and records audit.
 func (s *UserService) RevokeAuthorization(ctx context.Context, in *user.RevokeAuthorizationRequest) (*user.RevokeAuthorizationReply, error) {
-	successProcess, errorProcess := util.GetProcesses[*user.RevokeAuthorizationReply]("RevokeAuthorization", GetAuditInsertFunc(*s.auditUsecase))
+	successProcess, errorProcess := util.GetProcesses[*user.RevokeAuthorizationReply]()
 	claim, err := s.jwtUtil.GetBaseAuthClaims(ctx)
 	if err != nil {
 		return nil, errorProcess(ctx, err)

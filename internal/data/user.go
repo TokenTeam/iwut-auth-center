@@ -72,7 +72,7 @@ func (r *userRepo) UpdateUserPassword(ctx context.Context, uid string, oldPasswo
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	l.Debugf("UpdateUserPassword called with UserId: %s", uid)
+	l.Debugf("UpdateUserPassword called with UserID: %s", uid)
 
 	collection := r.userCollection
 	filter := bson.M{"uid": uid, "password": oldPassword}
@@ -124,7 +124,7 @@ func (r *userRepo) DeleteUserAccount(ctx context.Context, uid string) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	l.Debugf("DeleteUserAccount called with UserId: %s", uid)
+	l.Debugf("DeleteUserAccount called with UserID: %s", uid)
 
 	collection := r.userCollection
 	filter := bson.M{"uid": uid}
@@ -179,7 +179,7 @@ func (r *userRepo) GetUserProfileWithFilter(ctx context.Context, uid string, key
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	l.Debugf("GetUserProfileWithFilter called with UserId: %s", uid)
+	l.Debugf("GetUserProfileWithFilter called with UserID: %s", uid)
 
 	collection := r.userCollection
 
@@ -324,7 +324,7 @@ func (r *userRepo) UpdateUserProfile(ctx context.Context, uid string, attrs *str
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	l.Debugf("UpdateUserProfile called with UserId: %s", uid)
+	l.Debugf("UpdateUserProfile called with UserID: %s", uid)
 
 	set := bson.M{
 		"updated_at": time.Now(),
@@ -372,7 +372,7 @@ func (r *userRepo) GetUserProfileKeys(ctx context.Context, uid string) (*biz.Use
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	l.Debugf("GetUserProfileKeys called with UserId: %s", uid)
+	l.Debugf("GetUserProfileKeys called with UserID: %s", uid)
 
 	collection := r.userCollection
 	// Read the `profile` sub-document and return its keys. If profile is missing
@@ -413,7 +413,7 @@ func (r *userRepo) GetUserClaimsWithFilter(ctx context.Context, uid string, keys
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	l.Debugf("GetUserClaimsWithFilter called with UserId: %s", uid)
+	l.Debugf("GetUserClaimsWithFilter called with UserID: %s", uid)
 
 	collection := r.userCollection
 	var doc bson.M
@@ -484,7 +484,7 @@ func (r *userRepo) UpdateUserConsent(ctx context.Context, uid string, clientId s
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	l.Debugf("UpdateUserConsent called with UserId: %s", uid)
+	l.Debugf("UpdateUserConsent called with UserID: %s", uid)
 
 	collection := r.userCollection
 
@@ -587,7 +587,7 @@ func (r *userRepo) SetUserDeveloperId(ctx context.Context, uid string, developer
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	l.Debugf("SetUserDeveloperId called with UserId: %s", uid)
+	l.Debugf("SetUserDeveloperId called with UserID: %s", uid)
 
 	if err := r.UserExists(ctx, uid); err != nil {
 		return err

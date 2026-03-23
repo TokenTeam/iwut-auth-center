@@ -21,17 +21,17 @@ type AuthService struct {
 	auth.UnimplementedAuthServer
 	authUsecase          *biz.AuthUsecase
 	mailUsecase          *mail.Usecase
-	auditUsecase         *biz.AuditUsecase
 	jwtUtil              *util.JwtUtil
 	accessTokenLifeSpan  time.Duration
 	refreshTokenLifeSpan time.Duration
+	auditUsecase         *string
 	frontendUrl          string
 }
 
 // NewAuthService constructs an AuthService.
 // It wires usecases, mail sender, audit usecase and JWT util and configures token lifetimes.
-func NewAuthService(authUsecase *biz.AuthUsecase, mailUsecase *mail.Usecase, auditUsecase *biz.AuditUsecase, jwtUtil *util.JwtUtil, c *conf.Jwt, sc *conf.Server) *AuthService {
-	return &AuthService{authUsecase: authUsecase, mailUsecase: mailUsecase, auditUsecase: auditUsecase, jwtUtil: jwtUtil,
+func NewAuthService(authUsecase *biz.AuthUsecase, mailUsecase *mail.Usecase, jwtUtil *util.JwtUtil, c *conf.Jwt, sc *conf.Server) *AuthService {
+	return &AuthService{authUsecase: authUsecase, mailUsecase: mailUsecase, jwtUtil: jwtUtil,
 		accessTokenLifeSpan:  time.Duration(c.GetAccessTokenLifeSpan()) * time.Second,
 		refreshTokenLifeSpan: time.Duration(c.GetRefreshTokenLifeSpan()) * time.Second,
 		frontendUrl:          strings.TrimSuffix(sc.GetFrontendUrl(), "/"),
@@ -44,20 +44,20 @@ func NewAuthService(authUsecase *biz.AuthUsecase, mailUsecase *mail.Usecase, aud
 // - Records audit information via the audit helper provided by util.GetProcesses.
 func (s *AuthService) PasswordLogin(ctx context.Context, in *auth.LoginRequest) (*auth.LoginReply, error) {
 
-	successProcess, errorProcess := util.GetProcesses[*auth.LoginReply]("PasswordLogin", GetAuditInsertFunc(*s.auditUsecase))
+	successProcess, errorProcess := util.GetProcesses[*auth.LoginReply]()
 	userId, version, err := s.authUsecase.Repo.CheckPasswordWithEmailAndGetUserIdAndVersion(ctx, in.Email, in.Password)
 	if err != nil {
-		return nil, errorProcess(ctx, err, util.Audit{})
+		return nil, errorProcess(ctx, err, util.UserInfoValue{UserID: userId})
 	}
 
 	userDeveloperId, err := s.authUsecase.Repo.GetDeveloperIdByUserId(ctx, userId)
 	if err != nil {
-		return nil, errorProcess(ctx, err, util.Audit{UserID: &userId})
+		return nil, errorProcess(ctx, err, util.UserInfoValue{UserID: userId})
 	}
 
 	err = s.authUsecase.Repo.AddOrUpdateUserVersion(ctx, userId, version, s.refreshTokenLifeSpan)
 	if err != nil {
-		return nil, errorProcess(ctx, err, util.Audit{UserID: &userId})
+		return nil, errorProcess(ctx, err, util.UserInfoValue{UserID: userId})
 	}
 	accessToken, err := (*s.jwtUtil).EncodeJWTWithRS256(map[string]interface{}{
 		"uid":     userId,
@@ -66,7 +66,7 @@ func (s *AuthService) PasswordLogin(ctx context.Context, in *auth.LoginRequest) 
 		"did":     userDeveloperId,
 	}, s.accessTokenLifeSpan)
 	if err != nil {
-		return nil, errorProcess(ctx, err, util.Audit{UserID: &userId})
+		return nil, errorProcess(ctx, err, util.UserInfoValue{UserID: userId})
 	}
 	refreshToken, err := (*s.jwtUtil).EncodeJWTWithRS256(map[string]interface{}{
 		"uid":     userId,
@@ -75,7 +75,7 @@ func (s *AuthService) PasswordLogin(ctx context.Context, in *auth.LoginRequest) 
 		"did":     userDeveloperId,
 	}, s.refreshTokenLifeSpan)
 	if err != nil {
-		return nil, errorProcess(ctx, err, util.Audit{UserID: &userId})
+		return nil, errorProcess(ctx, err, util.UserInfoValue{UserID: userId})
 	}
 
 	return successProcess(ctx, func(reqId string) *auth.LoginReply {
@@ -88,7 +88,7 @@ func (s *AuthService) PasswordLogin(ctx context.Context, in *auth.LoginRequest) 
 			},
 			TraceId: reqId,
 		}
-	}, util.Audit{UserID: &userId}), nil
+	}, util.UserInfoValue{UserID: userId}), nil
 }
 
 // GenerateSecure6DigitCode returns a cryptographically secure 6-digit numeric code as string.
@@ -105,7 +105,7 @@ func GenerateSecure6DigitCode() (string, error) {
 // GetRegisterMail generates a verification code, stores rate-limited captcha via auth usecase
 // and sends the code via mail usecase. It returns RPC-level success/failure with auditing.
 func (s *AuthService) GetRegisterMail(ctx context.Context, in *auth.GetVerifyCodeRequest) (*auth.GetVerifyCodeReply, error) {
-	successProcess, errorProcess := util.GetProcesses[*auth.GetVerifyCodeReply]("GetRegisterMail", GetAuditInsertFunc(*s.auditUsecase))
+	successProcess, errorProcess := util.GetProcesses[*auth.GetVerifyCodeReply]()
 	captcha, err := GenerateSecure6DigitCode()
 	if err != nil {
 		return nil, errorProcess(ctx, errors.InternalServer("500", "failed to generate verify code"))
@@ -125,7 +125,7 @@ func (s *AuthService) GetRegisterMail(ctx context.Context, in *auth.GetVerifyCod
 			Message: "send verify code mail successful",
 			TraceId: reqId,
 		}
-	}, util.Audit{Message: stringPtr(in.GetEmail())}), nil
+	}), nil
 }
 
 // GetResetUrlMail handles password reset URL generation and emailing.
@@ -134,7 +134,7 @@ func (s *AuthService) GetRegisterMail(ctx context.Context, in *auth.GetVerifyCod
 // - Sends the reset URL via mail usecase,
 // - Returns RPC-level success/failure with auditing.
 func (s *AuthService) GetResetUrlMail(ctx context.Context, in *auth.GetResetUrlRequest) (*auth.GetResetUrlReply, error) {
-	successProcess, errorProcess := util.GetProcesses[*auth.GetResetUrlReply]("GetResetUrlMail", GetAuditInsertFunc(*s.auditUsecase))
+	successProcess, errorProcess := util.GetProcesses[*auth.GetResetUrlReply]()
 	captcha, err := GenerateSecure6DigitCode()
 	if err != nil {
 		return nil, errorProcess(ctx, errors.InternalServer("500", "failed to generate verify code"))
@@ -159,7 +159,7 @@ func (s *AuthService) GetResetUrlMail(ctx context.Context, in *auth.GetResetUrlR
 			Message: "send reset url mail successful",
 			TraceId: reqId,
 		}
-	}, util.Audit{Message: stringPtr(in.GetEmail())}), nil
+	}), nil
 }
 
 // Register handles user registration:
@@ -167,7 +167,7 @@ func (s *AuthService) GetResetUrlMail(ctx context.Context, in *auth.GetResetUrlR
 // - Creates a new user record via auth usecase,
 // - Returns created user id on success and records audit.
 func (s *AuthService) Register(ctx context.Context, in *auth.RegisterRequest) (*auth.RegisterReply, error) {
-	successProcess, errorProcess := util.GetProcesses[*auth.RegisterReply]("Register", GetAuditInsertFunc(*s.auditUsecase))
+	successProcess, errorProcess := util.GetProcesses[*auth.RegisterReply]()
 	err := s.authUsecase.Repo.CheckRegisterCaptchaUsable(ctx, in.GetEmail(), in.GetVerifyCode(), 10*time.Minute)
 	if err != nil {
 		return nil, errorProcess(ctx, err)
@@ -187,7 +187,7 @@ func (s *AuthService) Register(ctx context.Context, in *auth.RegisterRequest) (*
 			},
 			TraceId: reqId,
 		}
-	}, util.Audit{UserID: &id}), nil
+	}, util.UserInfoValue{UserID: id}), nil
 }
 
 // ResetPassword handles password reset requests:
@@ -195,7 +195,7 @@ func (s *AuthService) Register(ctx context.Context, in *auth.RegisterRequest) (*
 // - Updates the user's password via auth usecase,
 // - Returns RPC-level success/failure with auditing.
 func (s *AuthService) ResetPassword(ctx context.Context, in *auth.ResetPasswordRequest) (*auth.ResetPasswordReply, error) {
-	successProcess, errorProcess := util.GetProcesses[*auth.ResetPasswordReply]("ResetPassword", GetAuditInsertFunc(*s.auditUsecase))
+	successProcess, errorProcess := util.GetProcesses[*auth.ResetPasswordReply]()
 	err := s.authUsecase.Repo.CheckResetPasswordCaptchaUsable(ctx, in.GetEmail(), in.GetVerifyCode(), 10*time.Minute)
 	if err != nil {
 		return nil, errorProcess(ctx, err)
@@ -211,7 +211,7 @@ func (s *AuthService) ResetPassword(ctx context.Context, in *auth.ResetPasswordR
 			Message: "Reset password successful",
 			TraceId: reqId,
 		}
-	}, util.Audit{Message: stringPtr(in.GetEmail())}), nil
+	}), nil
 
 }
 
@@ -221,7 +221,7 @@ func (s *AuthService) ResetPassword(ctx context.Context, in *auth.ResetPasswordR
 // - Issues new access and refresh tokens when valid.
 func (s *AuthService) RefreshToken(ctx context.Context, in *auth.RefreshTokenRequest) (*auth.RefreshTokenReply, error) {
 	// Specify the concrete type parameter so the generic helper returns the correct function type
-	successProcess, errorProcess := util.GetProcesses[*auth.RefreshTokenReply]("RefreshToken", GetAuditInsertFunc(*s.auditUsecase))
+	successProcess, errorProcess := util.GetProcesses[*auth.RefreshTokenReply]()
 	token := ""
 	if token = in.GetRefreshToken(); strings.TrimSpace(token) == "" {
 
@@ -299,5 +299,5 @@ func (s *AuthService) RefreshToken(ctx context.Context, in *auth.RefreshTokenReq
 			},
 			TraceId: reqId,
 		}
-	}, util.Audit{UserID: &baseClaims.Uid}), nil
+	}, util.UserInfoValue{UserID: baseClaims.Uid}), nil
 }

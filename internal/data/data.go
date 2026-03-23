@@ -14,12 +14,10 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
 )
 
 // ProviderSet is data providers.
-var ProviderSet = wire.NewSet(NewAuditRepo, NewAuthRepo, NewUserRepo, NewOauth2Repo, NewData)
+var ProviderSet = wire.NewSet(NewAuthRepo, NewUserRepo, NewOauth2Repo, NewData)
 
 var (
 	RedisPrefixKey string
@@ -28,7 +26,6 @@ var (
 type Data struct {
 	mongo *mongo.Client
 	redis *redis.Client
-	db    *gorm.DB
 }
 
 // NewData .
@@ -55,19 +52,12 @@ func NewData(c *conf.Data, logger log.Logger) (*Data, func(), error) {
 		_ = mongoClient.Disconnect(context.Background())
 		return nil, nil, err
 	}
-	mysqlClient, err := initMySQL(c)
-	if err != nil {
-		// close mongo and redis if mysql init failed
-		_ = mongoClient.Disconnect(context.Background())
-		_ = redisClient.Close()
-		return nil, nil, err
-	}
 	cleanup := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
 		var wg sync.WaitGroup
-		errCh := make(chan error, 3)
+		errCh := make(chan error, 2)
 
 		// 并发关闭 mongodb
 		wg.Add(1)
@@ -87,22 +77,6 @@ func NewData(c *conf.Data, logger log.Logger) (*Data, func(), error) {
 			}
 		}()
 
-		// 并发关闭 mysql (通过 GORM 获取底层 *sql.DB 并 Close)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if mysqlClient != nil {
-				sqlDB, err := mysqlClient.DB()
-				if err != nil {
-					errCh <- fmt.Errorf("failed to get underlying sql.DB from gorm: %w", err)
-					return
-				}
-				if err := sqlDB.Close(); err != nil {
-					errCh <- fmt.Errorf("failed to close mysql client: %w", err)
-				}
-			}
-		}()
-
 		wg.Wait()
 		close(errCh)
 
@@ -117,7 +91,6 @@ func NewData(c *conf.Data, logger log.Logger) (*Data, func(), error) {
 	return &Data{
 		mongo: mongoClient,
 		redis: redisClient,
-		db:    mysqlClient,
 	}, cleanup, nil
 }
 
@@ -256,42 +229,6 @@ func initRedis(c *conf.Data) (*redis.Client, error) {
 	}
 
 	return rdb, nil
-}
-
-func initMySQL(c *conf.Data) (*gorm.DB, error) {
-	driver := c.GetDatabase().GetDriver()
-	source := c.GetDatabase().GetSource()
-	if driver == "" || source == "" {
-		return nil, fmt.Errorf("mysql driver or source is empty")
-	}
-
-	// currently we only support mysql driver here
-	if driver != "mysql" {
-		return nil, fmt.Errorf("unsupported database driver: %s", driver)
-	}
-
-	// open gorm DB using mysql driver
-	gdb, err := gorm.Open(mysql.Open(source), &gorm.Config{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to open gorm mysql: %w", err)
-	}
-
-	// configure underlying sql.DB connection pool and ping
-	sqlDB, err := gdb.DB()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get underlying sql.DB from gorm: %w", err)
-	}
-	sqlDB.SetMaxOpenConns(25)
-	sqlDB.SetMaxIdleConns(25)
-	sqlDB.SetConnMaxLifetime(time.Hour)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := sqlDB.PingContext(ctx); err != nil {
-		_ = sqlDB.Close()
-		return nil, fmt.Errorf("mysql ping failed: %w", err)
-	}
-	return gdb, nil
 }
 
 func GetRedisKey(keys ...string) string {

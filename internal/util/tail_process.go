@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	v1 "iwut-auth-center/api/gen/go/auth_center/v1/error_reason"
-	"time"
 
 	kratosErrors "github.com/go-kratos/kratos/v2/errors"
 )
@@ -13,22 +12,16 @@ import (
 // 为了写泛型写出*了
 // 单开Model也许是对的 但目前先不干
 type Audit struct {
-	ID         *string    `gorm:"primaryKey;column:id;type:char(36)"`  // UUID v4 string
-	TraceID    *string    `gorm:"column:trace_id;type:char(32);index"` // trace id as 32 hex chars
-	ClientID   *string    `gorm:"column:client_id;type:varchar(128)"`
-	UserID     *string    `gorm:"column:user_id;type:varchar(64)"`
-	IP         *string    `gorm:"column:ip;type:varchar(45)"`
-	UA         *string    `gorm:"column:ua;type:varchar(512)"`
-	Function   *string    `gorm:"column:function;type:varchar(128)"`
-	FinishAt   *time.Time `gorm:"column:finish_at"`
-	ResultCode *int       `gorm:"column:result_code"`
-	Message    *string    `gorm:"column:message;type:text"`
+	ClientID     *string
+	UserID       *string
+	IP           *string
+	UA           *string
+	FunctionName *string
 }
 
-func GetErrorProcess(funcName string, writeIntoAudit func(ctx context.Context, audit Audit)) func(ctx context.Context, err error, opts ...Audit) error {
-	return func(ctx context.Context, err error, opts ...Audit) error {
+func GetErrorProcess() func(ctx context.Context, err error, userInfo ...UserInfoValue) error {
+	return func(ctx context.Context, err error, userInfo ...UserInfoValue) error {
 		traceID := RequestIDFrom(ctx)
-		var returnCode int
 		var errorMessage string
 		var e *kratosErrors.Error
 		if errors.As(err, &e) {
@@ -37,100 +30,46 @@ func GetErrorProcess(funcName string, writeIntoAudit func(ctx context.Context, a
 			}
 			e.Metadata["traceId"] = traceID
 			errorMessage = e.Message
-			returnCode = int(e.Code)
 		} else {
 			errorMessage = err.Error()
-			returnCode = 500
 			errNew := kratosErrors.InternalServer(string(v1.ErrorReason_UNKNOWN_ERROR), errorMessage)
 			errNew.Metadata = map[string]string{"traceId": traceID}
 			err = errNew
 		}
-		writeIntoAudit(ctx, ReplaceWithOptions(GetAudit(ctx, traceID, funcName, errorMessage, returnCode), opts))
+		if len(userInfo) == 0 {
+			SetAudit(ctx, UserInfoValue{})
+		} else {
+			SetAudit(ctx, userInfo[0])
+		}
 		return err
 	}
 }
 
-func GetSuccessProcess[T any](funcName string, writeIntoAudit func(ctx context.Context, audit Audit)) func(ctx context.Context, setReqId func(reqId string) T, opts ...Audit) T {
-	return func(ctx context.Context, f func(reqId string) T, opts ...Audit) T {
+func GetSuccessProcess[T any]() func(ctx context.Context, setReqId func(reqId string) T, userInfo ...UserInfoValue) T {
+	return func(ctx context.Context, f func(reqId string) T, userInfo ...UserInfoValue) T {
 		traceID := RequestIDFrom(ctx)
-		writeIntoAudit(ctx, ReplaceWithOptions(GetAudit(ctx, traceID, funcName, "", 200), opts))
+		if len(userInfo) == 0 {
+			SetAudit(ctx, UserInfoValue{})
+		} else {
+			SetAudit(ctx, userInfo[0])
+		}
 		return f(traceID)
 	}
 }
 
-func ReplaceWithOptions(audit Audit, opts []Audit) Audit {
-	if len(opts) == 0 {
-		return audit
+func SetAudit(ctx context.Context, userInfo UserInfoValue) {
+	audit := RequestAuditFrom(ctx)
+	if audit == nil {
+		return
 	}
-	for _, o := range opts {
-		if o.ID != nil {
-			audit.ID = o.ID
-		}
-		if o.TraceID != nil {
-			audit.TraceID = o.TraceID
-		}
-		if o.ClientID != nil {
-			audit.ClientID = o.ClientID
-		}
-		if o.UserID != nil {
-			audit.UserID = o.UserID
-		}
-		if o.IP != nil {
-			audit.IP = o.IP
-		}
-		if o.UA != nil {
-			audit.UA = o.UA
-		}
-		if o.Function != nil {
-			audit.Function = o.Function
-		}
-		if o.FinishAt != nil {
-			audit.FinishAt = o.FinishAt
-		}
-		if o.ResultCode != nil {
-			audit.ResultCode = o.ResultCode
-		}
-		if o.Message != nil {
-			audit.Message = o.Message
-		}
-	}
-	return audit
+	audit.SetUserInfo(userInfo.UserID, userInfo.ClientID)
 }
 
-func GetAudit(ctx context.Context, traceID string, funcName string, message string, returnCode int) Audit {
-	var clientId, userId string
-	if JwtUtilInstance != nil {
-		jwtValue := JwtUtilInstance.TokenValueFrom(ctx)
-		if jwtValue != nil {
-			if jwtValue.BaseAuthClaims != nil {
-				userId = jwtValue.BaseAuthClaims.Uid
-			} else if jwtValue.OAuthClaims != nil {
-				userId = jwtValue.OAuthClaims.Uid
-				clientId = jwtValue.OAuthClaims.Azp
-			}
-		}
-	}
-
-	var ip, ua string
-	ipUa := RequestIpUAFrom(ctx)
-	if ipUa != nil {
-		ip = ipUa.Ip
-		ua = ipUa.UA
-	}
-	now := time.Now()
-	return Audit{
-		TraceID:    &traceID,
-		ClientID:   &clientId,
-		UserID:     &userId,
-		IP:         &ip,
-		UA:         &ua,
-		Function:   &funcName,
-		FinishAt:   &now,
-		ResultCode: &returnCode,
-		Message:    &message,
-	}
+func GetProcesses[T any]() (func(ctx context.Context, setReqId func(reqId string) T, userInfo ...UserInfoValue) T, func(ctx context.Context, err error, userInfo ...UserInfoValue) error) {
+	return GetSuccessProcess[T](), GetErrorProcess()
 }
 
-func GetProcesses[T any](funcName string, writeIntoAudit func(ctx context.Context, audit Audit)) (func(ctx context.Context, setReqId func(reqId string) T, opts ...Audit) T, func(ctx context.Context, err error, opts ...Audit) error) {
-	return GetSuccessProcess[T](funcName, writeIntoAudit), GetErrorProcess(funcName, writeIntoAudit)
+type UserInfoValue struct {
+	ClientID string
+	UserID   string
 }

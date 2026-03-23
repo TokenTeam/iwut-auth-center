@@ -35,38 +35,29 @@ func wireApp(confServer *conf.Server, confData *conf.Data, jwt *conf.Jwt, confMa
 	authRepo := data.NewAuthRepo(dataData, confData, jwt, logger, sha256Util)
 	authUsecase := biz.NewAuthUsecase(authRepo)
 	usecase := mail.NewMailUsecase(confMail, logger)
-	auditRepo, cleanup2, err := data.NewAuditRepo(dataData, logger)
-	if err != nil {
-		cleanup()
-		return nil, nil, err
-	}
-	auditUsecase := biz.NewAuditUsecase(auditRepo)
 	jwtUtil := util.NewJwtUtil(jwt)
-	authService := service.NewAuthService(authUsecase, usecase, auditUsecase, jwtUtil, jwt, confServer)
-	appCenterUtil, cleanup3, err := util.NewAppCenterUtil(confService, logger)
+	authService := service.NewAuthService(authUsecase, usecase, jwtUtil, jwt, confServer)
+	appCenterUtil, cleanup2, err := util.NewAppCenterUtil(confService, logger)
 	if err != nil {
-		cleanup2()
 		cleanup()
 		return nil, nil, err
 	}
 	userRepo := data.NewUserRepo(dataData, confData, logger, appCenterUtil, sha256Util)
 	userUsecase := biz.NewUserUsecase(userRepo)
-	userService, err := service.NewUserService(userUsecase, authUsecase, auditUsecase, jwtUtil, jwt)
+	userService, err := service.NewUserService(userUsecase, authUsecase, jwtUtil, jwt)
 	if err != nil {
-		cleanup3()
 		cleanup2()
 		cleanup()
 		return nil, nil, err
 	}
 	oauth2Repo := data.NewOauth2Repo(dataData, confData, jwt, appCenterUtil, userUsecase, logger)
 	oauth2Usecase := biz.NewOauth2Usecase(oauth2Repo)
-	oauth2Service := service.NewOauth2Service(oauth2Usecase, auditUsecase, appCenterUtil, jwtUtil, jwt)
+	oauth2Service := service.NewOauth2Service(oauth2Usecase, appCenterUtil, jwtUtil, jwt)
 	jwtCheckMiddleware := middleware.NewJwtInfoMiddleware(jwtUtil)
 	grpcServer := server.NewGRPCServer(confServer, authService, userService, oauth2Service, jwtCheckMiddleware, logger)
 	httpServer := server.NewHTTPServer(confServer, authService, userService, oauth2Service, jwtCheckMiddleware, logger)
 	app := newApp(logger, grpcServer, httpServer)
 	return app, func() {
-		cleanup3()
 		cleanup2()
 		cleanup()
 	}, nil
