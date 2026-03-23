@@ -34,10 +34,6 @@ message Server {
 }
 
 message Data {
-  message Database {
-    string driver = 1;
-    string source = 2;
-  }
   message Redis {
     string addr = 1;
     string password = 2;
@@ -60,9 +56,8 @@ message Data {
     google.protobuf.Duration connect_timeout = 6;
     Limitations limitations = 7;
   }
-  Database database = 1;
-  Redis redis = 2;
-  MongoDB mongodb = 3;
+  Redis redis = 1;
+  MongoDB mongodb = 2;
 }
 
 message Service {

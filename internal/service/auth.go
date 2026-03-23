@@ -262,16 +262,16 @@ func (s *AuthService) RefreshToken(ctx context.Context, in *auth.RefreshTokenReq
 		return nil, errorProcess(ctx, errors.BadRequest("400", err.Error()))
 	}
 	if baseClaims.Type != "refresh" {
-		return nil, errorProcess(ctx, errors.BadRequest("400", "Invalid token type"))
+		return nil, errorProcess(ctx, errors.BadRequest("400", "Invalid token type"), util.UserInfoValue{UserID: baseClaims.Uid})
 	}
 	version, err := s.authUsecase.Repo.GetUserVersion(ctx,
 		baseClaims.Uid,
 		time.Duration(baseClaims.Exp-time.Now().Unix())*time.Second)
 	if err != nil {
-		return nil, errorProcess(ctx, errors.BadRequest("400", err.Error()))
+		return nil, errorProcess(ctx, errors.BadRequest("400", err.Error()), util.UserInfoValue{UserID: baseClaims.Uid})
 	}
 	if baseClaims.Version != version {
-		return nil, errorProcess(ctx, errors.BadRequest("400", "Token has been revoked"))
+		return nil, errorProcess(ctx, errors.BadRequest("400", "Token has been revoked"), util.UserInfoValue{UserID: baseClaims.Uid})
 	}
 	accessToken, err := s.jwtUtil.EncodeJWTWithRS256(map[string]interface{}{
 		"uid":     baseClaims.Uid,
@@ -279,7 +279,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, in *auth.RefreshTokenReq
 		"version": version,
 	}, s.accessTokenLifeSpan)
 	if err != nil {
-		return nil, errorProcess(ctx, err)
+		return nil, errorProcess(ctx, err, util.UserInfoValue{UserID: baseClaims.Uid})
 	}
 	refreshToken, err := s.jwtUtil.EncodeJWTWithRS256(map[string]interface{}{
 		"uid":     baseClaims.Uid,
@@ -287,7 +287,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, in *auth.RefreshTokenReq
 		"version": version,
 	}, s.refreshTokenLifeSpan)
 	if err != nil {
-		return nil, errorProcess(ctx, err)
+		return nil, errorProcess(ctx, err, util.UserInfoValue{UserID: baseClaims.Uid})
 	}
 	return successProcess(ctx, func(reqId string) *auth.RefreshTokenReply {
 		return &auth.RefreshTokenReply{

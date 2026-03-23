@@ -11,9 +11,6 @@ server:
   jaeger_endpoint: "${jaegerEndpoint:localhost:4317}"
   env: "${env:PROD}"
 data:
-  database:
-    driver: mysql
-    source: "${mysqlConnection:appuser:apppass@tcp(127.0.0.1:3306)/appdb?parseTime=True&loc=Local}"
   redis:
     addr: "${redisUrl:localhost:6379}"
     password: "${redisPass}"

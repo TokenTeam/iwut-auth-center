@@ -8,17 +8,6 @@ import (
 	kratosErrors "github.com/go-kratos/kratos/v2/errors"
 )
 
-// Audit 不能引用data\audit.go，避免循环引用
-// 为了写泛型写出*了
-// 单开Model也许是对的 但目前先不干
-type Audit struct {
-	ClientID     *string
-	UserID       *string
-	IP           *string
-	UA           *string
-	FunctionName *string
-}
-
 func GetErrorProcess() func(ctx context.Context, err error, userInfo ...UserInfoValue) error {
 	return func(ctx context.Context, err error, userInfo ...UserInfoValue) error {
 		traceID := RequestIDFrom(ctx)

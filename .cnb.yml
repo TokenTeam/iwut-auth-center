@@ -1,0 +1,74 @@
+.common: &common
+  imports:
+    - https://cnb.cool/TokenTeam/secrets/-/blob/main/tcloud.yml
+    - https://cnb.cool/TokenTeam/secrets/-/blob/main/iwut-auth-center.yml
+
+.step_build_and_push: &step_build_and_push
+  name: build and push
+  script: |
+    docker build -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${image_tag} -f prod.Dockerfile .
+    docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${image_tag}
+
+.step_deploy: &step_deploy
+  name: deploy
+  image: tencentcom/tcloud-cmd
+  settings:
+    secret_id: ${secret_id}
+    secret_key: ${secret_key}
+    region: ap-chengdu
+    instance_ids: ${instance_ids}
+    script: |
+      sudo docker stop ${CNB_REPO_NAME_LOWERCASE} || true
+      sudo docker rm ${CNB_REPO_NAME_LOWERCASE} || true
+      sudo docker pull ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${image_tag}
+      sudo docker run -d --name ${CNB_REPO_NAME_LOWERCASE} \
+        -p ${default_DOCKER_CONTAINER_HTTP_PORT}:8000 \
+        -p ${default_DOCKER_CONTAINER_GRPC_PORT}:9000 \
+        --add-host=host.docker.internal:host-gateway \
+        -e TZ="Asia/Shanghai" \
+        -e AuthCenter_env='${ENV}' \
+        -e AuthCenter_appUrl='${default_appUrl}' \
+        -e AuthCenter_jwtSalt='${default_jwtSalt}' \
+        -e AuthCenter_mailPassword='${default_mailPassword}' \
+        -e AuthCenter_jaegerEndpoint='${default_jaegerEndpoint}' \
+        -e AuthCenter_redisUrl='${default_redisUrl}' \
+        -e AuthCenter_mongoUrl='${default_mongoUrl}' \
+        -e AuthCenter_mongoUser='${default_mongoUser}' \
+        -e AuthCenter_mongoPass='${default_mongoPass}' \
+        -e AuthCenter_mongoDB='${default_mongoDB}' \
+        -e AuthCenter_mongoAuthSource='${default_mongoAuthSource}' \
+        ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${image_tag}
+      sudo docker image prune -a -f
+    query_instance: true
+
+master:
+  push:
+    - <<: *common
+      env:
+        instance_ids: ${server_dev}
+        image_tag: dev
+        ENV: ${dev_env}
+      services:
+        - docker
+      stages:
+        - <<: *step_build_and_push
+        - <<: *step_deploy
+
+"*":
+  tag_push:
+    - <<: *common
+      env:
+        image_tag: latest
+      services:
+        - docker
+      stages:
+        - <<: *step_build_and_push
+
+  tag_deploy.production:
+    - <<: *common
+      env:
+        instance_ids: ${server_prod}
+        image_tag: latest
+        ENV: ${prod_env}
+      stages:
+        - <<: *step_deploy

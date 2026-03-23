@@ -8,20 +8,6 @@ import (
 
 func RequestTailProcess() []any {
 	return []any{
-		"ip", log.Valuer(func(ctx context.Context) any {
-			ip := RequestIpFrom(ctx)
-			if ip == nil {
-				return ""
-			}
-			return *ip
-		}),
-		"ua", log.Valuer(func(ctx context.Context) any {
-			ua := RequestUAFrom(ctx)
-			if ua == nil {
-				return ""
-			}
-			return *ua
-		}),
 		"user_id", log.Valuer(func(ctx context.Context) any {
 			userID := RequestUserIDFrom(ctx)
 			if userID == nil {
