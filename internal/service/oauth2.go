@@ -80,7 +80,7 @@ func (s *Oauth2Service) Authorize(ctx context.Context, in *oauth2.AuthorizeReque
 		Status:              "",
 	}
 
-	if ok, err := s.oauth2Usecase.Repo.CheckGetCodeAndSetTypeRequest(ctx, codeInfo); !ok {
+	if ok, err := s.oauth2Usecase.CheckGetCodeAndSetTypeRequest(ctx, codeInfo); !ok {
 		if err != nil {
 			return nil, errorProcess(ctx, err)
 		}
@@ -215,7 +215,7 @@ func (s *Oauth2Service) GetToken(ctx context.Context, in *oauth2.GetTokenRequest
 			ErrorDescription: stringPtr("failed to erase used authorization code"),
 		}, nil
 	}
-	err = s.oauth2Usecase.Repo.InsertJTIToUserConsents(ctx, codeInfo.UserId, clientInfo.ClientId, jti, codeInfo.Status)
+	err = s.oauth2Usecase.InsertJTIToUserConsents(ctx, codeInfo.UserId, clientInfo.ClientId, jti, codeInfo.Status)
 	if err != nil {
 		return &oauth2.GetTokenReply{
 			Error:            stringPtr("internal_error"),
@@ -243,14 +243,14 @@ func (s *Oauth2Service) GetUserProfile(ctx context.Context, in *oauth2.GetUserPr
 	}
 	var officialProfile map[string]any
 	if in.GetScope() != nil {
-		officialProfile, err = s.oauth2Usecase.Repo.GetUserOfficialProfile(ctx, claim.Uid, claim.Azp, in.GetScope().GetInternalVersion(), in.GetScope().GetScopeKeys())
+		officialProfile, err = s.oauth2Usecase.GetUserOfficialProfile(ctx, claim.Uid, claim.Azp, in.GetScope().GetInternalVersion(), in.GetScope().GetScopeKeys())
 		if err != nil {
 			return nil, errorProcess(ctx, err)
 		}
 	}
 	var storageKeyValue map[string]*string
 	if in.GetStorage() != nil {
-		storageKeyValue, err = s.oauth2Usecase.Repo.GetUserProfile(ctx, claim.Uid, claim.Azp, in.GetStorage().GetStorageKeys())
+		storageKeyValue, err = s.oauth2Usecase.GetUserProfile(ctx, claim.Uid, claim.Azp, in.GetStorage().GetStorageKeys())
 		if err != nil {
 			return nil, errorProcess(ctx, err)
 		}
@@ -290,7 +290,7 @@ func (s *Oauth2Service) SetUserStorage(ctx context.Context, in *structpb.Struct)
 	if err != nil {
 		return nil, errorProcess(ctx, err)
 	}
-	err = s.oauth2Usecase.Repo.SetUserProfile(ctx, claim.Uid, claim.Azp, inParsed)
+	err = s.oauth2Usecase.SetUserProfile(ctx, claim.Uid, claim.Azp, inParsed)
 	if err != nil {
 		return nil, errorProcess(ctx, err)
 	}

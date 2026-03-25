@@ -138,7 +138,7 @@ func (s *UserService) UpdateProfile(ctx context.Context, in *structpb.Struct) (*
 	if err != nil {
 		return nil, errorProcess(ctx, err)
 	}
-	if err = s.userUsecase.Repo.UpdateUserProfile(ctx, claim.Uid, in); err != nil {
+	if err = s.userUsecase.UpdateUserProfile(ctx, claim.Uid, in); err != nil {
 		return nil, errorProcess(ctx, err)
 	}
 
@@ -222,7 +222,7 @@ func (s *UserService) UpdateUserConsent(ctx context.Context, in *user.UpdateUser
 		return nil, errorProcess(ctx, err)
 	}
 
-	if err = s.userUsecase.Repo.UpdateUserConsent(ctx, claim.Uid, in.GetClientId(), in.GetClientVersion(), "", in.GetOptionalScopes(), true); err != nil {
+	if err = s.userUsecase.UpdateUserConsent(ctx, claim.Uid, in.GetClientId(), in.GetClientVersion(), "", in.GetOptionalScopes(), true); err != nil {
 		return nil, errorProcess(ctx, err)
 	}
 	return successProcess(ctx, func(reqId string) *user.UpdateUserConsentReply {
@@ -241,7 +241,7 @@ func (s *UserService) SetUserDeveloperId(ctx context.Context, in *user.SetUserDe
 	if err != nil {
 		return nil, errorProcess(ctx, err)
 	}
-	if err = s.userUsecase.Repo.SetUserDeveloperId(ctx, claim.Uid, in.GetDeveloperId()); err != nil {
+	if err = s.userUsecase.SetUserDeveloperId(ctx, claim.Uid, in.GetDeveloperId()); err != nil {
 		return nil, errorProcess(ctx, err)
 	}
 	return successProcess(ctx, func(reqId string) *user.SetUserDeveloperIdReply {

@@ -16,7 +16,7 @@ import (
 type Usecase struct {
 	loginAuth *LoginAuth
 	hostname  string
-	logger    *log.Helper
+	log       *log.Helper
 }
 
 func NewMailUsecase(c *conf.Mail, logger log.Logger) *Usecase {
@@ -26,14 +26,15 @@ func NewMailUsecase(c *conf.Mail, logger log.Logger) *Usecase {
 			password: c.GetPassword(),
 		},
 		hostname: fmt.Sprintf("%s:%d", c.GetHost(), c.GetPort()),
-		logger:   log.NewHelper(logger),
+		log:      log.NewHelper(logger),
 	}
 }
 
 func (m *Usecase) SendVerifyCodeMail(ctx context.Context, expireTime int32, captcha string, to []string) error {
+	l := log.NewHelper(log.WithContext(ctx, m.log.Logger()))
 	if len(to) == 0 {
 		reqId := util.RequestIDFrom(ctx)
-		m.logger.Errorf("trying to send a mail without recipients. reqId: %s", reqId)
+		l.Errorf("trying to send a mail without recipients. reqId: %s", reqId)
 		return fmt.Errorf("no recipients")
 	}
 	body := mailTemplate
@@ -46,9 +47,9 @@ func (m *Usecase) SendVerifyCodeMail(ctx context.Context, expireTime int32, capt
 }
 
 func (m *Usecase) SendResetPasswordMail(ctx context.Context, expireTime int32, url string, to []string) error {
+	l := log.NewHelper(log.WithContext(ctx, m.log.Logger()))
 	if len(to) == 0 {
-		reqId := util.RequestIDFrom(ctx)
-		m.logger.Errorf("trying to send a mail without recipients. reqId: %s", reqId)
+		l.Errorf("trying to send a mail without recipients.")
 		return fmt.Errorf("no recipients")
 	}
 	body := mailTemplate
@@ -61,6 +62,7 @@ func (m *Usecase) SendResetPasswordMail(ctx context.Context, expireTime int32, u
 }
 
 func (m *Usecase) SendEmail(ctx context.Context, subject string, recipients []string, body string) error {
+	l := log.NewHelper(log.WithContext(ctx, m.log.Logger()))
 	hostname := m.hostname
 	authentication := m.loginAuth
 	sender := m.loginAuth.username
@@ -92,7 +94,7 @@ func (m *Usecase) SendEmail(ctx context.Context, subject string, recipients []st
 	)
 
 	if err != nil {
-		m.logger.Errorf("send email fail. reqId:%s, err: %v", util.RequestIDFrom(ctx), err)
+		l.Errorf("send email fail. err: %v", err)
 		return err
 	}
 	return nil

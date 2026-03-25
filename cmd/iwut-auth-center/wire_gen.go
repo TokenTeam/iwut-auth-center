@@ -37,21 +37,21 @@ func wireApp(confServer *conf.Server, confData *conf.Data, jwt *conf.Jwt, confMa
 	usecase := mail.NewMailUsecase(confMail, logger)
 	jwtUtil := util.NewJwtUtil(jwt)
 	authService := service.NewAuthService(authUsecase, usecase, jwtUtil, jwt, confServer)
+	userRepo := data.NewUserRepo(dataData, confData, logger, sha256Util)
 	appCenterUtil, cleanup2, err := util.NewAppCenterUtil(confService, logger)
 	if err != nil {
 		cleanup()
 		return nil, nil, err
 	}
-	userRepo := data.NewUserRepo(dataData, confData, logger, appCenterUtil, sha256Util)
-	userUsecase := biz.NewUserUsecase(userRepo)
+	userUsecase := biz.NewUserUsecase(userRepo, appCenterUtil, confData, logger)
 	userService, err := service.NewUserService(userUsecase, authUsecase, jwtUtil, jwt)
 	if err != nil {
 		cleanup2()
 		cleanup()
 		return nil, nil, err
 	}
-	oauth2Repo := data.NewOauth2Repo(dataData, confData, jwt, appCenterUtil, userUsecase, logger)
-	oauth2Usecase := biz.NewOauth2Usecase(oauth2Repo)
+	oauth2Repo := data.NewOauth2Repo(dataData, confData, jwt, logger)
+	oauth2Usecase := biz.NewOauth2Usecase(oauth2Repo, userRepo, appCenterUtil, confData, jwt, logger)
 	oauth2Service := service.NewOauth2Service(oauth2Usecase, appCenterUtil, jwtUtil, jwt)
 	jwtCheckMiddleware := middleware.NewJwtInfoMiddleware(jwtUtil)
 	grpcServer := server.NewGRPCServer(confServer, authService, userService, oauth2Service, jwtCheckMiddleware, logger)
