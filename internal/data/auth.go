@@ -77,7 +77,7 @@ func (r *authRepo) CheckPasswordWithEmailAndGetUserIdAndVersion(ctx context.Cont
 
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return "", -1, errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
+			return "", -1, errors.NotFound(v1.ErrorReason_USER_NOT_FOUND.String(), "user not found")
 		}
 		l.Errorf("failed to find user: %v", err)
 		return "", -1, fmt.Errorf("failed to find user: %w", err)
@@ -88,7 +88,7 @@ func (r *authRepo) CheckPasswordWithEmailAndGetUserIdAndVersion(ctx context.Cont
 				l.Error("failed to restore deleted user: %v", err)
 				return "", -1, fmt.Errorf("failed to restore deleted user: %w", err)
 			}
-			return "", -1, errors.New(410, string(v1.ErrorReason_USER_DELETED), "user has been deleted")
+			return "", -1, errors.New(410, v1.ErrorReason_USER_DELETED.String(), "user has been deleted")
 		}
 	}
 
@@ -114,7 +114,7 @@ func (r *authRepo) GetDeveloperIdByUserId(ctx context.Context, uid string) (*str
 	}
 	if err := collection.FindOne(ctx, filter).Decode(&result); err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return nil, errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
+			return nil, errors.NotFound(v1.ErrorReason_USER_NOT_FOUND.String(), "user not found")
 		}
 		l.Errorf("failed to find user: %v", err)
 		return nil, fmt.Errorf("failed to find user: %w", err)
@@ -125,7 +125,7 @@ func (r *authRepo) GetDeveloperIdByUserId(ctx context.Context, uid string) (*str
 				l.Error("failed to restore deleted user: %v", err)
 				return nil, fmt.Errorf("failed to restore deleted user: %w", err)
 			}
-			return nil, errors.New(410, string(v1.ErrorReason_USER_DELETED), "user has been deleted")
+			return nil, errors.New(410, v1.ErrorReason_USER_DELETED.String(), "user has been deleted")
 		}
 	}
 	return result.Claim.DeveloperId, nil
@@ -155,7 +155,7 @@ func (r *authRepo) TryRestoreDeletedUser(ctx context.Context, uid string, delete
 			return false, fmt.Errorf("failed to restore deleted user: %w", err)
 		}
 	} else {
-		return false, errors.New(410, string(v1.ErrorReason_USER_DELETED), "user has been deleted")
+		return false, errors.New(410, v1.ErrorReason_USER_DELETED.String(), "user has been deleted")
 	}
 	return true, nil
 }
@@ -197,7 +197,7 @@ func (r *authRepo) TryInsertRegisterCaptcha(ctx context.Context, email string, c
 		return fmt.Errorf("failed to count documents: %w", err)
 	}
 	if count > 0 {
-		return errors.Conflict(string(v1.ErrorReason_USER_ALREADY_EXISTS), "user already exists")
+		return errors.Conflict(v1.ErrorReason_USER_ALREADY_EXISTS.String(), "user already exists")
 	}
 
 	key := GetRedisKey("register_captcha", email)
@@ -212,7 +212,7 @@ func (r *authRepo) TryInsertRegisterCaptcha(ctx context.Context, email string, c
 	if len(zs) > 0 {
 		lastTs := int64(zs[0].Score)
 		if time.Unix(now, 0).Sub(time.Unix(lastTs, 0)) < time.Minute {
-			return errors.New(429, string(v1.ErrorReason_CAPTCHA_REQUEST_TOO_FREQUENTLY), "asking captcha too frequently")
+			return errors.New(429, v1.ErrorReason_CAPTCHA_REQUEST_TOO_FREQUENTLY.String(), "asking captcha too frequently")
 		}
 	}
 
@@ -274,7 +274,7 @@ func (r *authRepo) TryInsertResetPasswordCaptcha(ctx context.Context, email stri
 		return fmt.Errorf("failed to count documents: %w", err)
 	}
 	if count == 0 {
-		return errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
+		return errors.NotFound(v1.ErrorReason_USER_NOT_FOUND.String(), "user not found")
 	}
 
 	key := GetRedisKey("reset_password_captcha", email)
@@ -289,7 +289,7 @@ func (r *authRepo) TryInsertResetPasswordCaptcha(ctx context.Context, email stri
 	if len(zs) > 0 {
 		lastTs := int64(zs[0].Score)
 		if time.Unix(now, 0).Sub(time.Unix(lastTs, 0)) < time.Minute {
-			return errors.New(429, string(v1.ErrorReason_CAPTCHA_REQUEST_TOO_FREQUENTLY), "asking captcha too frequently")
+			return errors.New(429, v1.ErrorReason_CAPTCHA_REQUEST_TOO_FREQUENTLY.String(), "asking captcha too frequently")
 		}
 	}
 
@@ -346,7 +346,7 @@ func (r *authRepo) CheckRegisterCaptchaUsable(ctx context.Context, email string,
 
 	_, err := r.data.redis.ZRank(ctx, key, code).Result()
 	if errors.Is(err, redis.Nil) {
-		return errors.BadRequest(string(v1.ErrorReason_INVALID_CAPTCHA), "captcha not usable")
+		return errors.BadRequest(v1.ErrorReason_INVALID_CAPTCHA.String(), "captcha not usable")
 	} else if err != nil {
 		l.Errorf("ZRank error: %v", err)
 		return fmt.Errorf("redis zrank error: %w", err)
@@ -392,7 +392,7 @@ func (r *authRepo) CheckResetPasswordCaptchaUsable(ctx context.Context, email st
 
 	_, err := r.data.redis.ZRank(ctx, key, code).Result()
 	if errors.Is(err, redis.Nil) {
-		return errors.BadRequest(string(v1.ErrorReason_INVALID_CAPTCHA), "captcha not usable")
+		return errors.BadRequest(v1.ErrorReason_INVALID_CAPTCHA.String(), "captcha not usable")
 	} else if err != nil {
 		l.Errorf("ZRank error: %v", err)
 		return fmt.Errorf("redis zrank error: %w", err)
@@ -456,7 +456,7 @@ func (r *authRepo) RegisterUser(ctx context.Context, email string, password stri
 		if errors.As(err, &we) {
 			for _, e := range we.WriteErrors {
 				if e.Code == 11000 {
-					return "", errors.Conflict(string(v1.ErrorReason_USER_ALREADY_EXISTS), "user already exists")
+					return "", errors.Conflict(v1.ErrorReason_USER_ALREADY_EXISTS.String(), "user already exists")
 				}
 			}
 		}
@@ -479,7 +479,7 @@ func (r *authRepo) ResetPassword(ctx context.Context, email string, newPassword 
 	err := r.userCollection.FindOne(ctx, filter).Decode(&result)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
+			return errors.NotFound(v1.ErrorReason_USER_NOT_FOUND.String(), "user not found")
 		}
 		l.Errorf("failed to find user: %v", err)
 		return fmt.Errorf("failed to find user: %w", err)
@@ -498,7 +498,7 @@ func (r *authRepo) ResetPassword(ctx context.Context, email string, newPassword 
 		return fmt.Errorf("failed to update user password: %w", err)
 	}
 	if res.MatchedCount == 0 {
-		return errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
+		return errors.NotFound(v1.ErrorReason_USER_NOT_FOUND.String(), "user not found")
 	}
 	err = r.AddOrUpdateUserVersion(ctx, result.UserId, result.Version, r.accessTokenLifeSpan)
 	if err != nil {
@@ -578,12 +578,12 @@ func (r *authRepo) GetUserVersion(ctx context.Context, uid string, ttl time.Dura
 		err = collection.FindOne(ctx, filter).Decode(&result)
 		if err != nil {
 			if errors.Is(err, mongo.ErrNoDocuments) {
-				return 1<<31 - 1, errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
+				return 1<<31 - 1, errors.NotFound(v1.ErrorReason_USER_NOT_FOUND.String(), "user not found")
 			}
 			l.Errorf("failed to find user: %v", err)
 			return 1<<31 - 1, fmt.Errorf("failed to find user: %w", err)
 		} else if result.DeletedAt != nil {
-			return 1<<31 - 1, errors.New(410, string(v1.ErrorReason_USER_DELETED), "user has been deleted")
+			return 1<<31 - 1, errors.New(410, v1.ErrorReason_USER_DELETED.String(), "user has been deleted")
 		}
 		err = r.AddOrUpdateUserVersion(ctx, uid, result.Version, ttl)
 		if err != nil {

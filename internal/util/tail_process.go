@@ -21,7 +21,7 @@ func GetErrorProcess() func(ctx context.Context, err error, userInfo ...UserInfo
 			errorMessage = e.Message
 		} else {
 			errorMessage = err.Error()
-			errNew := kratosErrors.InternalServer(string(v1.ErrorReason_UNKNOWN_ERROR), errorMessage)
+			errNew := kratosErrors.InternalServer(v1.ErrorReason_UNKNOWN_ERROR.String(), errorMessage)
 			errNew.Metadata = map[string]string{"traceId": traceID}
 			err = errNew
 		}

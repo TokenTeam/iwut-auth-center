@@ -2,6 +2,7 @@ package server
 
 import (
 	authpb "iwut-auth-center/api/gen/go/auth_center/v1/auth"
+	v1 "iwut-auth-center/api/gen/go/auth_center/v1/error_reason"
 	oauth2pb "iwut-auth-center/api/gen/go/auth_center/v1/oauth2"
 	userpb "iwut-auth-center/api/gen/go/auth_center/v1/user"
 	"iwut-auth-center/internal/conf"
@@ -46,13 +47,16 @@ func CreatedErrorEncoder(w http.ResponseWriter, r *http.Request, err error) {
 	codec, _ := CodecForRequest(r, "Accept")
 	returnErr := struct {
 		Code    int32   `json:"code"`
+		Reason  *string `json:"reason,omitempty"`
 		Message string  `json:"message"`
 		TraceId *string `json:"traceId,omitempty"`
 	}{
 		Code:    se.Code,
 		Message: se.Message,
 	}
-	// 检查se有没有 GetMetadata 方法，如果有则调用它
+	if _, ok := v1.ErrorReason_value[se.Reason]; ok {
+		returnErr.Reason = &se.Reason
+	}
 	if mdGetter, ok := interface{}(se).(interface {
 		GetMetadata() map[string]string
 	}); ok {

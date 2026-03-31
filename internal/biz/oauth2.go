@@ -131,7 +131,7 @@ func ResolveTestConsentAccess(target *util.ApplicationVersionInfo, consents []Us
 			OptionalScope:          IntersectScopesByOrder(target.OptionalScope, consent.OptionalScope),
 		}, nil
 	}
-	return nil, errors.Forbidden(string(v1.ErrorReason_USER_DENIED), "user consent not found for this version")
+	return nil, errors.Forbidden(v1.ErrorReason_USER_DENIED.String(), "user consent not found for this version")
 }
 
 // ---- Repo Interface (thin data access) ----
@@ -182,10 +182,10 @@ func (uc *Oauth2Usecase) CheckGetCodeAndSetTypeRequest(ctx context.Context, code
 	defer cancel()
 
 	if codeInfo.Scope != "read" {
-		return false, errors.BadRequest(string(v1.ErrorReason_INVALID_SCOPE), "unsupported scope")
+		return false, errors.BadRequest(v1.ErrorReason_INVALID_SCOPE.String(), "unsupported scope")
 	}
 	if codeInfo.ResponseType != "code" {
-		return false, errors.BadRequest(string(v1.ErrorReason_INVALID_RESPONSE_TYPE), "unsupported response_type")
+		return false, errors.BadRequest(v1.ErrorReason_INVALID_RESPONSE_TYPE.String(), "unsupported response_type")
 	}
 
 	l.Debugf("CheckGetCodeAndSetTypeRequest userId: %s, codeInfo: %+v", codeInfo.UserId, codeInfo)
@@ -212,7 +212,7 @@ func (uc *Oauth2Usecase) CheckGetCodeAndSetTypeRequest(ctx context.Context, code
 		return true, nil
 	}
 
-	return false, errors.BadRequest(string(v1.ErrorReason_REDIRECT_URI_MISMATCH), "redirect_uri mismatch")
+	return false, errors.BadRequest(v1.ErrorReason_REDIRECT_URI_MISMATCH.String(), "redirect_uri mismatch")
 }
 
 func (uc *Oauth2Usecase) resolveUserConsentAccess(ctx context.Context, uid string, clientId string, internalVersion int32) (*ResolvedConsentAccess, error) {
@@ -230,10 +230,10 @@ func (uc *Oauth2Usecase) resolveUserConsentAccess(ctx context.Context, uid strin
 		return &ResolvedConsentAccess{
 			Allowed:                false,
 			ApplicationVersionInfo: applicationVersionInfo,
-		}, errors.Forbidden(string(v1.ErrorReason_PERMISSION_DENIED), "user permission denied")
+		}, errors.Forbidden(v1.ErrorReason_PERMISSION_DENIED.String(), "user permission denied")
 	}
 	if applicationVersionInfo.Status != "STABLE" && applicationVersionInfo.Status != "GREY" && applicationVersionInfo.Status != "TEST" {
-		return nil, errors.BadRequest(string(v1.ErrorReason_INVALID_APPLICATION_VERSION_STATUS), "an application with invalid status trying to access user official profile")
+		return nil, errors.BadRequest(v1.ErrorReason_INVALID_APPLICATION_VERSION_STATUS.String(), "an application with invalid status trying to access user official profile")
 	}
 
 	consents, err := uc.Repo.LoadUserConsentRecords(ctx, uid, clientId)
@@ -247,7 +247,7 @@ func (uc *Oauth2Usecase) resolveUserConsentAccess(ctx context.Context, uid strin
 	case "STABLE", "GREY":
 		return uc.resolveStableGreyConsentAccess(ctx, clientId, applicationVersionInfo, consents)
 	default:
-		return nil, errors.BadRequest(string(v1.ErrorReason_INVALID_APPLICATION_VERSION_STATUS), "an application with invalid status trying to access user official profile")
+		return nil, errors.BadRequest(v1.ErrorReason_INVALID_APPLICATION_VERSION_STATUS.String(), "an application with invalid status trying to access user official profile")
 	}
 }
 
@@ -261,7 +261,7 @@ func (uc *Oauth2Usecase) resolveStableGreyConsentAccess(ctx context.Context, cli
 		}
 	}
 	if len(stableGreyConsents) == 0 {
-		return nil, errors.Forbidden(string(v1.ErrorReason_USER_DENIED), "user consent not found")
+		return nil, errors.Forbidden(v1.ErrorReason_USER_DENIED.String(), "user consent not found")
 	}
 
 	for _, consent := range stableGreyConsents {
@@ -296,7 +296,7 @@ func (uc *Oauth2Usecase) resolveStableGreyConsentAccess(ctx context.Context, cli
 		}
 	}
 	if bestCompatibleConsent == nil {
-		return nil, errors.Forbidden(string(v1.ErrorReason_USER_DENIED), "user client version outdated")
+		return nil, errors.Forbidden(v1.ErrorReason_USER_DENIED.String(), "user client version outdated")
 	}
 
 	return &ResolvedConsentAccess{
@@ -341,7 +341,7 @@ func (uc *Oauth2Usecase) GetUserOfficialProfile(ctx context.Context, uid string,
 		return nil, err
 	}
 	if resolvedAccess == nil || !resolvedAccess.Allowed || resolvedAccess.ApplicationVersionInfo == nil {
-		return nil, errors.Forbidden(string(v1.ErrorReason_PERMISSION_DENIED), "user permission denied")
+		return nil, errors.Forbidden(v1.ErrorReason_PERMISSION_DENIED.String(), "user permission denied")
 	}
 
 	readScopes := ScopeIntersection(scopes, resolvedAccess.BasicScope)
@@ -441,7 +441,7 @@ func (uc *Oauth2Usecase) GetUserProfile(ctx context.Context, uid string, clientI
 
 	for _, s := range storageKeys {
 		if !util.IsASCIIAlphaNumDashUnderscore(s) {
-			return nil, errors.BadRequest(string(v1.ErrorReason_INVALID_KEY_NAME), fmt.Sprintf("invalid storage key '%s'", s))
+			return nil, errors.BadRequest(v1.ErrorReason_INVALID_KEY_NAME.String(), fmt.Sprintf("invalid storage key '%s'", s))
 		}
 	}
 
@@ -452,18 +452,18 @@ func (uc *Oauth2Usecase) SetUserProfile(ctx context.Context, uid string, clientI
 	l := log.NewHelper(log.WithContext(ctx, uc.log.Logger()))
 
 	if len(storageKeyValues) > 1000 {
-		return errors.BadRequest(string(v1.ErrorReason_TOO_MANY_KEYS), "too many storage keys to set")
+		return errors.BadRequest(v1.ErrorReason_TOO_MANY_KEYS.String(), "too many storage keys to set")
 	}
 
 	var totalLength int64
 	for k, v := range storageKeyValues {
 		if !util.IsASCIIAlphaNumDashUnderscore(k) {
-			return errors.BadRequest(string(v1.ErrorReason_INVALID_KEY_NAME), fmt.Sprintf("invalid storage key '%s'", k))
+			return errors.BadRequest(v1.ErrorReason_INVALID_KEY_NAME.String(), fmt.Sprintf("invalid storage key '%s'", k))
 		}
 		totalLength += int64(len(k) + len(v))
 	}
 	if totalLength > uc.oauth2InfoMemoryLimitation {
-		return errors.New(413, string(v1.ErrorReason_OAUTH2_INFO_MEMORY_LIMITATION_EXCEEDED), "oauth2 info memory limitation exceeded")
+		return errors.New(413, v1.ErrorReason_OAUTH2_INFO_MEMORY_LIMITATION_EXCEEDED.String(), "oauth2 info memory limitation exceeded")
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)

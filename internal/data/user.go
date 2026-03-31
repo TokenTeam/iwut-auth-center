@@ -60,12 +60,12 @@ func (r *userRepo) UpdateUserPassword(ctx context.Context, uid string, oldPasswo
 	err := collection.FindOne(ctx, filter).Decode(&result)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
+			return errors.NotFound(v1.ErrorReason_USER_NOT_FOUND.String(), "user not found")
 		}
 		l.Errorf("failed to find user: %v", err)
 		return fmt.Errorf("failed to find user: %w", err)
 	} else if result.DeletedAt != nil {
-		return errors.New(410, string(v1.ErrorReason_USER_DELETED), "user has been deleted")
+		return errors.New(410, v1.ErrorReason_USER_DELETED.String(), "user has been deleted")
 	}
 	update := bson.M{
 		"$set": bson.M{
@@ -100,12 +100,12 @@ func (r *userRepo) DeleteUserAccount(ctx context.Context, uid string) error {
 	err := collection.FindOne(ctx, filter).Decode(&result)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
+			return errors.NotFound(v1.ErrorReason_USER_NOT_FOUND.String(), "user not found")
 		}
 		l.Errorf("failed to find user: %v", err)
 		return fmt.Errorf("failed to find user: %w", err)
 	} else if result.DeletedAt != nil {
-		return errors.New(410, string(v1.ErrorReason_USER_DELETED), "user has been deleted")
+		return errors.New(410, v1.ErrorReason_USER_DELETED.String(), "user has been deleted")
 	}
 
 	now := time.Now()
@@ -138,12 +138,12 @@ func (r *userRepo) UserExists(ctx context.Context, uid string) error {
 	err := collection.FindOne(ctx, filter).Decode(&result)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
+			return errors.NotFound(v1.ErrorReason_USER_NOT_FOUND.String(), "user not found")
 		}
 		l.Errorf("failed to find user: %v", err)
 		return fmt.Errorf("failed to find user: %w", err)
 	} else if result.DeletedAt != nil {
-		return errors.New(410, string(v1.ErrorReason_USER_DELETED), "user has been deleted")
+		return errors.New(410, v1.ErrorReason_USER_DELETED.String(), "user has been deleted")
 	}
 	return nil
 }
@@ -164,7 +164,7 @@ func (r *userRepo) GetUserProfileWithFilter(ctx context.Context, uid string, key
 	proj := options.FindOne().SetProjection(bson.M{"profile": 1, "uid": 1, "email": 1, "created_at": 1, "updated_at": 1})
 	if err := collection.FindOne(ctx, bson.M{"uid": uid}, proj).Decode(&doc); err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return nil, errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
+			return nil, errors.NotFound(v1.ErrorReason_USER_NOT_FOUND.String(), "user not found")
 		}
 		l.Errorf("failed to find user profile: %v", err)
 		return nil, fmt.Errorf("failed to find user profile: %w", err)
@@ -314,7 +314,7 @@ func (r *userRepo) GetUserProfileKeys(ctx context.Context, uid string) (*biz.Use
 	proj := options.FindOne().SetProjection(bson.M{"profile": 1})
 	if err := collection.FindOne(ctx, bson.M{"uid": uid}, proj).Decode(&doc); err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return nil, errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
+			return nil, errors.NotFound(v1.ErrorReason_USER_NOT_FOUND.String(), "user not found")
 		}
 		l.Errorf("failed to find user profile keys: %v", err)
 		return nil, fmt.Errorf("aggregate error: %w", err)
@@ -350,7 +350,7 @@ func (r *userRepo) GetUserClaimsWithFilter(ctx context.Context, uid string, keys
 	proj := options.FindOne().SetProjection(bson.M{"claim": 1})
 	if err := collection.FindOne(ctx, bson.M{"uid": uid}, proj).Decode(&doc); err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return nil, errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
+			return nil, errors.NotFound(v1.ErrorReason_USER_NOT_FOUND.String(), "user not found")
 		}
 		l.Errorf("failed to find user claims: %v", err)
 		return nil, fmt.Errorf("aggregate error: %w", err)
@@ -404,7 +404,7 @@ func (r *userRepo) GetDeveloperIdInfo(ctx context.Context, uid string) (*string,
 	err := r.userCollection.FindOne(ctx, filter).Decode(&result)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return nil, nil, errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
+			return nil, nil, errors.NotFound(v1.ErrorReason_USER_NOT_FOUND.String(), "user not found")
 		}
 		l.Errorf("GetDeveloperIdInfo FindOne error: %v", err)
 		return nil, nil, fmt.Errorf("failed to get developer id info: %w", err)
@@ -428,7 +428,7 @@ func (r *userRepo) UpdateDeveloperId(ctx context.Context, uid string, developerI
 	_, err := r.userCollection.UpdateOne(ctx, bson.M{"uid": uid}, update)
 	if err != nil {
 		if isDuplicateKeyError(err) {
-			return errors.New(409, string(v1.ErrorReason_DEVELOPER_ID_ALREADY_EXIST), "developer id already in use")
+			return errors.New(409, v1.ErrorReason_DEVELOPER_ID_ALREADY_EXIST.String(), "developer id already in use")
 		}
 		l.Errorf("failed to set user developer id: %v", err)
 		return fmt.Errorf("failed to set user developer id: %w", err)
@@ -525,7 +525,7 @@ func (r *userRepo) RevokeUserConsent(ctx context.Context, userId string, clientI
 		if err := res.Err(); err != nil {
 			if errors.Is(err, mongo.ErrNoDocuments) {
 				l.Errorf("RevokeUserConsent TEST FindOneAndUpdate no document: %v", err)
-				return errors.NotFound("404", "user consent not found")
+				return errors.NotFound(v1.ErrorReason_USER_CONSENT_NOT_FOUND.String(), "user consent not found")
 			}
 			l.Errorf("RevokeUserConsent TEST FindOneAndUpdate error: %v", err)
 			return err
@@ -564,7 +564,7 @@ func (r *userRepo) RevokeUserConsent(ctx context.Context, userId string, clientI
 		return err
 	}
 	if len(oldDocs) == 0 {
-		return errors.NotFound("404", "user consent not found")
+		return errors.NotFound(v1.ErrorReason_USER_CONSENT_NOT_FOUND.String(), "user consent not found")
 	}
 
 	var allJTIs []string

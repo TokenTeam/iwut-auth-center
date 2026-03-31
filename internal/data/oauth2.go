@@ -148,7 +148,7 @@ func (r *oauth2Repo) GetUserConsentJTIs(ctx context.Context, uid string, clientI
 	err := r.userConsentsCollection.FindOne(ctx, filter).Decode(&doc)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return nil, errors.NotFound("404", "user consent not found")
+			return nil, errors.NotFound(v1.ErrorReason_USER_CONSENT_NOT_FOUND.String(), "user consent not found")
 		}
 		l.Errorf("GetUserConsentJTIs FindOne error: %v", err)
 		return nil, err
@@ -187,7 +187,7 @@ func (r *oauth2Repo) CheckUserConsentExists(ctx context.Context, uid string, cli
 	err := r.userConsentsCollection.FindOne(ctx, filter, options.FindOne().SetProjection(bson.M{"_id": 1})).Err()
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		l.Errorf("CheckUserConsentExists user consent not found for userId: %s, clientId: %s", uid, clientId)
-		return errors.NotFound("404", "user consent not found")
+		return errors.NotFound(v1.ErrorReason_USER_CONSENT_NOT_FOUND.String(), "user consent not found")
 	} else if err != nil {
 		l.Errorf("CheckUserConsentExists FindOne error: %v", err)
 		return err
@@ -229,7 +229,7 @@ func (r *oauth2Repo) GetUserStorageData(ctx context.Context, uid string, applica
 
 	if err := validateApplicationId(applicationId); err != nil {
 		l.Errorf("GetUserStorageData invalid application id: %s", applicationId)
-		return nil, errors.InternalServer(string(v1.ErrorReason_INVALID_APP_ID), "invalid application id")
+		return nil, errors.InternalServer(v1.ErrorReason_INVALID_APP_ID.String(), "invalid application id")
 	}
 
 	proj := bson.D{}
@@ -254,7 +254,7 @@ func (r *oauth2Repo) GetUserStorageData(ctx context.Context, uid string, applica
 			l.Errorf("GetUserStorageData cursor error: %v", err)
 			return nil, err
 		}
-		return nil, errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
+		return nil, errors.NotFound(v1.ErrorReason_USER_NOT_FOUND.String(), "user not found")
 	}
 
 	var doc bson.M
@@ -290,7 +290,7 @@ func (r *oauth2Repo) SetUserStorageData(ctx context.Context, uid string, applica
 
 	if err := validateApplicationId(applicationId); err != nil {
 		l.Errorf("SetUserStorageData invalid application id: %s", applicationId)
-		return errors.InternalServer(string(v1.ErrorReason_INVALID_APP_ID), "invalid application id")
+		return errors.InternalServer(v1.ErrorReason_INVALID_APP_ID.String(), "invalid application id")
 	}
 
 	filter := bson.M{"uid": uid}
@@ -299,7 +299,7 @@ func (r *oauth2Repo) SetUserStorageData(ctx context.Context, uid string, applica
 	err := r.userCollection.FindOne(ctx, filter, options.FindOne().SetProjection(bson.M{applicationId: 1})).Decode(&doc)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return errors.NotFound(string(v1.ErrorReason_USER_NOT_FOUND), "user not found")
+			return errors.NotFound(v1.ErrorReason_USER_NOT_FOUND.String(), "user not found")
 		}
 		l.Errorf("SetUserStorageData FindOne error: %v", err)
 		return err
@@ -323,7 +323,7 @@ func (r *oauth2Repo) SetUserStorageData(ctx context.Context, uid string, applica
 	}
 
 	if len(existedKeyValue) > 1000 {
-		return errors.BadRequest(string(v1.ErrorReason_TOO_MANY_KEYS), "too many storage keys to set")
+		return errors.BadRequest(v1.ErrorReason_TOO_MANY_KEYS.String(), "too many storage keys to set")
 	}
 
 	var totalLength int64
@@ -331,7 +331,7 @@ func (r *oauth2Repo) SetUserStorageData(ctx context.Context, uid string, applica
 		totalLength += int64(len(k) + len(v))
 	}
 	if totalLength > memLimit {
-		return errors.New(413, string(v1.ErrorReason_OAUTH2_INFO_MEMORY_LIMITATION_EXCEEDED), "oauth2 info memory limitation exceeded")
+		return errors.New(413, v1.ErrorReason_OAUTH2_INFO_MEMORY_LIMITATION_EXCEEDED.String(), "oauth2 info memory limitation exceeded")
 	}
 
 	update := bson.M{}

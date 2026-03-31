@@ -76,15 +76,15 @@ func (uc *UserUsecase) UpdateUserProfile(ctx context.Context, uid string, attrs 
 	}
 	if length > uc.officialInfoMemoryLimitation {
 		l.Errorf("official info memory limitation exceeded: %d > %d", length, uc.officialInfoMemoryLimitation)
-		return errors.New(413, string(v1.ErrorReason_OFFICIAL_INFO_MEMORY_LIMITATION_EXCEEDED), "official info memory limitation exceeded")
+		return errors.New(413, v1.ErrorReason_OFFICIAL_INFO_MEMORY_LIMITATION_EXCEEDED.String(), "official info memory limitation exceeded")
 	}
 
 	for k, v := range attrsMap {
 		switch v.(type) {
 		case map[string]any:
-			return errors.BadRequest(string(v1.ErrorReason_INVALID_STRUCTURE), fmt.Sprintf("nested objects are not allowed in official attributes: key %q has object value", k))
+			return errors.BadRequest(v1.ErrorReason_INVALID_STRUCTURE.String(), fmt.Sprintf("nested objects are not allowed in official attributes: key %q has object value", k))
 		case []any:
-			return errors.BadRequest(string(v1.ErrorReason_INVALID_STRUCTURE), fmt.Sprintf("array values are not allowed in official attributes: key %q has array value", k))
+			return errors.BadRequest(v1.ErrorReason_INVALID_STRUCTURE.String(), fmt.Sprintf("array values are not allowed in official attributes: key %q has array value", k))
 		}
 	}
 
@@ -95,13 +95,13 @@ func (uc *UserUsecase) SetUserDeveloperId(ctx context.Context, uid string, devel
 	l := log.NewHelper(log.WithContext(ctx, uc.log.Logger()))
 
 	if developerId == "" {
-		return errors.BadRequest(string(v1.ErrorReason_INVALID_DEVELOPER_ID), "developerId cannot be empty")
+		return errors.BadRequest(v1.ErrorReason_INVALID_DEVELOPER_ID.String(), "developerId cannot be empty")
 	}
 	for c := range developerId {
 		if !((developerId[c] >= 'a' && developerId[c] <= 'z') || (developerId[c] >= 'A' && developerId[c] <= 'Z') ||
 			(developerId[c] >= '0' && developerId[c] <= '9') ||
 			developerId[c] == '-' || developerId[c] == '_') {
-			return errors.BadRequest(string(v1.ErrorReason_INVALID_DEVELOPER_ID), "invalid developerId format: "+developerId)
+			return errors.BadRequest(v1.ErrorReason_INVALID_DEVELOPER_ID.String(), "invalid developerId format: "+developerId)
 		}
 	}
 
@@ -118,7 +118,7 @@ func (uc *UserUsecase) SetUserDeveloperId(ctx context.Context, uid string, devel
 		if lastUpdate != nil {
 			if time.Since(*lastUpdate) < 30*24*time.Hour {
 				l.Infof("developerId can only be updated once every 30 days")
-				return errors.BadRequest(string(v1.ErrorReason_UPDATE_DEVELOPER_ID_TOO_FREQUENTLY), "developerId can only be updated once every 30 days")
+				return errors.BadRequest(v1.ErrorReason_UPDATE_DEVELOPER_ID_TOO_FREQUENTLY.String(), "developerId can only be updated once every 30 days")
 			}
 		} else {
 			l.Errorf("missing developer_id_updated_at for user with existing developerId: %s", uid)
@@ -161,7 +161,7 @@ func (uc *UserUsecase) UpdateUserConsent(ctx context.Context, uid string, client
 		for _, v := range optionalScopes {
 			if _, ok := scopeSet[v]; !ok {
 				l.Errorf("invalid optional scope: %s", v)
-				return errors.BadRequest(string(v1.ErrorReason_INVALID_SCOPE), "invalid optional scope: "+v)
+				return errors.BadRequest(v1.ErrorReason_INVALID_SCOPE.String(), "invalid optional scope: "+v)
 			}
 		}
 		applicationVersionInfo = appVerInfo
