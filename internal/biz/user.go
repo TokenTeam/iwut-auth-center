@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -70,16 +71,18 @@ func NewUserUsecase(repo UserRepo, appCenterUtil *util.AppCenterUtil, c *conf.Da
 func (uc *UserUsecase) UpdateUserProfile(ctx context.Context, uid string, attrs *structpb.Struct) error {
 	l := log.NewHelper(log.WithContext(ctx, uc.log.Logger()))
 
-	attrsMap, length, err := util.StructToAnyMap(attrs)
-	if err != nil {
-		return err
-	}
-	if length > uc.officialInfoMemoryLimitation {
+	length := proto.Size(attrs)
+
+	attrsMap := attrs.AsMap()
+	if int64(length) > uc.officialInfoMemoryLimitation {
 		l.Errorf("official info memory limitation exceeded: %d > %d", length, uc.officialInfoMemoryLimitation)
 		return errors.New(413, v1.ErrorReason_OFFICIAL_INFO_MEMORY_LIMITATION_EXCEEDED.String(), "official info memory limitation exceeded")
 	}
 
 	for k, v := range attrsMap {
+		if !util.IsASCIIAlphaNumDashUnderscore(k) {
+			return errors.BadRequest(v1.ErrorReason_INVALID_KEY_NAME.String(), fmt.Sprintf("invalid key format: %q", k))
+		}
 		switch v.(type) {
 		case map[string]any:
 			return errors.BadRequest(v1.ErrorReason_INVALID_STRUCTURE.String(), fmt.Sprintf("nested objects are not allowed in official attributes: key %q has object value", k))
