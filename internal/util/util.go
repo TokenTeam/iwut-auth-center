@@ -3,4 +3,4 @@ package util
 import "github.com/google/wire"
 
 // ProviderSet for wire DI (keep minimal wiring)
-var ProviderSet = wire.NewSet(NewJwtUtil, NewSha256Util, NewAppCenterUtil)
+var ProviderSet = wire.NewSet(NewJwtUtil, NewSha256Util, NewPasswordUtil, NewAppCenterUtil)

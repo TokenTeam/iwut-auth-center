@@ -21,18 +21,18 @@ type authRepo struct {
 	data                *Data
 	log                 *log.Helper
 	userCollection      *mongo.Collection
-	sha256Util          *util.Sha256Util
+	passwordUtil        *util.PasswordUtil
 	accessTokenLifeSpan time.Duration
 }
 
-func NewAuthRepo(data *Data, c *conf.Data, cj *conf.Jwt, logger log.Logger, sha256Util *util.Sha256Util) biz.AuthRepo {
+func NewAuthRepo(data *Data, c *conf.Data, cj *conf.Jwt, logger log.Logger, passwordUtil *util.PasswordUtil) biz.AuthRepo {
 	dbName := c.GetMongodb().GetDatabase()
 	usersCollection := data.mongo.Database(dbName).Collection("user")
 	return &authRepo{
 		data:                data,
 		log:                 log.NewHelper(logger),
 		userCollection:      usersCollection,
-		sha256Util:          sha256Util,
+		passwordUtil:        passwordUtil,
 		accessTokenLifeSpan: time.Duration(cj.GetAccessTokenLifeSpan()) * time.Second,
 	}
 }
@@ -40,36 +40,28 @@ func NewAuthRepo(data *Data, c *conf.Data, cj *conf.Jwt, logger log.Logger, sha2
 // CheckPasswordWithEmailAndGetUserIdAndVersion verifies the provided password for
 // the user with the given email, and returns the user's ID and version on success.
 // Behavior:
-//   - The provided plain password is hashed with the repo's sha256 util before
-//     querying the MongoDB `user` collection for a document matching {email, password}.
+//   - Queries the MongoDB `user` collection by email, then verifies the password
+//     in application code using PasswordUtil (supports both Argon2id and legacy SHA-256).
+//   - If the stored hash is legacy SHA-256, transparently rehashes with Argon2id on success.
 //   - If no document is found, it returns v1.ErrorReason_USER_NOT_FOUND.
 //   - If a matching user has a deleted_at timestamp, attempt to restore the user
 //     when the deletion is within a 30-day recovery window by clearing deleted_at
 //     and updating updated_at; if restore fails return an error. If the deletion is
 //     older than 30 days, return v1.ErrorReason_USER_DELETED.
-//
-// Parameters:
-// - ctx: context for cancellation and timeouts.
-// - email: user email to look up.
-// - password: plain-text password to verify.
-// Returns:
-// - userId (hex string): the MongoDB object id as hex when validation succeeds.
-// - version: integer version stored on the user document.
-// - error: non-nil for validation failures, not-found, DB errors, or restore failures.
 func (r *authRepo) CheckPasswordWithEmailAndGetUserIdAndVersion(ctx context.Context, email string, password string) (string, int, error) {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
-	password = r.sha256Util.HashPassword(password)
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	l.Debugf("CheckPasswordAndGetUserBaseInfo called with email: %s", email)
 
 	collection := r.userCollection
-	filter := bson.M{"email": email, "password": password}
+	filter := bson.M{"email": email}
 
 	var result struct {
 		UserId    string     `bson:"uid"`
+		Password  string     `bson:"password"`
 		Version   int        `bson:"version"`
 		DeletedAt *time.Time `bson:"deleted_at"`
 	}
@@ -82,6 +74,16 @@ func (r *authRepo) CheckPasswordWithEmailAndGetUserIdAndVersion(ctx context.Cont
 		l.Errorf("failed to find user: %v", err)
 		return "", -1, fmt.Errorf("failed to find user: %w", err)
 	}
+
+	match, err := r.passwordUtil.VerifyPassword(password, result.Password)
+	if err != nil {
+		l.Errorf("password verification error: %v", err)
+		return "", -1, fmt.Errorf("password verification error: %w", err)
+	}
+	if !match {
+		return "", -1, errors.NotFound(v1.ErrorReason_USER_NOT_FOUND.String(), "user not found")
+	}
+
 	if result.DeletedAt != nil {
 		if success, err := r.TryRestoreDeletedUser(ctx, result.UserId, result.DeletedAt); err != nil || !success {
 			if err != nil {
@@ -89,6 +91,15 @@ func (r *authRepo) CheckPasswordWithEmailAndGetUserIdAndVersion(ctx context.Cont
 				return "", -1, fmt.Errorf("failed to restore deleted user: %w", err)
 			}
 			return "", -1, errors.New(410, v1.ErrorReason_USER_DELETED.String(), "user has been deleted")
+		}
+	}
+
+	if r.passwordUtil.NeedsRehash(result.Password) {
+		if newHash, err := r.passwordUtil.HashPassword(password); err == nil {
+			update := bson.M{"$set": bson.M{"password": newHash, "updated_at": time.Now()}}
+			if _, err := collection.UpdateOne(ctx, bson.M{"uid": result.UserId}, update); err != nil {
+				l.Errorf("failed to rehash password for user %s: %v", result.UserId, err)
+			}
 		}
 	}
 
@@ -409,27 +420,20 @@ func (r *authRepo) CheckResetPasswordCaptchaUsable(ctx context.Context, email st
 // RegisterUser creates a new user document in MongoDB with the given email and
 // hashed password. It returns the inserted document ID as a string on success.
 // Behavior:
-//   - Hashes the provided password using the repo's sha256 util before storing.
-//   - Checks for existing users with the same email and returns
-//     v1.ErrorReason_USER_ALREADY_EXISTS if present.
+//   - Hashes the provided password using Argon2id before storing.
 //   - Inserts a new document with created_at, updated_at and Version = 0.
-//   - Converts the MongoDB InsertedID into a string (hex when ObjectID).
 //
 // Notes and edge cases:
 //   - Concurrent registrations for the same email may still result in duplicates
 //     if no unique index is enforced at the DB level; the application should ensure
 //     a unique index on `email` to prevent races.
-//
-// Parameters:
-// - ctx: context for cancellation.
-// - email: user email to register.
-// - password: plain-text password to hash and store.
-// Returns:
-// - id string: inserted document id formatted as a string.
-// - error: non-nil on validation, DB errors, or other failures.
 func (r *authRepo) RegisterUser(ctx context.Context, email string, password string) (string, error) {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
-	password = r.sha256Util.HashPassword(password)
+	hashedPassword, err := r.passwordUtil.HashPassword(password)
+	if err != nil {
+		return "", fmt.Errorf("failed to hash password: %w", err)
+	}
+	password = hashedPassword
 	uid := util.MustUUIDv7String()
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -449,7 +453,7 @@ func (r *authRepo) RegisterUser(ctx context.Context, email string, password stri
 		"version":    0,
 	}
 
-	_, err := r.userCollection.InsertOne(ctx, doc)
+	_, err = r.userCollection.InsertOne(ctx, doc)
 	if err != nil {
 		// If duplicate key error (11000) occurs, map to UserAlreadyExistsError.
 		var we mongo.WriteException
@@ -470,13 +474,17 @@ func (r *authRepo) RegisterUser(ctx context.Context, email string, password stri
 
 func (r *authRepo) ResetPassword(ctx context.Context, email string, newPassword string) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
-	newPassword = r.sha256Util.HashPassword(newPassword)
+	hashedPassword, err := r.passwordUtil.HashPassword(newPassword)
+	if err != nil {
+		return fmt.Errorf("failed to hash password: %w", err)
+	}
+	newPassword = hashedPassword
 	filter := bson.M{"email": email}
 	var result struct {
 		UserId  string `bson:"uid"`
 		Version int    `bson:"version"`
 	}
-	err := r.userCollection.FindOne(ctx, filter).Decode(&result)
+	err = r.userCollection.FindOne(ctx, filter).Decode(&result)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return errors.NotFound(v1.ErrorReason_USER_NOT_FOUND.String(), "user not found")

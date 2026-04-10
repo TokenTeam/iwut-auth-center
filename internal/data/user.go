@@ -22,10 +22,10 @@ type userRepo struct {
 	log                    *log.Helper
 	userCollection         *mongo.Collection
 	userConsentsCollection *mongo.Collection
-	sha256Util             *util.Sha256Util
+	passwordUtil           *util.PasswordUtil
 }
 
-func NewUserRepo(data *Data, c *conf.Data, logger log.Logger, sha256Util *util.Sha256Util) biz.UserRepo {
+func NewUserRepo(data *Data, c *conf.Data, logger log.Logger, passwordUtil *util.PasswordUtil) biz.UserRepo {
 	dbName := c.GetMongodb().GetDatabase()
 	usersCollection := data.mongo.Database(dbName).Collection("user")
 	userConsentsCollection := data.mongo.Database(dbName).Collection("user_consents")
@@ -34,7 +34,7 @@ func NewUserRepo(data *Data, c *conf.Data, logger log.Logger, sha256Util *util.S
 		log:                    log.NewHelper(logger),
 		userCollection:         usersCollection,
 		userConsentsCollection: userConsentsCollection,
-		sha256Util:             sha256Util,
+		passwordUtil:           passwordUtil,
 	}
 }
 
@@ -43,17 +43,16 @@ func NewUserRepo(data *Data, c *conf.Data, logger log.Logger, sha256Util *util.S
 func (r *userRepo) UpdateUserPassword(ctx context.Context, uid string, oldPassword string, newPassword string) error {
 	l := log.NewHelper(log.WithContext(ctx, r.log.Logger()))
 
-	oldPassword = r.sha256Util.HashPassword(oldPassword)
-	newPassword = r.sha256Util.HashPassword(newPassword)
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	l.Debugf("UpdateUserPassword called with UserID: %s", uid)
 
 	collection := r.userCollection
-	filter := bson.M{"uid": uid, "password": oldPassword}
+	filter := bson.M{"uid": uid}
 
 	var result struct {
+		Password  string     `bson:"password"`
 		Version   int        `bson:"version"`
 		DeletedAt *time.Time `bson:"deleted_at"`
 	}
@@ -67,9 +66,24 @@ func (r *userRepo) UpdateUserPassword(ctx context.Context, uid string, oldPasswo
 	} else if result.DeletedAt != nil {
 		return errors.New(410, v1.ErrorReason_USER_DELETED.String(), "user has been deleted")
 	}
+
+	match, err := r.passwordUtil.VerifyPassword(oldPassword, result.Password)
+	if err != nil {
+		l.Errorf("password verification error: %v", err)
+		return fmt.Errorf("password verification error: %w", err)
+	}
+	if !match {
+		return errors.NotFound(v1.ErrorReason_USER_NOT_FOUND.String(), "user not found")
+	}
+
+	hashedNewPassword, err := r.passwordUtil.HashPassword(newPassword)
+	if err != nil {
+		return fmt.Errorf("failed to hash password: %w", err)
+	}
+
 	update := bson.M{
 		"$set": bson.M{
-			"password":   newPassword,
+			"password":   hashedNewPassword,
 			"updated_at": time.Now(),
 			"version":    util.NextJWTVersion(result.Version),
 		},
