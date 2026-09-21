@@ -1,0 +1,4 @@
+/auth-center
+*.test
+*.out
+.idea/
