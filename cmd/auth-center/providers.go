@@ -1,12 +1,49 @@
 package main
 
 import (
+	"context"
+	"fmt"
+	"time"
+
 	"github.com/go-kratos/kratos/v2"
 	kgrpc "github.com/go-kratos/kratos/v2/transport/grpc"
+	drivermongo "go.mongodb.org/mongo-driver/v2/mongo"
 
+	mongoadapter "iwut-auth-center/internal/adapter/mongo"
 	"iwut-auth-center/internal/adapter/transport"
 	"iwut-auth-center/internal/config"
 )
+
+const (
+	mongoShutdownTimeout = 5 * time.Second
+	mongoSchemaTimeout   = 10 * time.Second
+)
+
+func provideMongoClient(configuration config.Config) (*drivermongo.Client, func(), error) {
+	client, err := mongoadapter.NewClient(configuration.MongoURI)
+	if err != nil {
+		return nil, nil, err
+	}
+	cleanup := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), mongoShutdownTimeout)
+		defer cancel()
+		_ = client.Disconnect(ctx)
+	}
+	return client, cleanup, nil
+}
+
+func provideMongoDatabase(client *drivermongo.Client, configuration config.Config) (*drivermongo.Database, error) {
+	database, err := mongoadapter.NewDatabase(client, configuration.MongoDatabase)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), mongoSchemaTimeout)
+	defer cancel()
+	if err := mongoadapter.EnsurePrincipalSchema(ctx, database); err != nil {
+		return nil, fmt.Errorf("ensure principal schema: %w", err)
+	}
+	return database, nil
+}
 
 func provideServerConfig(configuration config.Config) transport.ServerConfig {
 	return transport.ServerConfig{GRPCAddr: configuration.GRPCAddr}

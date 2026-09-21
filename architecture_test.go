@@ -4,7 +4,6 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -14,9 +13,8 @@ import (
 
 const modulePath = "iwut-auth-center"
 
-// TestArchitectureBoundaries keeps the first vertical slice honest while the
-// storage adapter is still hard-coded. Domain, port and use-case code must not
-// acquire transport, configuration, adapter or database dependencies.
+// TestArchitectureBoundaries keeps domain, port and use-case code independent
+// from transport, configuration, concrete adapters and database drivers.
 func TestArchitectureBoundaries(t *testing.T) {
 	t.Parallel()
 	root := moduleRoot(t)
@@ -52,17 +50,6 @@ func TestArchitectureBoundaries(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("walk internal packages: %v", err)
-	}
-}
-
-func TestNoMongoDependencyDuringHardcodedPhase(t *testing.T) {
-	t.Parallel()
-	data, err := os.ReadFile(filepath.Join(moduleRoot(t), "go.mod"))
-	if err != nil {
-		t.Fatalf("read go.mod: %v", err)
-	}
-	if strings.Contains(string(data), "mongo") {
-		t.Fatal("go.mod must not contain a MongoDB dependency during the hard-coded catalog phase")
 	}
 }
 

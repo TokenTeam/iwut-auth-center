@@ -8,12 +8,17 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	developerport "iwut-auth-center/internal/developer/port"
+	developerusecase "iwut-auth-center/internal/developer/usecase"
 	"iwut-auth-center/internal/scope/port"
 )
 
 const (
-	ReasonScopeCatalogUnavailable = "ERROR_REASON_SCOPE_CATALOG_UNAVAILABLE"
-	ReasonInternal                = "ERROR_REASON_INTERNAL"
+	ReasonScopeCatalogUnavailable     = "ERROR_REASON_SCOPE_CATALOG_UNAVAILABLE"
+	ReasonInvalidDeveloperStatusQuery = "ERROR_REASON_INVALID_DEVELOPER_STATUS_QUERY"
+	ReasonDeveloperStatusNotFound     = "ERROR_REASON_DEVELOPER_STATUS_NOT_FOUND"
+	ReasonDeveloperStatusUnavailable  = "ERROR_REASON_DEVELOPER_STATUS_UNAVAILABLE"
+	ReasonInternal                    = "ERROR_REASON_INTERNAL"
 )
 
 func toTransportError(err error) error {
@@ -26,6 +31,12 @@ func toTransportError(err error) error {
 		return status.Error(codes.DeadlineExceeded, "request deadline exceeded")
 	case errors.Is(err, port.ErrScopeCatalogUnavailable):
 		return transportStatus(codes.Unavailable, ReasonScopeCatalogUnavailable, "scope catalog is unavailable")
+	case errors.Is(err, developerusecase.ErrInvalidDeveloperStatusQuery):
+		return transportStatus(codes.InvalidArgument, ReasonInvalidDeveloperStatusQuery, "developer status query is invalid")
+	case errors.Is(err, developerusecase.ErrDeveloperStatusNotFound):
+		return transportStatus(codes.NotFound, ReasonDeveloperStatusNotFound, "developer status was not found")
+	case errors.Is(err, developerport.ErrDeveloperStatusUnavailable):
+		return transportStatus(codes.Unavailable, ReasonDeveloperStatusUnavailable, "developer status is unavailable")
 	default:
 		return transportStatus(codes.Internal, ReasonInternal, "internal failure")
 	}

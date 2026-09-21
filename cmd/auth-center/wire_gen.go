@@ -9,25 +9,46 @@ package main
 import (
 	"github.com/go-kratos/kratos/v2"
 	"iwut-auth-center/internal/adapter/catalog"
+	"iwut-auth-center/internal/adapter/mongo"
 	"iwut-auth-center/internal/adapter/transport"
 	"iwut-auth-center/internal/config"
+	usecase2 "iwut-auth-center/internal/developer/usecase"
 	"iwut-auth-center/internal/scope/usecase"
 )
 
 // Injectors from wire.go:
 
-func wireApp(configuration config.Config) (*kratos.App, error) {
+func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 	serverConfig := provideServerConfig(configuration)
 	hardcodedCatalog, err := catalog.NewHardcodedCatalog()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	getScopeCatalogSnapshotHandler := usecase.NewGetScopeCatalogSnapshotHandler(hardcodedCatalog)
 	scopeCatalogService := transport.NewScopeCatalogService(getScopeCatalogSnapshotHandler)
-	server, err := transport.NewGRPCServer(serverConfig, scopeCatalogService)
+	client, cleanup, err := provideMongoClient(configuration)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	database, err := provideMongoDatabase(client, configuration)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	principalRepository, err := mongo.NewPrincipalRepository(database)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	batchGetDeveloperStatusesHandler := usecase2.NewBatchGetDeveloperStatusesHandler(principalRepository)
+	developerStatusService := transport.NewDeveloperStatusService(batchGetDeveloperStatusesHandler)
+	server, err := transport.NewGRPCServer(serverConfig, scopeCatalogService, developerStatusService)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
 	}
 	app := provideApp(server)
-	return app, nil
+	return app, func() {
+		cleanup()
+	}, nil
 }

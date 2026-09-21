@@ -18,10 +18,11 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("load configuration: %w", err)
 	}
-	app, err := wireApp(configuration)
+	app, cleanup, err := wireApp(configuration)
 	if err != nil {
 		return fmt.Errorf("build composition: %w", err)
 	}
+	defer cleanup()
 	if err := app.Run(); err != nil {
 		return fmt.Errorf("run: %w", err)
 	}

@@ -1,4 +1,4 @@
-# Auth Center local gates for the UC-AUTH-001 bootstrap implementation.
+# Auth Center local gates.
 GO ?= go
 WIRE_PACKAGE := github.com/goforj/wire/cmd/wire@v1.2.0
 override GOFLAGS += -buildvcs=false
@@ -13,6 +13,7 @@ help:
 	@echo "  make build         compile all packages"
 	@echo "  make test          run unit, contract and real-listener E2E tests"
 	@echo "  make test-race     run the full suite with the race detector"
+	@echo "  make test-mongo    run Mongo repository and real-provider E2E tests"
 	@echo "  make vet           run go vet"
 	@echo "  make wire-check    fail if wire_gen.go is stale"
 	@echo "  make api-check     fail if generated API code drifted from Proto"
@@ -43,6 +44,10 @@ test:
 .PHONY: test-race
 test-race:
 	$(GO) test -race ./...
+
+.PHONY: test-mongo
+test-mongo:
+	./scripts/test-mongo-integration.sh
 
 .PHONY: vet
 vet:

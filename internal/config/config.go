@@ -8,8 +8,12 @@ import (
 )
 
 const (
-	GRPCAddrEnv     = "AUTH_CENTER_GRPC_ADDR"
-	DefaultGRPCAddr = ":9000"
+	GRPCAddrEnv          = "AUTH_CENTER_GRPC_ADDR"
+	MongoURIEnv          = "AUTH_CENTER_MONGO_URI"
+	MongoDatabaseEnv     = "AUTH_CENTER_MONGO_DATABASE"
+	DefaultGRPCAddr      = ":9000"
+	DefaultMongoURI      = "mongodb://127.0.0.1:27017"
+	DefaultMongoDatabase = "iwut_auth_center"
 )
 
 var ErrInvalidConfiguration = errors.New("invalid auth center configuration")
@@ -17,7 +21,9 @@ var ErrInvalidConfiguration = errors.New("invalid auth center configuration")
 type LookupEnv func(key string) (value string, found bool)
 
 type Config struct {
-	GRPCAddr string
+	GRPCAddr      string
+	MongoURI      string
+	MongoDatabase string
 }
 
 func LoadFromEnvironment() (Config, error) {
@@ -35,5 +41,19 @@ func Load(lookup LookupEnv) (Config, error) {
 			return Config{}, fmt.Errorf("%w: %s must not be empty when set", ErrInvalidConfiguration, GRPCAddrEnv)
 		}
 	}
-	return Config{GRPCAddr: address}, nil
+	mongoURI := DefaultMongoURI
+	if raw, found := lookup(MongoURIEnv); found {
+		mongoURI = strings.TrimSpace(raw)
+		if mongoURI == "" {
+			return Config{}, fmt.Errorf("%w: %s must not be empty when set", ErrInvalidConfiguration, MongoURIEnv)
+		}
+	}
+	database := DefaultMongoDatabase
+	if raw, found := lookup(MongoDatabaseEnv); found {
+		database = strings.TrimSpace(raw)
+		if database == "" {
+			return Config{}, fmt.Errorf("%w: %s must not be empty when set", ErrInvalidConfiguration, MongoDatabaseEnv)
+		}
+	}
+	return Config{GRPCAddr: address, MongoURI: mongoURI, MongoDatabase: database}, nil
 }

@@ -5,6 +5,7 @@ import (
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	developerstatusv1 "iwut-auth-center/api/gen/go/auth_center/v1/developer_status"
 	scopecatalogv1 "iwut-auth-center/api/gen/go/auth_center/v1/scope_catalog"
 )
 
@@ -34,6 +35,26 @@ func TestScopeCatalogContractMatchesPlatformV1(t *testing.T) {
 	definition := (&scopecatalogv1.ScopeDefinition{}).ProtoReflect().Descriptor()
 	if definition.Fields().Len() != 2 || int32(definition.Fields().ByName("name").Number()) != 1 || int32(definition.Fields().ByName("requestable").Number()) != 2 {
 		t.Fatalf("ScopeDefinition descriptor = %v", definition.Fields())
+	}
+}
+
+func TestDeveloperStatusContractMatchesPlatformV1(t *testing.T) {
+	if got, want := developerstatusv1.DeveloperStatusDirectory_BatchGetDeveloperStatuses_FullMethodName,
+		"/auth_center.v1.developer_status.DeveloperStatusDirectory/BatchGetDeveloperStatuses"; got != want {
+		t.Fatalf("full method = %q, want %q", got, want)
+	}
+
+	request := (&developerstatusv1.BatchGetDeveloperStatusesRequest{}).ProtoReflect().Descriptor()
+	if request.Fields().Len() != 1 || int32(request.Fields().ByName("auth_ids").Number()) != 1 || !request.Fields().ByName("auth_ids").IsList() {
+		t.Fatalf("request descriptor = %v", request.Fields())
+	}
+	response := (&developerstatusv1.BatchGetDeveloperStatusesResponse{}).ProtoReflect().Descriptor()
+	if response.Fields().Len() != 1 || int32(response.Fields().ByName("entries").Number()) != 1 || !response.Fields().ByName("entries").IsList() {
+		t.Fatalf("response descriptor = %v", response.Fields())
+	}
+	entry := (&developerstatusv1.DeveloperStatusEntry{}).ProtoReflect().Descriptor()
+	if entry.Fields().Len() != 2 || int32(entry.Fields().ByName("auth_id").Number()) != 1 || int32(entry.Fields().ByName("developer_status").Number()) != 2 {
+		t.Fatalf("entry descriptor = %v", entry.Fields())
 	}
 }
 

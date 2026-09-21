@@ -28,7 +28,7 @@ func (service *ScopeCatalogService) GetScopeCatalogSnapshot(
 	_ *scopecatalogv1.GetScopeCatalogSnapshotRequest,
 ) (*scopecatalogv1.GetScopeCatalogSnapshotResponse, error) {
 	if service == nil || service.handler == nil {
-		return nil, toTransportError(errorsInternal)
+		return nil, toTransportError(errInternalTransport)
 	}
 	snapshot, err := service.handler.Handle(ctx)
 	if err != nil {
@@ -49,6 +49,6 @@ func (service *ScopeCatalogService) GetScopeCatalogSnapshot(
 	}, nil
 }
 
-var errorsInternal = errors.New("internal scope catalog transport failure")
+var errInternalTransport = errors.New("internal transport failure")
 
 var _ scopecatalogv1.ScopeCatalogServer = (*ScopeCatalogService)(nil)
