@@ -22,8 +22,11 @@ func TestNewAuthIDRejectsInvalidValues(t *testing.T) {
 
 func TestNewPrincipalEnforcesTypeSpecificStatus(t *testing.T) {
 	id, _ := NewAuthID("auth-1")
-	if _, err := NewPrincipal(id, PrincipalTypeUser, ""); err == nil {
-		t.Fatal("USER without status accepted")
+	if principal, err := NewPrincipal(id, PrincipalTypeUser, ""); err != nil || principal.DeveloperStatus() != "" {
+		t.Fatalf("ordinary USER rejected: (%#v, %v)", principal, err)
+	}
+	if _, err := NewPrincipal(id, PrincipalTypeUser, "UNKNOWN"); err == nil {
+		t.Fatal("USER with invalid status accepted")
 	}
 	if _, err := NewPrincipal(id, PrincipalTypeSystem, DeveloperStatusApproved); err == nil {
 		t.Fatal("SYSTEM with developer status accepted")

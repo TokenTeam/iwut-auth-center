@@ -127,7 +127,7 @@ func TestE2E_UCAUTH001And002_RealProvidersOverRealGRPC(t *testing.T) {
 		}
 	}
 
-	for _, authID := range []string{"missing-user", "system-reviewer"} {
+	for _, authID := range []string{"missing-user", "ordinary-user", "system-reviewer"} {
 		_, err := developerClient.BatchGetDeveloperStatuses(t.Context(), &developerstatusv1.BatchGetDeveloperStatusesRequest{
 			AuthIds: []string{authID},
 		})
@@ -159,6 +159,7 @@ func seedPrincipalFixtures(t *testing.T, uri, databaseName string) {
 	_, err = database.Collection(mongoadapter.PrincipalCollection).InsertMany(t.Context(), []any{
 		bson.M{"authId": "developer-approved", "principalType": "USER", "developerStatus": "APPROVED"},
 		bson.M{"authId": "developer-suspended", "principalType": "USER", "developerStatus": "SUSPENDED"},
+		bson.M{"authId": "ordinary-user", "principalType": "USER", "developerStatus": nil},
 		bson.M{"authId": "system-reviewer", "principalType": "SYSTEM"},
 	})
 	if err != nil {

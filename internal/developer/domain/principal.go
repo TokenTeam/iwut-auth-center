@@ -56,8 +56,8 @@ func NewPrincipal(authID AuthID, principalType PrincipalType, status DeveloperSt
 	if principalType != PrincipalTypeUser && principalType != PrincipalTypeSystem {
 		return Principal{}, errors.New("invalid principal type")
 	}
-	if principalType == PrincipalTypeUser && !status.IsValid() {
-		return Principal{}, errors.New("user principal requires developer status")
+	if principalType == PrincipalTypeUser && status != "" && !status.IsValid() {
+		return Principal{}, errors.New("invalid user developer status")
 	}
 	if principalType == PrincipalTypeSystem && status != "" {
 		return Principal{}, errors.New("system principal cannot have developer status")

@@ -48,6 +48,7 @@ func TestBatchGetDeveloperStatusesFailsClosed(t *testing.T) {
 		{name: "oversized auth id", ids: []string{strings.Repeat("a", domain.MaxAuthIDBytes+1)}, want: ErrInvalidDeveloperStatusQuery},
 		{name: "invalid UTF-8 auth id", ids: []string{string([]byte{0xff})}, want: ErrInvalidDeveloperStatusQuery},
 		{name: "missing", ids: []string{"auth-a", "auth-b"}, principals: []domain.Principal{principal(t, "auth-a", domain.PrincipalTypeUser, domain.DeveloperStatusApproved)}, want: ErrDeveloperStatusNotFound, calls: 1},
+		{name: "ordinary user", ids: []string{"ordinary"}, principals: []domain.Principal{principal(t, "ordinary", domain.PrincipalTypeUser, "")}, want: ErrDeveloperStatusNotFound, calls: 1},
 		{name: "system", ids: []string{"system"}, principals: []domain.Principal{principal(t, "system", domain.PrincipalTypeSystem, "")}, want: ErrDeveloperStatusNotFound, calls: 1},
 	}
 	for _, testCase := range tests {

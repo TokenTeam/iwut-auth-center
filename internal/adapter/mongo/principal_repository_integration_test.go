@@ -26,6 +26,7 @@ func TestPrincipalRepository_BatchGetAndUniqueAuthID(t *testing.T) {
 	_, err := collection.InsertMany(t.Context(), []any{
 		bson.M{"authId": "user-a", "principalType": "USER", "developerStatus": "APPROVED"},
 		bson.M{"authId": "user-b", "principalType": "USER", "developerStatus": "SUSPENDED"},
+		bson.M{"authId": "ordinary-user", "principalType": "USER", "developerStatus": nil},
 	})
 	if err != nil {
 		t.Fatalf("insert fixtures: %v", err)
@@ -41,7 +42,8 @@ func TestPrincipalRepository_BatchGetAndUniqueAuthID(t *testing.T) {
 	}
 	authIDA, _ := domain.NewAuthID("user-a")
 	authIDB, _ := domain.NewAuthID("user-b")
-	principals, err := repository.BatchGet(t.Context(), []domain.AuthID{authIDB, authIDA})
+	ordinaryAuthID, _ := domain.NewAuthID("ordinary-user")
+	principals, err := repository.BatchGet(t.Context(), []domain.AuthID{authIDB, ordinaryAuthID, authIDA})
 	if err != nil {
 		t.Fatalf("BatchGet() error = %v", err)
 	}
@@ -49,7 +51,7 @@ func TestPrincipalRepository_BatchGetAndUniqueAuthID(t *testing.T) {
 	for _, principal := range principals {
 		got[principal.AuthID()] = principal.DeveloperStatus()
 	}
-	if got[authIDA] != domain.DeveloperStatusApproved || got[authIDB] != domain.DeveloperStatusSuspended {
+	if got[authIDA] != domain.DeveloperStatusApproved || got[authIDB] != domain.DeveloperStatusSuspended || got[ordinaryAuthID] != "" {
 		t.Fatalf("statuses = %v", got)
 	}
 }
