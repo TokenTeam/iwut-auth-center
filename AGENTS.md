@@ -8,23 +8,24 @@ so. Authoritative design lives outside this repository at `../../docs/`.
 
 ## Current work package
 
-**Internal service identity + UC-AUTH-003 Resolve System Principal.** Before changing behavior, read:
+**UC-AUTH-005–009: user profile, device registration/login, Session and credential revocation.** Before changing behavior, read:
 
-1. `../../docs/platform/adr/ADR-PLAT-002-internal-service-identity-jws.md`
-2. `../../docs/platform/contracts/trusted-service-identity-v1.md`
-3. `../../docs/auth-center/use-cases/UC-AUTH-003-resolve-system-principal.md`
-4. `../../docs/platform/contracts/auth-system-principal-v1.md`
+1. The corresponding `../../docs/auth-center/briefs/UC-AUTH-005.md` through `UC-AUTH-009.md`.
+2. `../../docs/platform/contracts/auth-device-session-v1.md` and its test vectors.
+3. `../../docs/platform/contracts/trusted-identity-v1.md` for profile user authentication.
+4. `../../docs/platform/contracts/trusted-service-identity-v1.md` for existing internal methods.
 
 Scope:
 
-- caller-signed service JWS middleware and fixed RPC permission mapping;
-- native gRPC service `auth_center.v1.system_principal.SystemPrincipalDirectory`;
+- preserve caller-signed service JWS middleware and existing fixed RPC permission mapping;
+- select authentication by exact full method; no anonymous package wildcard;
+- native gRPC user profile and device authentication methods;
 - Kratos lifecycle and `github.com/goforj/wire` composition root;
-- Auth-owned MongoDB SYSTEM principal provision and purpose uniqueness;
-- real MongoDB and real-listener E2E through generated clients.
+- Auth-owned MongoDB profile, credential, operation, Session and student association state;
+- real MongoDB replica-set transactions and real-listener E2E through generated clients.
 
-No HTTP/Gateway/gRPC-Web route. Reviewer grant/revoke, ordinary user provision,
-Developer status mutation and Scope Catalog mutation remain separate UCs.
+Gateway routes, Session-to-JWS issuance and mobile secure-storage/UI delivery remain
+separate work packages. Backend verification must not claim their completion.
 
 ## Code boundaries
 
