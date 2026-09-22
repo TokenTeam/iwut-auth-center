@@ -8,6 +8,7 @@ import (
 )
 
 var (
+	ErrCredentialRegistered = errors.New("credential already registered")
 	ErrInvalidInput         = errors.New("invalid login input")
 	ErrAuthenticationFailed = errors.New("authentication failed")
 	ErrAlreadyCompleted     = errors.New("login already completed")

@@ -13,6 +13,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 	"go.mongodb.org/mongo-driver/v2/mongo/writeconcern"
 
+	"iwut-auth-center/internal/adapter/deviceprotocol"
 	"iwut-auth-center/internal/authentication/domain"
 	"iwut-auth-center/internal/authentication/port"
 )
@@ -77,13 +78,14 @@ type SessionDocument struct {
 type AuthenticationRepository struct {
 	database                *drivermongo.Database
 	maxPending, maxFailures int
+	clock                   func() time.Time
 }
 
 func NewAuthenticationRepository(database *drivermongo.Database, maxPending, maxFailures int) (*AuthenticationRepository, error) {
 	if database == nil || maxPending <= 0 || maxFailures <= 0 {
 		return nil, port.ErrUnavailable
 	}
-	return &AuthenticationRepository{database: database, maxPending: maxPending, maxFailures: maxFailures}, nil
+	return &AuthenticationRepository{database: database, maxPending: maxPending, maxFailures: maxFailures, clock: time.Now}, nil
 }
 
 func EnsureAuthenticationSchema(ctx context.Context, db *drivermongo.Database) error {
@@ -141,7 +143,7 @@ func (r *AuthenticationRepository) WithAuthTransaction(ctx context.Context, fn f
 		return nil, fn(tx)
 	}, options.Transaction().SetReadConcern(readconcern.Snapshot()).SetWriteConcern(writeconcern.Majority()).SetReadPreference(readpref.Primary()))
 	if err != nil {
-		for _, known := range []error{port.ErrAuthenticationFailed, port.ErrSessionInvalid, port.ErrAlreadyCompleted, port.ErrLimitExceeded, port.ErrNotFound} {
+		for _, known := range []error{port.ErrCredentialRegistered, port.ErrAuthenticationFailed, port.ErrSessionInvalid, port.ErrAlreadyCompleted, port.ErrLimitExceeded, port.ErrNotFound} {
 			if errors.Is(err, known) {
 				return known
 			}
@@ -153,6 +155,10 @@ func (r *AuthenticationRepository) WithAuthTransaction(ctx context.Context, fn f
 
 func (r *AuthenticationRepository) CreateOperation(ctx context.Context, op domain.Operation, now time.Time) error {
 	return r.WithAuthTransaction(ctx, func(tx context.Context) error {
+		now := r.currentTime(now)
+		if op.Status != domain.Pending || op.FailedAttempts != 0 || !now.Before(op.ExpiresAt) {
+			return port.ErrAuthenticationFailed
+		}
 		// Expiration releases capacity without relying on TTL; encrypted registration
 		// snapshots are cleared in the same transition, never copied into history.
 		_, err := r.database.Collection(AuthenticationOperationCollection).UpdateMany(tx, bson.M{"status": domain.Pending, "expiresAt": bson.M{"$lte": now}}, bson.M{"$set": bson.M{"status": domain.Closed}, "$unset": associationUnset()})
@@ -185,6 +191,7 @@ func (r *AuthenticationRepository) GetOperation(ctx context.Context, id string) 
 
 func (r *AuthenticationRepository) RecordFailure(ctx context.Context, id string, now time.Time) error {
 	return r.WithAuthTransaction(ctx, func(tx context.Context) error {
+		now := r.currentTime(now)
 		op, err := r.GetOperation(tx, id)
 		if errors.Is(err, port.ErrNotFound) {
 			return nil
@@ -241,6 +248,7 @@ func (r *AuthenticationRepository) ResolveCredential(ctx context.Context, locato
 }
 
 func (r *AuthenticationRepository) ConsumeOperationTx(ctx context.Context, id, purpose, authID, credentialID, sessionID string, now time.Time) error {
+	now = r.currentTime(now)
 	op, err := r.GetOperation(ctx, id)
 	if err != nil {
 		return err
@@ -251,7 +259,7 @@ func (r *AuthenticationRepository) ConsumeOperationTx(ctx context.Context, id, p
 	if op.Status == domain.Completed {
 		return port.ErrAlreadyCompleted
 	}
-	if op.Status != domain.Pending || !now.Before(op.ExpiresAt) || op.FailedAttempts >= r.maxFailures {
+	if op.Status != domain.Pending || !now.Before(op.ExpiresAt) || op.FailedAttempts < 0 || op.FailedAttempts >= r.maxFailures {
 		return port.ErrAuthenticationFailed
 	}
 	result, err := r.database.Collection(AuthenticationOperationCollection).UpdateOne(ctx, bson.M{"operationId": id, "purpose": purpose, "status": domain.Pending, "expiresAt": bson.M{"$gt": now}, "failedAttempts": bson.M{"$lt": r.maxFailures}}, bson.M{"$set": bson.M{"status": domain.Completed, "completedAuthId": authID, "completedCredentialId": credentialID, "completedSessionId": sessionID}, "$unset": associationUnset()})
@@ -289,6 +297,7 @@ func (r *AuthenticationRepository) ConfirmPrincipalCredentialTx(ctx context.Cont
 
 func (r *AuthenticationRepository) CompleteLogin(ctx context.Context, expected domain.Operation, session domain.Session, now time.Time) error {
 	err := r.WithAuthTransaction(ctx, func(tx context.Context) error {
+		now := r.currentTime(now)
 		op, err := r.GetOperation(tx, expected.OperationID)
 		if err != nil {
 			return err
@@ -330,7 +339,8 @@ func (r *AuthenticationRepository) CompleteLogin(ctx context.Context, expected d
 // CreateSessionTx is called within WithAuthTransaction after ownership and proof
 // confirmation; its candidate ID and secret digest are fixed outside retries.
 func (r *AuthenticationRepository) CreateSessionTx(ctx context.Context, session domain.Session, now time.Time) error {
-	if !validSession(sessionDocument(session)) {
+	now = r.currentTime(now)
+	if !validSession(sessionDocument(session)) || !now.Before(session.ExpiresAt) {
 		return port.ErrUnavailable
 	}
 	if err := r.ConfirmPrincipalCredentialTx(ctx, session.AuthID, session.CredentialID, now); err != nil {
@@ -388,6 +398,7 @@ func (r *AuthenticationRepository) CheckSession(ctx context.Context, digest []by
 	}
 	var result domain.Session
 	err := r.WithAuthTransaction(ctx, func(tx context.Context) error {
+		now := r.currentTime(now)
 		var doc SessionDocument
 		err := r.database.Collection(SessionCollection).FindOne(tx, bson.M{"tokenDigest": digest, "revokedAt": nil, "expiresAt": bson.M{"$gt": now}}).Decode(&doc)
 		if errors.Is(err, drivermongo.ErrNoDocuments) {
@@ -432,11 +443,21 @@ func (r *AuthenticationRepository) CheckSession(ctx context.Context, digest []by
 }
 
 func associationUnset() bson.M { return bson.M{"lookupKey": "", "nonce": "", "ciphertext": ""} }
+func (r *AuthenticationRepository) currentTime(floor time.Time) time.Time {
+	now := r.clock().UTC().Truncate(time.Millisecond)
+	if now.Before(floor) {
+		return floor
+	}
+	return now
+}
+
 func validCredential(doc CredentialDocument) bool {
-	return doc.CredentialID != "" && doc.AuthID != "" && doc.ProtocolVersion == domain.ProtocolVersion && len(doc.PublicKey) == 65 && doc.PublicKey[0] == 4 && len(doc.Fingerprint) == 32 && !doc.CreatedAt.IsZero() && doc.RevokedAt == nil
+	protocol, _ := deviceprotocol.New("storage-validation")
+	fingerprint, err := protocol.Fingerprint(doc.PublicKey)
+	return err == nil && bytes.Equal(fingerprint, doc.Fingerprint) && deviceprotocol.ValidID(doc.CredentialID) && doc.AuthID != "" && doc.ProtocolVersion == domain.ProtocolVersion && !doc.CreatedAt.IsZero() && doc.RevokedAt == nil
 }
 func validSession(doc SessionDocument) bool {
-	return doc.SessionID != "" && doc.AuthID != "" && doc.CredentialID != "" && doc.AuthenticationMethod == "DEVICE_CREDENTIAL" && len(doc.TokenDigest) == 32 && !doc.CreatedAt.IsZero() && !doc.AuthenticatedAt.IsZero() && !doc.LastUsedAt.Before(doc.CreatedAt) && doc.ExpiresAt.After(doc.CreatedAt) && doc.RevokedAt == nil
+	return deviceprotocol.ValidID(doc.SessionID) && doc.AuthID != "" && deviceprotocol.ValidID(doc.CredentialID) && doc.AuthenticationMethod == "DEVICE_CREDENTIAL" && len(doc.TokenDigest) == 32 && !doc.CreatedAt.IsZero() && !doc.AuthenticatedAt.IsZero() && !doc.LastUsedAt.Before(doc.CreatedAt) && doc.ExpiresAt.After(doc.CreatedAt) && doc.RevokedAt == nil
 }
 
 var _ port.LoginRepository = (*AuthenticationRepository)(nil)
