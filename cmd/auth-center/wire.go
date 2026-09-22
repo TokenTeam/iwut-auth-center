@@ -29,6 +29,7 @@ func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 		wire.Bind(new(transport.ResolveSystemPrincipalHandler), new(*systemprincipalusecase.ResolveSystemPrincipalHandler)),
 		provideMongoClient,
 		provideMongoDatabase,
+		provideUserEndpoints,
 		provideServerConfig,
 		provideApp,
 	))

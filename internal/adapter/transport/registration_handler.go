@@ -17,21 +17,28 @@ type RegistrationUseCase interface {
 	Begin(context.Context, string, []byte, string, []byte, string) (auth.Challenge, error)
 	Complete(context.Context, string, []byte) (auth.Established, error)
 }
-type RegistrationHandler struct{ registration RegistrationUseCase }
+type RegistrationHandler struct {
+	registration    RegistrationUseCase
+	maxMessageBytes int
+}
 
-func NewRegistrationHandler(registration RegistrationUseCase) *RegistrationHandler {
-	return &RegistrationHandler{registration: registration}
+func NewRegistrationHandler(registration RegistrationUseCase, maximumBytes ...int) *RegistrationHandler {
+	limit := 16 * 1024
+	if len(maximumBytes) > 0 && maximumBytes[0] > 0 {
+		limit = maximumBytes[0]
+	}
+	return &RegistrationHandler{registration: registration, maxMessageBytes: limit}
 }
 
 func (h *RegistrationHandler) BeginUserRegistration(ctx context.Context, in *api.BeginUserRegistrationRequest) (*api.AuthenticationChallenge, error) {
 	if in == nil || in.CredentialProposal == nil || in.Association == nil {
 		return nil, registrationTransportError(port.ErrInvalidInput)
 	}
-	if proto.Size(in) > 16*1024 {
-		return nil, registrationTransportError(port.ErrInputTooLarge)
-	}
 	if h == nil || h.registration == nil {
 		return nil, registrationTransportError(port.ErrUnavailable)
+	}
+	if proto.Size(in) > h.maxMessageBytes {
+		return nil, registrationTransportError(port.ErrInputTooLarge)
 	}
 	source := "unknown"
 	if p, ok := peer.FromContext(ctx); ok && p.Addr != nil {
@@ -50,11 +57,11 @@ func (h *RegistrationHandler) CompleteUserRegistration(ctx context.Context, in *
 	if in == nil || in.Proof == nil {
 		return nil, registrationTransportError(port.ErrProofInvalid)
 	}
-	if proto.Size(in) > 16*1024 || len(in.Proof.Signature) > 72 {
-		return nil, registrationTransportError(port.ErrInputTooLarge)
-	}
 	if h == nil || h.registration == nil {
 		return nil, registrationTransportError(port.ErrUnavailable)
+	}
+	if proto.Size(in) > h.maxMessageBytes || len(in.Proof.Signature) > 72 {
+		return nil, registrationTransportError(port.ErrInputTooLarge)
 	}
 	result, err := h.registration.Complete(ctx, in.OperationId, in.Proof.Signature)
 	if err != nil {

@@ -18,7 +18,7 @@ docker run --detach --rm \
   --ulimit nofile=65536:65536 \
   --publish "127.0.0.1:${mongo_port}:${mongo_port}" \
   mongo:8.2.12 \
-  mongod --bind_ip_all --port "${mongo_port}" --replSet auth-test >/dev/null
+  mongod --bind_ip_all --port "${mongo_port}" --replSet auth-test --setParameter enableTestCommands=1 >/dev/null
 
 ready=false
 for _ in $(seq 1 60); do

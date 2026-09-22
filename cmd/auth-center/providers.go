@@ -51,8 +51,8 @@ func provideMongoDatabase(client *drivermongo.Client, configuration config.Confi
 	return database, nil
 }
 
-func provideServerConfig(configuration config.Config) transport.ServerConfig {
-	return transport.ServerConfig{GRPCAddr: configuration.GRPCAddr}
+func provideServerConfig(configuration config.Config, endpoints *transport.UserEndpoints) transport.ServerConfig {
+	return transport.ServerConfig{GRPCAddr: configuration.GRPCAddr, UserEndpoints: endpoints}
 }
 
 func provideApp(server *kgrpc.Server) *kratos.App {

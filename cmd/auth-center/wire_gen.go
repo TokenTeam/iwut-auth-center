@@ -20,17 +20,6 @@ import (
 // Injectors from wire.go:
 
 func wireApp(configuration config.Config) (*kratos.App, func(), error) {
-	serverConfig := provideServerConfig(configuration)
-	serviceIdentityVerifier, err := transport.NewServiceIdentityVerifier(configuration)
-	if err != nil {
-		return nil, nil, err
-	}
-	hardcodedCatalog, err := catalog.NewHardcodedCatalog()
-	if err != nil {
-		return nil, nil, err
-	}
-	getScopeCatalogSnapshotHandler := usecase.NewGetScopeCatalogSnapshotHandler(hardcodedCatalog)
-	scopeCatalogService := transport.NewScopeCatalogService(getScopeCatalogSnapshotHandler)
 	client, cleanup, err := provideMongoClient(configuration)
 	if err != nil {
 		return nil, nil, err
@@ -40,6 +29,24 @@ func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 		cleanup()
 		return nil, nil, err
 	}
+	userEndpoints, err := provideUserEndpoints(configuration, database)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	serverConfig := provideServerConfig(configuration, userEndpoints)
+	serviceIdentityVerifier, err := transport.NewServiceIdentityVerifier(configuration)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	hardcodedCatalog, err := catalog.NewHardcodedCatalog()
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	getScopeCatalogSnapshotHandler := usecase.NewGetScopeCatalogSnapshotHandler(hardcodedCatalog)
+	scopeCatalogService := transport.NewScopeCatalogService(getScopeCatalogSnapshotHandler)
 	principalRepository, err := mongo.NewPrincipalRepository(database)
 	if err != nil {
 		cleanup()

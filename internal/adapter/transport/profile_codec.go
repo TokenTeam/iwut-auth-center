@@ -13,6 +13,12 @@ type profileStrictCodec struct{ encoding.Codec }
 // earlier wire branches. Install using grpc.ForceServerCodec alongside MaxRecvMsgSize.
 func NewProfileStrictCodec() encoding.Codec { return profileStrictCodec{encoding.GetCodec("proto")} }
 func (c profileStrictCodec) Unmarshal(data []byte, v any) error {
+	switch v.(type) {
+	case *pb.EditOwnProfileRequest, *pb.GetOwnProfileRequest, *pb.GetProfileEditingSchemaRequest:
+		if len(data) > domain.MaxMessageBytes {
+			return profileError(domain.ErrLimit)
+		}
+	}
 	if _, ok := v.(*pb.EditOwnProfileRequest); ok {
 		if e := validateProfileWire(data, 0); e != nil {
 			return profileError(e)
