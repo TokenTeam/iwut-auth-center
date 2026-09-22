@@ -30,6 +30,7 @@ var ErrInvalidConfiguration = errors.New("invalid auth center configuration")
 type LookupEnv func(key string) (value string, found bool)
 
 type Config struct {
+	UserEndpoints            *UserEndpoints
 	GRPCAddr                 string
 	MongoURI                 string
 	MongoDatabase            string
@@ -108,8 +109,13 @@ func Load(lookup LookupEnv) (Config, error) {
 			return Config{}, fmt.Errorf("%w: %s must be a non-negative Go duration", ErrInvalidConfiguration, ServiceClockSkewEnv)
 		}
 	}
+	userEndpoints, err := loadUserEndpoints(lookup)
+	if err != nil {
+		return Config{}, err
+	}
 	return Config{
-		GRPCAddr: address, MongoURI: mongoURI, MongoDatabase: database,
+		UserEndpoints: userEndpoints,
+		GRPCAddr:      address, MongoURI: mongoURI, MongoDatabase: database,
 		ServiceCallers: callers, ServiceIdentityMaxTTL: maxTTL, ServiceIdentityClockSkew: clockSkew,
 	}, nil
 }
