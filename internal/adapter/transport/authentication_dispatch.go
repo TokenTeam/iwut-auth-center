@@ -13,7 +13,11 @@ import (
 
 // A nil user middleware fails closed. It never falls back to service identity
 // or treats a whole namespace as anonymous.
-func userEndpointAuthenticationMiddleware(service *ServiceIdentityVerifier, profile, session middleware.Middleware, enabled bool) middleware.Middleware {
+func userEndpointAuthenticationMiddleware(service *ServiceIdentityVerifier, profile, session middleware.Middleware, enabled bool, maximumBytes ...int) middleware.Middleware {
+	limit := 16 * 1024
+	if len(maximumBytes) > 0 && maximumBytes[0] > 0 {
+		limit = maximumBytes[0]
+	}
 	return func(handler middleware.Handler) middleware.Handler {
 		internal := serviceIdentityMiddleware(service)(handler)
 		return func(ctx context.Context, request any) (any, error) {
@@ -30,12 +34,12 @@ func userEndpointAuthenticationMiddleware(service *ServiceIdentityVerifier, prof
 				authv1.AuthenticationService_BeginDeviceLogin_FullMethodName,
 				authv1.AuthenticationService_CompleteDeviceLogin_FullMethodName,
 				authv1.AuthenticationService_RevokeCurrentSession_FullMethodName:
-				if err := checkAuthenticationMessageSize(request); err != nil {
+				if err := checkAuthenticationMessageSize(request, limit); err != nil {
 					return nil, err
 				}
 				return handler(ctx, request)
 			case authv1.AuthenticationService_RevokeOwnCredential_FullMethodName:
-				if err := checkAuthenticationMessageSize(request); err != nil {
+				if err := checkAuthenticationMessageSize(request, limit); err != nil {
 					return nil, err
 				}
 				if session == nil {
@@ -56,12 +60,12 @@ func userEndpointAuthenticationMiddleware(service *ServiceIdentityVerifier, prof
 	}
 }
 
-func checkAuthenticationMessageSize(request any) error {
+func checkAuthenticationMessageSize(request any, limit int) error {
 	message, ok := request.(proto.Message)
 	if !ok || message == nil {
 		return transportStatus(codes.InvalidArgument, "INVALID_LOGIN_INPUT", "invalid authentication request")
 	}
-	if proto.Size(message) > 16*1024 {
+	if proto.Size(message) > limit {
 		return transportStatus(codes.ResourceExhausted, "AUTHENTICATION_INPUT_TOO_LARGE", "authentication request is too large")
 	}
 	return nil
