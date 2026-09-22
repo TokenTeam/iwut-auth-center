@@ -14,12 +14,17 @@ import (
 	"iwut-auth-center/internal/config"
 	usecase2 "iwut-auth-center/internal/developer/usecase"
 	"iwut-auth-center/internal/scope/usecase"
+	usecase3 "iwut-auth-center/internal/systemprincipal/usecase"
 )
 
 // Injectors from wire.go:
 
 func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 	serverConfig := provideServerConfig(configuration)
+	serviceIdentityVerifier, err := transport.NewServiceIdentityVerifier(configuration)
+	if err != nil {
+		return nil, nil, err
+	}
 	hardcodedCatalog, err := catalog.NewHardcodedCatalog()
 	if err != nil {
 		return nil, nil, err
@@ -42,7 +47,14 @@ func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 	}
 	batchGetDeveloperStatusesHandler := usecase2.NewBatchGetDeveloperStatusesHandler(principalRepository)
 	developerStatusService := transport.NewDeveloperStatusService(batchGetDeveloperStatusesHandler)
-	server, err := transport.NewGRPCServer(serverConfig, scopeCatalogService, developerStatusService)
+	systemPrincipalRepository, err := mongo.NewSystemPrincipalRepository(database)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	resolveSystemPrincipalHandler := usecase3.NewResolveSystemPrincipalHandler(systemPrincipalRepository)
+	systemPrincipalService := transport.NewSystemPrincipalService(resolveSystemPrincipalHandler)
+	server, err := transport.NewGRPCServer(serverConfig, serviceIdentityVerifier, scopeCatalogService, developerStatusService, systemPrincipalService)
 	if err != nil {
 		cleanup()
 		return nil, nil, err

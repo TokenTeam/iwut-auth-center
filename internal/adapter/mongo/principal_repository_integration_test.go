@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -75,6 +76,49 @@ func TestPrincipalRepository_CorruptRecordFailsClosed(t *testing.T) {
 	_, err = repository.BatchGet(t.Context(), []domain.AuthID{authID})
 	if !errors.Is(err, port.ErrDeveloperStatusUnavailable) {
 		t.Fatalf("BatchGet() error = %v, want ErrDeveloperStatusUnavailable", err)
+	}
+}
+
+func TestSystemPrincipalRepository_BootstrapIsIdempotentAndResolvable(t *testing.T) {
+	database := integrationDatabase(t)
+	if err := EnsurePrincipalSchema(t.Context(), database); err != nil {
+		t.Fatalf("EnsurePrincipalSchema() error = %v", err)
+	}
+	if err := EnsureSystemPrincipalSchema(t.Context(), database); err != nil {
+		t.Fatalf("EnsureSystemPrincipalSchema() error = %v", err)
+	}
+	var waitGroup sync.WaitGroup
+	errorsByCall := make(chan error, 8)
+	for range 8 {
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			errorsByCall <- BootstrapSystemPrincipals(t.Context(), database)
+		}()
+	}
+	waitGroup.Wait()
+	close(errorsByCall)
+	for err := range errorsByCall {
+		if err != nil {
+			t.Fatalf("concurrent BootstrapSystemPrincipals() error = %v", err)
+		}
+	}
+	if err := BootstrapSystemPrincipals(t.Context(), database); err != nil {
+		t.Fatalf("BootstrapSystemPrincipals() second error = %v", err)
+	}
+	repository, err := NewSystemPrincipalRepository(database)
+	if err != nil {
+		t.Fatalf("NewSystemPrincipalRepository() error = %v", err)
+	}
+	principal, err := repository.Resolve(t.Context(), "app-center.review-auto-rejection")
+	if err != nil || principal.AuthID() == "" {
+		t.Fatalf("Resolve() = (%#v, %v)", principal, err)
+	}
+	count, err := database.Collection(PrincipalCollection).CountDocuments(t.Context(), bson.M{
+		"principalType": "SYSTEM", "systemPurpose": "app-center.review-auto-rejection",
+	})
+	if err != nil || count != 1 {
+		t.Fatalf("system principal count = %d, error = %v", count, err)
 	}
 }
 

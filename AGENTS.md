@@ -8,29 +8,23 @@ so. Authoritative design lives outside this repository at `../../docs/`.
 
 ## Current work package
 
-**UC-AUTH-002 Batch Get Developer Statuses.** Before changing behavior, read:
+**Internal service identity + UC-AUTH-003 Resolve System Principal.** Before changing behavior, read:
 
-1. `../../docs/auth-center/use-cases/UC-AUTH-002-batch-get-developer-statuses.md`
-2. `../../docs/platform/contracts/auth-developer-status-v1.md`
-3. `../../docs/auth-center/open-questions.md`
+1. `../../docs/platform/adr/ADR-PLAT-002-internal-service-identity-jws.md`
+2. `../../docs/platform/contracts/trusted-service-identity-v1.md`
+3. `../../docs/auth-center/use-cases/UC-AUTH-003-resolve-system-principal.md`
+4. `../../docs/platform/contracts/auth-system-principal-v1.md`
 
 Scope:
 
-- native gRPC service `auth_center.v1.developer_status.DeveloperStatusDirectory`;
+- caller-signed service JWS middleware and fixed RPC permission mapping;
+- native gRPC service `auth_center.v1.system_principal.SystemPrincipalDirectory`;
 - Kratos lifecycle and `github.com/goforj/wire` composition root;
-- Domain, UseCase, port and adapters separated by responsibility;
-- Auth-owned MongoDB `auth_principals` repository and unique `authId` index;
-- real MongoDB and real-listener E2E through the generated gRPC client.
+- Auth-owned MongoDB SYSTEM principal provision and purpose uniqueness;
+- real MongoDB and real-listener E2E through generated clients.
 
-Temporary explicit gaps:
-
-- no production service-identity credential or allowlist interceptor;
-- no HTTP/Gateway/gRPC-Web route;
-- no catalog mutation, OAuth or user capability.
-
-Keep the design status `PROPOSED` and implementation status `IN_PROGRESS` until
-the service-identity and allowlist work package is complete. Principal creation
-and Developer status mutation remain separate future use cases.
+No HTTP/Gateway/gRPC-Web route. Reviewer grant/revoke, ordinary user provision,
+Developer status mutation and Scope Catalog mutation remain separate UCs.
 
 ## Code boundaries
 

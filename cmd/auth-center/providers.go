@@ -42,6 +42,12 @@ func provideMongoDatabase(client *drivermongo.Client, configuration config.Confi
 	if err := mongoadapter.EnsurePrincipalSchema(ctx, database); err != nil {
 		return nil, fmt.Errorf("ensure principal schema: %w", err)
 	}
+	if err := mongoadapter.EnsureSystemPrincipalSchema(ctx, database); err != nil {
+		return nil, fmt.Errorf("ensure system principal schema: %w", err)
+	}
+	if err := mongoadapter.BootstrapSystemPrincipals(ctx, database); err != nil {
+		return nil, fmt.Errorf("bootstrap system principals: %w", err)
+	}
 	return database, nil
 }
 

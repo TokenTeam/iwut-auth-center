@@ -1,12 +1,27 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"testing"
 )
 
+var testServiceCallers = base64.StdEncoding.EncodeToString([]byte(`{"iwut-app-center":{"status":"ACTIVE","keys":{"kid-1":{"publicKeyPemB64":"cGVt"}},"permissions":["auth.scope-catalog.read"],"systemPrincipalPurposes":[]}}`))
+
+func withRequiredServiceCallers(lookup LookupEnv) LookupEnv {
+	return func(key string) (string, bool) {
+		if key == ServiceCallersEnv {
+			return testServiceCallers, true
+		}
+		if lookup == nil {
+			return "", false
+		}
+		return lookup(key)
+	}
+}
+
 func TestLoadUsesDefaults(t *testing.T) {
-	configuration, err := Load(func(string) (string, bool) { return "", false })
+	configuration, err := Load(withRequiredServiceCallers(nil))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -22,12 +37,12 @@ func TestLoadUsesDefaults(t *testing.T) {
 }
 
 func TestLoadAcceptsExplicitGRPCAddress(t *testing.T) {
-	configuration, err := Load(func(key string) (string, bool) {
+	configuration, err := Load(withRequiredServiceCallers(func(key string) (string, bool) {
 		if key == GRPCAddrEnv {
 			return " 127.0.0.1:19000 ", true
 		}
 		return "", false
-	})
+	}))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -37,7 +52,7 @@ func TestLoadAcceptsExplicitGRPCAddress(t *testing.T) {
 }
 
 func TestLoadAcceptsExplicitMongoConfiguration(t *testing.T) {
-	configuration, err := Load(func(key string) (string, bool) {
+	configuration, err := Load(withRequiredServiceCallers(func(key string) (string, bool) {
 		switch key {
 		case MongoURIEnv:
 			return " mongodb://mongo:27017 ", true
@@ -46,7 +61,7 @@ func TestLoadAcceptsExplicitMongoConfiguration(t *testing.T) {
 		default:
 			return "", false
 		}
-	})
+	}))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -61,24 +76,25 @@ func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 		lookup LookupEnv
 	}{
 		{name: "nil lookup", lookup: nil},
-		{name: "empty explicit address", lookup: func(key string) (string, bool) {
+		{name: "missing callers", lookup: func(string) (string, bool) { return "", false }},
+		{name: "empty explicit address", lookup: withRequiredServiceCallers(func(key string) (string, bool) {
 			if key == GRPCAddrEnv {
 				return " ", true
 			}
 			return "", false
-		}},
-		{name: "empty explicit mongo URI", lookup: func(key string) (string, bool) {
+		})},
+		{name: "empty explicit mongo URI", lookup: withRequiredServiceCallers(func(key string) (string, bool) {
 			if key == MongoURIEnv {
 				return " ", true
 			}
 			return "", false
-		}},
-		{name: "empty explicit mongo database", lookup: func(key string) (string, bool) {
+		})},
+		{name: "empty explicit mongo database", lookup: withRequiredServiceCallers(func(key string) (string, bool) {
 			if key == MongoDatabaseEnv {
 				return " ", true
 			}
 			return "", false
-		}},
+		})},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

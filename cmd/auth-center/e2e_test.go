@@ -2,6 +2,14 @@ package main
 
 import (
 	"context"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"net"
@@ -14,10 +22,12 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	developerstatusv1 "iwut-auth-center/api/gen/go/auth_center/v1/developer_status"
 	scopecatalogv1 "iwut-auth-center/api/gen/go/auth_center/v1/scope_catalog"
+	systemprincipalv1 "iwut-auth-center/api/gen/go/auth_center/v1/system_principal"
 	"iwut-auth-center/internal/adapter/catalog"
 	mongoadapter "iwut-auth-center/internal/adapter/mongo"
 	"iwut-auth-center/internal/config"
@@ -32,6 +42,7 @@ func TestE2E_UCAUTH001And002_RealProvidersOverRealGRPC(t *testing.T) {
 	}
 	databaseName := fmt.Sprintf("iwut_auth_center_e2e_%d", time.Now().UnixNano())
 	seedPrincipalFixtures(t, mongoURI, databaseName)
+	serviceKey, serviceCallers := testServiceCallerRegistry(t)
 
 	address := reserveAddress(t)
 	configuration, err := config.Load(func(key string) (string, bool) {
@@ -42,6 +53,8 @@ func TestE2E_UCAUTH001And002_RealProvidersOverRealGRPC(t *testing.T) {
 			return mongoURI, true
 		case config.MongoDatabaseEnv:
 			return databaseName, true
+		case config.ServiceCallersEnv:
+			return serviceCallers, true
 		default:
 			return "", false
 		}
@@ -78,7 +91,11 @@ func TestE2E_UCAUTH001And002_RealProvidersOverRealGRPC(t *testing.T) {
 	connection := dialGRPC(t, address, runDone, &runErr)
 	t.Cleanup(func() { _ = connection.Close() })
 	client := scopecatalogv1.NewScopeCatalogClient(connection)
-	response, err := client.GetScopeCatalogSnapshot(t.Context(), &scopecatalogv1.GetScopeCatalogSnapshotRequest{})
+	if _, err := client.GetScopeCatalogSnapshot(t.Context(), &scopecatalogv1.GetScopeCatalogSnapshotRequest{}); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("GetScopeCatalogSnapshot() without service identity code = %v, want Unauthenticated", status.Code(err))
+	}
+	callContext := serviceCallContext(t, t.Context(), serviceKey, "app-center", "app-center-2026-01", "iwut-auth-center")
+	response, err := client.GetScopeCatalogSnapshot(callContext, &scopecatalogv1.GetScopeCatalogSnapshotRequest{})
 	if err != nil {
 		t.Fatalf("GetScopeCatalogSnapshot() error = %v", err)
 	}
@@ -104,7 +121,13 @@ func TestE2E_UCAUTH001And002_RealProvidersOverRealGRPC(t *testing.T) {
 	}
 
 	developerClient := developerstatusv1.NewDeveloperStatusDirectoryClient(connection)
-	statusResponse, err := developerClient.BatchGetDeveloperStatuses(t.Context(), &developerstatusv1.BatchGetDeveloperStatusesRequest{
+	limitedContext := serviceCallContext(t, t.Context(), serviceKey, "scope-only", "app-center-2026-01", "iwut-auth-center")
+	if _, err := developerClient.BatchGetDeveloperStatuses(limitedContext, &developerstatusv1.BatchGetDeveloperStatusesRequest{
+		AuthIds: []string{"developer-approved"},
+	}); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("BatchGetDeveloperStatuses() without permission code = %v, want PermissionDenied", status.Code(err))
+	}
+	statusResponse, err := developerClient.BatchGetDeveloperStatuses(callContext, &developerstatusv1.BatchGetDeveloperStatusesRequest{
 		AuthIds: []string{"developer-suspended", "developer-approved"},
 	})
 	if err != nil {
@@ -128,13 +151,86 @@ func TestE2E_UCAUTH001And002_RealProvidersOverRealGRPC(t *testing.T) {
 	}
 
 	for _, authID := range []string{"missing-user", "ordinary-user", "system-reviewer"} {
-		_, err := developerClient.BatchGetDeveloperStatuses(t.Context(), &developerstatusv1.BatchGetDeveloperStatusesRequest{
+		_, err := developerClient.BatchGetDeveloperStatuses(callContext, &developerstatusv1.BatchGetDeveloperStatusesRequest{
 			AuthIds: []string{authID},
 		})
 		if status.Code(err) != codes.NotFound {
 			t.Fatalf("BatchGetDeveloperStatuses(%q) code = %v, want NotFound", authID, status.Code(err))
 		}
 	}
+
+	systemClient := systemprincipalv1.NewSystemPrincipalDirectoryClient(connection)
+	first, err := systemClient.ResolveSystemPrincipal(callContext, &systemprincipalv1.ResolveSystemPrincipalRequest{
+		Purpose: systemprincipalv1.SystemPrincipalPurpose_SYSTEM_PRINCIPAL_PURPOSE_APP_CENTER_REVIEW_AUTO_REJECTION,
+	})
+	if err != nil {
+		t.Fatalf("ResolveSystemPrincipal() error = %v", err)
+	}
+	second, err := systemClient.ResolveSystemPrincipal(callContext, &systemprincipalv1.ResolveSystemPrincipalRequest{
+		Purpose: systemprincipalv1.SystemPrincipalPurpose_SYSTEM_PRINCIPAL_PURPOSE_APP_CENTER_REVIEW_AUTO_REJECTION,
+	})
+	if err != nil {
+		t.Fatalf("ResolveSystemPrincipal() second error = %v", err)
+	}
+	if first.GetAuthId() == "" || first.GetAuthId() != second.GetAuthId() {
+		t.Fatalf("system principal auth IDs = (%q, %q), want one stable non-empty ID", first.GetAuthId(), second.GetAuthId())
+	}
+}
+
+func testServiceCallerRegistry(t *testing.T) (*rsa.PrivateKey, string) {
+	t.Helper()
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate service key: %v", err)
+	}
+	publicDER, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
+	if err != nil {
+		t.Fatalf("marshal service public key: %v", err)
+	}
+	publicPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicDER})
+	registry := map[string]any{
+		"app-center": map[string]any{
+			"status": "ACTIVE",
+			"keys": map[string]any{
+				"app-center-2026-01": map[string]string{"publicKeyPemB64": base64.StdEncoding.EncodeToString(publicPEM)},
+			},
+			"permissions":             []string{"auth.scope-catalog.read", "auth.developer-status.read", "auth.system-principal.resolve"},
+			"systemPrincipalPurposes": []string{"app-center.review-auto-rejection"},
+		},
+		"scope-only": map[string]any{
+			"status": "ACTIVE",
+			"keys": map[string]any{
+				"app-center-2026-01": map[string]string{"publicKeyPemB64": base64.StdEncoding.EncodeToString(publicPEM)},
+			},
+			"permissions":             []string{"auth.scope-catalog.read"},
+			"systemPrincipalPurposes": []string{},
+		},
+	}
+	raw, err := json.Marshal(registry)
+	if err != nil {
+		t.Fatalf("marshal service caller registry: %v", err)
+	}
+	return privateKey, base64.StdEncoding.EncodeToString(raw)
+}
+
+func serviceCallContext(t *testing.T, ctx context.Context, key *rsa.PrivateKey, serviceID, kid, audience string) context.Context {
+	t.Helper()
+	now := time.Now().UTC()
+	header, _ := json.Marshal(map[string]string{"alg": "RS256", "typ": "JWT", "kid": kid})
+	claims, _ := json.Marshal(map[string]any{
+		"iss": serviceID, "sub": serviceID, "aud": audience,
+		"iat": now.Unix(), "nbf": now.Add(-5 * time.Second).Unix(), "exp": now.Add(time.Minute).Unix(),
+		"jti": fmt.Sprintf("e2e-%d", now.UnixNano()),
+	})
+	encodedHeader := base64.RawURLEncoding.EncodeToString(header)
+	encodedClaims := base64.RawURLEncoding.EncodeToString(claims)
+	digest := sha256.Sum256([]byte(encodedHeader + "." + encodedClaims))
+	signature, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, digest[:])
+	if err != nil {
+		t.Fatalf("sign service JWS: %v", err)
+	}
+	token := encodedHeader + "." + encodedClaims + "." + base64.RawURLEncoding.EncodeToString(signature)
+	return metadata.NewOutgoingContext(ctx, metadata.Pairs("authorization", "Bearer "+token))
 }
 
 func seedPrincipalFixtures(t *testing.T, uri, databaseName string) {

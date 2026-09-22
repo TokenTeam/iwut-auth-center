@@ -14,11 +14,17 @@ import (
 )
 
 const (
-	ReasonScopeCatalogUnavailable     = "ERROR_REASON_SCOPE_CATALOG_UNAVAILABLE"
-	ReasonInvalidDeveloperStatusQuery = "ERROR_REASON_INVALID_DEVELOPER_STATUS_QUERY"
-	ReasonDeveloperStatusNotFound     = "ERROR_REASON_DEVELOPER_STATUS_NOT_FOUND"
-	ReasonDeveloperStatusUnavailable  = "ERROR_REASON_DEVELOPER_STATUS_UNAVAILABLE"
-	ReasonInternal                    = "ERROR_REASON_INTERNAL"
+	ReasonScopeCatalogUnavailable      = "ERROR_REASON_SCOPE_CATALOG_UNAVAILABLE"
+	ReasonInvalidDeveloperStatusQuery  = "ERROR_REASON_INVALID_DEVELOPER_STATUS_QUERY"
+	ReasonDeveloperStatusNotFound      = "ERROR_REASON_DEVELOPER_STATUS_NOT_FOUND"
+	ReasonDeveloperStatusUnavailable   = "ERROR_REASON_DEVELOPER_STATUS_UNAVAILABLE"
+	ReasonServiceIdentityRequired      = "ERROR_REASON_SERVICE_IDENTITY_REQUIRED"
+	ReasonInvalidServiceIdentity       = "ERROR_REASON_INVALID_SERVICE_IDENTITY"
+	ReasonScopeCatalogReadForbidden    = "ERROR_REASON_SCOPE_CATALOG_READ_FORBIDDEN"
+	ReasonDeveloperStatusReadForbidden = "ERROR_REASON_DEVELOPER_STATUS_READ_FORBIDDEN"
+	ReasonSystemPrincipalReadForbidden = "ERROR_REASON_SYSTEM_PRINCIPAL_READ_FORBIDDEN"
+	ReasonServicePermissionDenied      = "ERROR_REASON_SERVICE_PERMISSION_DENIED"
+	ReasonInternal                     = "ERROR_REASON_INTERNAL"
 )
 
 func toTransportError(err error) error {
