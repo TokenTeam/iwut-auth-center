@@ -457,7 +457,7 @@ func validCredential(doc CredentialDocument) bool {
 	return err == nil && bytes.Equal(fingerprint, doc.Fingerprint) && deviceprotocol.ValidID(doc.CredentialID) && doc.AuthID != "" && doc.ProtocolVersion == domain.ProtocolVersion && !doc.CreatedAt.IsZero() && doc.RevokedAt == nil
 }
 func validSession(doc SessionDocument) bool {
-	return deviceprotocol.ValidID(doc.SessionID) && doc.AuthID != "" && deviceprotocol.ValidID(doc.CredentialID) && doc.AuthenticationMethod == "DEVICE_CREDENTIAL" && len(doc.TokenDigest) == 32 && !doc.CreatedAt.IsZero() && !doc.AuthenticatedAt.IsZero() && !doc.LastUsedAt.Before(doc.CreatedAt) && doc.ExpiresAt.After(doc.CreatedAt) && doc.RevokedAt == nil
+	return deviceprotocol.ValidID(doc.SessionID) && doc.AuthID != "" && deviceprotocol.ValidID(doc.CredentialID) && doc.AuthenticationMethod == "DEVICE_CREDENTIAL" && len(doc.TokenDigest) == 32 && !doc.CreatedAt.IsZero() && doc.AuthenticatedAt.Equal(doc.CreatedAt) && !doc.LastUsedAt.Before(doc.CreatedAt) && doc.LastUsedAt.Before(doc.ExpiresAt) && doc.ExpiresAt.After(doc.CreatedAt) && doc.RevokedAt == nil
 }
 
 var _ port.LoginRepository = (*AuthenticationRepository)(nil)
