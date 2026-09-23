@@ -18,7 +18,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	authv1 "iwut-auth-center/api/gen/go/auth_center/v1/authentication"
-	identityv1 "iwut-auth-center/api/gen/go/auth_center/v1/user_identity"
+	identityv1 "iwut-auth-center/api/gen/go/auth_center/v1/identity"
 	profilev1 "iwut-auth-center/api/gen/go/auth_center/v1/user_profile"
 	"iwut-auth-center/internal/adapter/deviceprotocol"
 	mongoadapter "iwut-auth-center/internal/adapter/mongo"

@@ -137,7 +137,7 @@ enabled only in that test container and removes it on exit.
 ## Session-to-user-identity issuance (UC010)
 
 `AUTH_IDENTITY_ISSUANCE_ENABLED=true` enables the internal native gRPC method
-`/auth_center.v1.user_identity.UserIdentityService/IssueUserIdentityFromSession`.
+`/auth_center.v1.identity.UserIdentityService/IssueUserIdentityFromSession`.
 It defaults to false and requires `AUTH_USER_ENDPOINTS_ENABLED=true`.
 The request carries only its exact destination `audience`; `authorization` must
 contain a registered service Bearer JWS, and `x-iwut-session` must contain exactly

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
-	identityv1 "iwut-auth-center/api/gen/go/auth_center/v1/user_identity"
+	identityv1 "iwut-auth-center/api/gen/go/auth_center/v1/identity"
 	"iwut-auth-center/internal/identity/domain"
 	"iwut-auth-center/internal/identity/usecase"
 )

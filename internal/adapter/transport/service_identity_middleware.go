@@ -3,7 +3,7 @@ package transport
 import (
 	"context"
 	"errors"
-	identityv1 "iwut-auth-center/api/gen/go/auth_center/v1/user_identity"
+	identityv1 "iwut-auth-center/api/gen/go/auth_center/v1/identity"
 	"strings"
 
 	"github.com/go-kratos/kratos/v2/middleware"

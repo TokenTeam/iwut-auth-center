@@ -6,7 +6,7 @@ import (
 	"github.com/go-kratos/kratos/v2/middleware"
 	"google.golang.org/grpc"
 	authv1 "iwut-auth-center/api/gen/go/auth_center/v1/authentication"
-	identityv1 "iwut-auth-center/api/gen/go/auth_center/v1/user_identity"
+	identityv1 "iwut-auth-center/api/gen/go/auth_center/v1/identity"
 	profilev1 "iwut-auth-center/api/gen/go/auth_center/v1/user_profile"
 	profiledomain "iwut-auth-center/internal/profile/domain"
 
