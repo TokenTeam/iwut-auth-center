@@ -6,6 +6,7 @@ import (
 	"github.com/go-kratos/kratos/v2/middleware"
 	"google.golang.org/grpc"
 	authv1 "iwut-auth-center/api/gen/go/auth_center/v1/authentication"
+	identityv1 "iwut-auth-center/api/gen/go/auth_center/v1/user_identity"
 	profilev1 "iwut-auth-center/api/gen/go/auth_center/v1/user_profile"
 	profiledomain "iwut-auth-center/internal/profile/domain"
 
@@ -23,6 +24,7 @@ type ServerConfig struct {
 
 // UserEndpoints is an optional, fully validated runtime assembled before listening.
 type UserEndpoints struct {
+	IdentityIssuance              *UserIdentityService
 	Authentication                *AuthenticationService
 	Profile                       *UserProfileServer
 	ProfileIdentity               middleware.Middleware
@@ -68,6 +70,9 @@ func NewGRPCServer(
 	if endpoints := configuration.UserEndpoints; endpoints != nil {
 		authv1.RegisterAuthenticationServiceServer(server, endpoints.Authentication)
 		profilev1.RegisterUserProfileServiceServer(server, endpoints.Profile)
+		if endpoints.IdentityIssuance != nil {
+			identityv1.RegisterUserIdentityServiceServer(server, endpoints.IdentityIssuance)
+		}
 	}
 	scopecatalogv1.RegisterScopeCatalogServer(server, service)
 	developerstatusv1.RegisterDeveloperStatusDirectoryServer(server, developerStatusService)

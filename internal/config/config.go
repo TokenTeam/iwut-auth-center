@@ -30,6 +30,7 @@ var ErrInvalidConfiguration = errors.New("invalid auth center configuration")
 type LookupEnv func(key string) (value string, found bool)
 
 type Config struct {
+	IdentityIssuance         *IdentityIssuance
 	UserEndpoints            *UserEndpoints
 	GRPCAddr                 string
 	MongoURI                 string
@@ -40,6 +41,7 @@ type Config struct {
 }
 
 type ServiceCallerRegistration struct {
+	IdentityAudiences       []string
 	ServiceID               string
 	Status                  string
 	PublicKeyPEMByKID       map[string][]byte
@@ -48,6 +50,7 @@ type ServiceCallerRegistration struct {
 }
 
 type serviceCallerJSON struct {
+	IdentityAudiences       []string           `json:"identityAudiences"`
 	Status                  string             `json:"status"`
 	Keys                    map[string]keyJSON `json:"keys"`
 	Permissions             []string           `json:"permissions"`
@@ -113,9 +116,14 @@ func Load(lookup LookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	issuance, err := loadIdentityIssuance(lookup, userEndpoints, callers)
+	if err != nil {
+		return Config{}, err
+	}
 	return Config{
-		UserEndpoints: userEndpoints,
-		GRPCAddr:      address, MongoURI: mongoURI, MongoDatabase: database,
+		IdentityIssuance: issuance,
+		UserEndpoints:    userEndpoints,
+		GRPCAddr:         address, MongoURI: mongoURI, MongoDatabase: database,
 		ServiceCallers: callers, ServiceIdentityMaxTTL: maxTTL, ServiceIdentityClockSkew: clockSkew,
 	}, nil
 }
@@ -167,8 +175,12 @@ func parseServiceCallers(raw string) ([]ServiceCallerRegistration, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%w: caller %q system principal purposes: %v", ErrInvalidConfiguration, serviceID, err)
 		}
+		if err := validateIdentityAudiences(permissions, caller.IdentityAudiences); err != nil {
+			return nil, err
+		}
 		registrations = append(registrations, ServiceCallerRegistration{
-			ServiceID: serviceID, Status: caller.Status, PublicKeyPEMByKID: keys,
+			IdentityAudiences: caller.IdentityAudiences,
+			ServiceID:         serviceID, Status: caller.Status, PublicKeyPEMByKID: keys,
 			Permissions: permissions, SystemPrincipalPurposes: purposes,
 		})
 	}

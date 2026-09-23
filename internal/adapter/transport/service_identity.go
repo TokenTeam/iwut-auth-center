@@ -18,6 +18,7 @@ import (
 
 const (
 	ServiceAuthorizationHeader          = "authorization"
+	PermissionIdentityIssue             = "auth.identity.issue"
 	PermissionScopeCatalogRead          = "auth.scope-catalog.read"
 	PermissionDeveloperStatusRead       = "auth.developer-status.read"
 	PermissionSystemPrincipalResolve    = "auth.system-principal.resolve"
@@ -37,6 +38,12 @@ type ServiceIdentity struct {
 	ServiceID               string
 	permissions             map[string]struct{}
 	systemPrincipalPurposes map[string]struct{}
+	identityAudiences       map[string]struct{}
+}
+
+func (identity ServiceIdentity) MayIssueIdentity(audience string) bool {
+	_, ok := identity.identityAudiences[audience]
+	return ok
 }
 
 func (identity ServiceIdentity) HasPermission(permission string) bool {
@@ -54,6 +61,7 @@ type registeredServiceCaller struct {
 	publicKeys              map[string]*rsa.PublicKey
 	permissions             map[string]struct{}
 	systemPrincipalPurposes map[string]struct{}
+	identityAudiences       map[string]struct{}
 }
 
 type ServiceIdentityVerifier struct {
@@ -88,7 +96,7 @@ func NewServiceIdentityVerifier(configuration config.Config) (*ServiceIdentityVe
 		permissions := make(map[string]struct{}, len(registration.Permissions))
 		for _, permission := range registration.Permissions {
 			switch permission {
-			case PermissionScopeCatalogRead, PermissionDeveloperStatusRead, PermissionSystemPrincipalResolve:
+			case PermissionIdentityIssue, PermissionScopeCatalogRead, PermissionDeveloperStatusRead, PermissionSystemPrincipalResolve:
 				permissions[permission] = struct{}{}
 			default:
 				return nil, fmt.Errorf("service identity verifier: unknown permission %q", permission)
@@ -101,8 +109,23 @@ func NewServiceIdentityVerifier(configuration config.Config) (*ServiceIdentityVe
 			}
 			purposes[purpose] = struct{}{}
 		}
+		audiences := map[string]struct{}{}
+		for _, a := range registration.IdentityAudiences {
+			if a != "iwut-auth-center" && a != "iwut-app-center" {
+				return nil, errors.New("service identity verifier: unknown identity audience")
+			}
+			if _, ok := audiences[a]; ok {
+				return nil, errors.New("service identity verifier: duplicate identity audience")
+			}
+			audiences[a] = struct{}{}
+		}
+		_, issue := permissions[PermissionIdentityIssue]
+		if issue != (len(audiences) > 0) {
+			return nil, errors.New("service identity verifier: issue permission requires audiences")
+		}
 		callers[registration.ServiceID] = registeredServiceCaller{
-			active: registration.Status == "ACTIVE", publicKeys: keys, permissions: permissions,
+			identityAudiences: audiences,
+			active:            registration.Status == "ACTIVE", publicKeys: keys, permissions: permissions,
 			systemPrincipalPurposes: purposes,
 		}
 	}
@@ -178,7 +201,7 @@ func (verifier *ServiceIdentityVerifier) Verify(token string) (ServiceIdentity, 
 	if now > *claims.Exp+skew || *claims.Nbf-skew > now || *claims.Iat > now+skew {
 		return ServiceIdentity{}, errServiceIdentityInvalid
 	}
-	return ServiceIdentity{ServiceID: *claims.Sub, permissions: caller.permissions, systemPrincipalPurposes: caller.systemPrincipalPurposes}, nil
+	return ServiceIdentity{ServiceID: *claims.Sub, permissions: caller.permissions, systemPrincipalPurposes: caller.systemPrincipalPurposes, identityAudiences: caller.identityAudiences}, nil
 }
 
 func parseServiceRSAPublicKey(data []byte) (*rsa.PublicKey, error) {

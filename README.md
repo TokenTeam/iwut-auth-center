@@ -52,7 +52,7 @@ owns external protocol mapping.
 - `cmd/auth-center/e2e_test.go` starts the real Wire-composed Kratos server and
   calls both APIs with generated gRPC clients against real MongoDB when
   `MONGODB_INTEGRATION_URI` is set. `make test-mongo` provisions that database.
-- Private keys are never accepted by Auth. Caller public keys, permissions and
+- Caller private keys are never accepted by Auth. Caller public keys, permissions and
   purpose allowlists come only from `AUTH_CENTER_SERVICE_CALLERS_B64`; token
   supplied key material or permissions are ignored/rejected.
 
@@ -91,7 +91,7 @@ Profile RPCs require `x-iwut-identity` with a trusted-user JWS for
 `RevokeCurrentSession` accepts only its `x-iwut-session` token and succeeds
 idempotently even when that correctly formatted token is expired or unknown.
 `RevokeOwnCredential` requires a currently valid Session in that header.
-Session-to-JWS issuance, Gateway routes, email recovery, device migration and
+Gateway routes, email recovery, device migration and
 mobile key storage/UI remain separate deliveries. These are app-managed device
 keys, not WebAuthn Passkeys.
 
@@ -133,3 +133,57 @@ Session/credential revocation → cold rotation → association reuse. Run
 `./scripts/test-mongo-integration.sh -race` for all database and provider tests.
 The script starts an isolated single-member replica set with fault injection
 enabled only in that test container and removes it on exit.
+
+## Session-to-user-identity issuance (UC010)
+
+`AUTH_IDENTITY_ISSUANCE_ENABLED=true` enables the internal native gRPC method
+`/auth_center.v1.user_identity.UserIdentityService/IssueUserIdentityFromSession`.
+It defaults to false and requires `AUTH_USER_ENDPOINTS_ENABLED=true`.
+The request carries only its exact destination `audience`; `authorization` must
+contain a registered service Bearer JWS, and `x-iwut-session` must contain exactly
+one canonical Session token. Neither credential can substitute for the other.
+There is no HTTP/gRPC-Web or terminal route for this method.
+
+Add `auth.identity.issue` and a nonempty unique `identityAudiences` array to the
+Gateway's caller registration. Allowed audiences are `iwut-auth-center` and
+`iwut-app-center`. Other service registrations omit this field and gain no new
+permission. An audience list without the permission is a startup error.
+
+| Variable | Meaning |
+| --- | --- |
+| `AUTH_USER_IDENTITY_SIGNING_KID` | Required signing kid, matching a configured local verifier public key |
+| `AUTH_USER_IDENTITY_PRIVATE_KEY_PEM_B64` | Required canonical standard Base64 of PKCS#1/PKCS#8 RSA private-key PEM, at least 2048 bits |
+| `AUTH_USER_IDENTITY_TTL` | Default `60s`; 1–300 whole seconds, no greater than the local verifier maxTTL |
+
+Issuer uses `AUTH_USER_IDENTITY_ISSUER`. Signing keys must differ from every
+registered service public key; comparison uses actual RSA public material, not
+kid labels. Provision the same accepted issuer/public key/maxTTL at each target.
+The Auth deployment validates its own verifier at startup; cross-service TTL/key
+alignment is a deployment contract, not automatic configuration discovery.
+Rotate by first adding the new public key at all consumers, then switching signer
+kid/private key. Keep the old public key through the longest issued lifetime,
+clock skew and in-flight window before removing it. Never log these secrets,
+Session tokens, request authentication metadata, or returned JWS.
+
+Each issue reads the current Session, credential and ACTIVE USER with capabilities
+inside the shared Mongo authentication transaction. Conditional record writes
+also conflict with direct capability/disable updates. RS256 signing runs inside
+that transaction and monotonic `lastUsedAt` commits only after signing succeeds.
+A candidate is returned only after confirmed commit and a fresh expiry check;
+unknown commit results fail closed and may require a fresh RPC. No token result
+is persisted or cached. A signed result authorized before revocation remains
+valid through its short lifetime and consumer clock skew.
+
+The Auth audience receives only `auth.reviewer.manage`; the App audience receives
+only `app.version.review` plus a valid existing Developer status, when present.
+These are intersections with current authoritative permissions, never grants.
+Ordinary users get `permissions: []` and no Developer claim. Session expiry bounds
+`exp`, so issuing never extends a Session. There is no Redis requirement.
+
+`cmd/auth-center/identity_issuance_e2e_test.go` covers real registration, production
+Wire/RSA service identity, native gRPC/Mongo issuance, real target profile
+verification, audience authorization and current capabilities/revocation. The
+Mongo integration suite additionally injects signer and unknown-commit failures
+and exercises concurrent capability/revocation writes. Tests log bounded local
+RSA and RPC/Mongo measurements; they are not production capacity estimates.
+Gateway routing and UC004 permission-management commands remain separate work.

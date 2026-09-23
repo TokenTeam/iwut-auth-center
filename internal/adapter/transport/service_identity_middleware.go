@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"errors"
+	identityv1 "iwut-auth-center/api/gen/go/auth_center/v1/user_identity"
 	"strings"
 
 	"github.com/go-kratos/kratos/v2/middleware"
@@ -61,6 +62,8 @@ func serviceIdentityMiddleware(verifier *ServiceIdentityVerifier) middleware.Mid
 
 func permissionForOperation(operation string) (string, bool) {
 	switch operation {
+	case identityv1.UserIdentityService_IssueUserIdentityFromSession_FullMethodName:
+		return PermissionIdentityIssue, true
 	case scopecatalogv1.ScopeCatalog_GetScopeCatalogSnapshot_FullMethodName:
 		return PermissionScopeCatalogRead, true
 	case developerstatusv1.DeveloperStatusDirectory_BatchGetDeveloperStatuses_FullMethodName:
@@ -79,6 +82,8 @@ func serviceIdentityError(err error, operation string) error {
 	if errors.Is(err, errServicePermissionDenied) {
 		reason := ReasonServicePermissionDenied
 		switch operation {
+		case identityv1.UserIdentityService_IssueUserIdentityFromSession_FullMethodName:
+			reason = ReasonIdentityIssuanceForbidden
 		case scopecatalogv1.ScopeCatalog_GetScopeCatalogSnapshot_FullMethodName:
 			reason = ReasonScopeCatalogReadForbidden
 		case developerstatusv1.DeveloperStatusDirectory_BatchGetDeveloperStatuses_FullMethodName:

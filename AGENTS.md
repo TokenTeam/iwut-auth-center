@@ -8,9 +8,9 @@ so. Authoritative design lives outside this repository at `../../docs/`.
 
 ## Current work package
 
-**UC-AUTH-005–009: user profile, device registration/login, Session and credential revocation.** Before changing behavior, read:
+**UC-AUTH-005–010: user profile, device registration/login, revocation and Session-to-JWS issuance.** Before changing behavior, read:
 
-1. The corresponding `../../docs/auth-center/briefs/UC-AUTH-005.md` through `UC-AUTH-009.md`.
+1. The corresponding `../../docs/auth-center/briefs/UC-AUTH-005.md` through `UC-AUTH-010.md`.
 2. `../../docs/platform/contracts/auth-device-session-v1.md` and its test vectors.
 3. `../../docs/platform/contracts/trusted-identity-v1.md` for profile user authentication.
 4. `../../docs/platform/contracts/trusted-service-identity-v1.md` for existing internal methods.
@@ -24,7 +24,9 @@ Scope:
 - Auth-owned MongoDB profile, credential, operation, Session and student association state;
 - real MongoDB replica-set transactions and real-listener E2E through generated clients.
 
-Gateway routes, Session-to-JWS issuance and mobile secure-storage/UI delivery remain
+UC010 additionally follows `../../docs/platform/contracts/auth-session-identity-issuance-v1.md`.
+
+Gateway routes and mobile secure-storage/UI delivery remain
 separate work packages. Backend verification must not claim their completion.
 
 ## Code boundaries

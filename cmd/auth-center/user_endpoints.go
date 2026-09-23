@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"iwut-auth-center/internal/adapter/identitysigner"
+	identityusecase "iwut-auth-center/internal/identity/usecase"
 	"time"
 
 	drivermongo "go.mongodb.org/mongo-driver/v2/mongo"
@@ -99,7 +101,24 @@ func provideUserEndpoints(configuration config.Config, database *drivermongo.Dat
 	if err != nil {
 		return nil, err
 	}
+	var issuance *transport.UserIdentityService
+	if c := configuration.IdentityIssuance; c != nil {
+		signer, err := identitysigner.New(c.Issuer, c.Kid, c.PrivateKey)
+		if err != nil {
+			return nil, err
+		}
+		repo, err := mongoadapter.NewIdentityRepository(repository)
+		if err != nil {
+			return nil, err
+		}
+		service, err := identityusecase.New(repo, signer, protocol, c.TTL)
+		if err != nil {
+			return nil, err
+		}
+		issuance = transport.NewUserIdentityService(service)
+	}
 	return &transport.UserEndpoints{
+		IdentityIssuance:              issuance,
 		Authentication:                authentication,
 		Profile:                       transport.NewUserProfileServer(profileusecase.NewProfileService(profileRepo, profileCatalog)),
 		ProfileIdentity:               transport.UserProfileIdentityMiddleware(profileIdentity),
