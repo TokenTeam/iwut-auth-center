@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	kratostransport "github.com/go-kratos/kratos/v2/transport"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 
@@ -31,6 +32,9 @@ func NewSessionRevocationHandler(revoker CurrentSessionRevoker) *SessionRevocati
 func (handler *SessionRevocationHandler) RevokeCurrentSession(ctx context.Context, _ *authenticationv1.RevokeCurrentSessionRequest) (*authenticationv1.SessionRevoked, error) {
 	md, _ := metadata.FromIncomingContext(ctx)
 	values := md.Get("x-iwut-session")
+	if tr, ok := kratostransport.FromServerContext(ctx); ok {
+		values = tr.RequestHeader().Values("x-iwut-session")
+	}
 	if len(values) != 1 {
 		return nil, transportStatus(codes.InvalidArgument, ReasonInvalidSessionToken, "session token is invalid")
 	}

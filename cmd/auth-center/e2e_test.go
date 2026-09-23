@@ -47,6 +47,8 @@ func TestE2E_UCAUTH001And002_RealProvidersOverRealGRPC(t *testing.T) {
 	address := reserveAddress(t)
 	configuration, err := config.Load(func(key string) (string, bool) {
 		switch key {
+		case config.HTTPAddrEnv:
+			return "127.0.0.1:0", true
 		case config.GRPCAddrEnv:
 			return address, true
 		case config.MongoURIEnv:

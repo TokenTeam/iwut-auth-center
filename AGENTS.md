@@ -19,7 +19,9 @@ Scope:
 
 - preserve caller-signed service JWS middleware and existing fixed RPC permission mapping;
 - select authentication by exact full method; no anonymous package wildcard;
-- native gRPC user profile and device authentication methods;
+- HTTP/JSON and native gRPC user profile and device authentication methods;
+- internal service methods remain native gRPC only; HTTP routing follows
+  `../../docs/platform/contracts/auth-center-api-routing.md`;
 - Kratos lifecycle and `github.com/goforj/wire` composition root;
 - Auth-owned MongoDB profile, credential, operation, Session and student association state;
 - real MongoDB replica-set transactions and real-listener E2E through generated clients.
@@ -41,7 +43,7 @@ internal/developer/domain/   principal/status business values
 internal/developer/usecase/  batch query orchestration
 internal/developer/port/     principal repository port
 internal/adapter/mongo/      Auth-owned MongoDB repository
-internal/adapter/transport/  Proto/gRPC conversion and Kratos server
+internal/adapter/transport/  Proto/HTTP/gRPC conversion and Kratos servers
 internal/config/             environment parsing and validation
 api/                        pinned independent API repository worktree
 ```

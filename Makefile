@@ -18,7 +18,7 @@ help:
 	@echo "  make wire-check    fail if wire_gen.go is stale"
 	@echo "  make api-check     fail if generated API code drifted from Proto"
 	@echo "  make check         run every local gate"
-	@echo "  make run           start the native gRPC server"
+	@echo "  make run           start the HTTP and native gRPC servers"
 
 .PHONY: generate
 generate:

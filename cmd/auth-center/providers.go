@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/go-kratos/kratos/v2"
-	kgrpc "github.com/go-kratos/kratos/v2/transport/grpc"
 	drivermongo "go.mongodb.org/mongo-driver/v2/mongo"
 
 	mongoadapter "iwut-auth-center/internal/adapter/mongo"
@@ -52,12 +51,12 @@ func provideMongoDatabase(client *drivermongo.Client, configuration config.Confi
 }
 
 func provideServerConfig(configuration config.Config, endpoints *transport.UserEndpoints) transport.ServerConfig {
-	return transport.ServerConfig{GRPCAddr: configuration.GRPCAddr, UserEndpoints: endpoints}
+	return transport.ServerConfig{HTTPAddr: configuration.HTTPAddr, GRPCAddr: configuration.GRPCAddr, UserEndpoints: endpoints}
 }
 
-func provideApp(server *kgrpc.Server) *kratos.App {
+func provideApp(servers *transport.Servers) *kratos.App {
 	return kratos.New(
 		kratos.Name("iwut-auth-center"),
-		kratos.Server(server),
+		kratos.Server(servers.HTTP, servers.GRPC),
 	)
 }

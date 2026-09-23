@@ -12,12 +12,14 @@ import (
 )
 
 const (
+	HTTPAddrEnv          = "AUTH_CENTER_HTTP_ADDR"
 	GRPCAddrEnv          = "AUTH_CENTER_GRPC_ADDR"
 	MongoURIEnv          = "AUTH_CENTER_MONGO_URI"
 	MongoDatabaseEnv     = "AUTH_CENTER_MONGO_DATABASE"
 	ServiceCallersEnv    = "AUTH_CENTER_SERVICE_CALLERS_B64"
 	ServiceMaxTTLEnv     = "AUTH_CENTER_SERVICE_IDENTITY_MAX_TTL"
 	ServiceClockSkewEnv  = "AUTH_CENTER_SERVICE_IDENTITY_CLOCK_SKEW"
+	DefaultHTTPAddr      = ":8000"
 	DefaultGRPCAddr      = ":9000"
 	DefaultMongoURI      = "mongodb://127.0.0.1:27017"
 	DefaultMongoDatabase = "iwut_auth_center"
@@ -32,6 +34,7 @@ type LookupEnv func(key string) (value string, found bool)
 type Config struct {
 	IdentityIssuance         *IdentityIssuance
 	UserEndpoints            *UserEndpoints
+	HTTPAddr                 string
 	GRPCAddr                 string
 	MongoURI                 string
 	MongoDatabase            string
@@ -74,6 +77,13 @@ func Load(lookup LookupEnv) (Config, error) {
 		address = strings.TrimSpace(raw)
 		if address == "" {
 			return Config{}, fmt.Errorf("%w: %s must not be empty when set", ErrInvalidConfiguration, GRPCAddrEnv)
+		}
+	}
+	httpAddress := DefaultHTTPAddr
+	if raw, found := lookup(HTTPAddrEnv); found {
+		httpAddress = strings.TrimSpace(raw)
+		if httpAddress == "" {
+			return Config{}, fmt.Errorf("%w: %s must not be empty when set", ErrInvalidConfiguration, HTTPAddrEnv)
 		}
 	}
 	mongoURI := DefaultMongoURI
@@ -123,7 +133,7 @@ func Load(lookup LookupEnv) (Config, error) {
 	return Config{
 		IdentityIssuance: issuance,
 		UserEndpoints:    userEndpoints,
-		GRPCAddr:         address, MongoURI: mongoURI, MongoDatabase: database,
+		HTTPAddr:         httpAddress, GRPCAddr: address, MongoURI: mongoURI, MongoDatabase: database,
 		ServiceCallers: callers, ServiceIdentityMaxTTL: maxTTL, ServiceIdentityClockSkew: clockSkew,
 	}, nil
 }

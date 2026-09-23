@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net"
 
+	khttp "github.com/go-kratos/kratos/v2/transport/http"
+
 	authv1 "iwut-auth-center/api/gen/go/auth_center/v1/authentication"
 	"iwut-auth-center/internal/authentication/domain"
 	"iwut-auth-center/internal/authentication/port"
@@ -55,6 +57,12 @@ func authenticationPeer(ctx context.Context) string {
 			return host
 		}
 		return p.Addr.String()
+	}
+	if request, ok := khttp.RequestFromServerContext(ctx); ok {
+		if host, _, err := net.SplitHostPort(request.RemoteAddr); err == nil {
+			return host
+		}
+		return request.RemoteAddr
 	}
 	return "unknown-network-peer"
 }

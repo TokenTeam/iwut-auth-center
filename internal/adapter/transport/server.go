@@ -18,6 +18,7 @@ import (
 )
 
 type ServerConfig struct {
+	HTTPAddr      string
 	GRPCAddr      string
 	UserEndpoints *UserEndpoints
 }

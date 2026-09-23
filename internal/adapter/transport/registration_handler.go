@@ -3,10 +3,8 @@ package transport
 import (
 	"context"
 	"errors"
-	"net"
 
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/peer"
 	"google.golang.org/protobuf/proto"
 	api "iwut-auth-center/api/gen/go/auth_center/v1/authentication"
 	auth "iwut-auth-center/internal/authentication/domain"
@@ -40,14 +38,7 @@ func (h *RegistrationHandler) BeginUserRegistration(ctx context.Context, in *api
 	if proto.Size(in) > h.maxMessageBytes {
 		return nil, registrationTransportError(port.ErrInputTooLarge)
 	}
-	source := "unknown"
-	if p, ok := peer.FromContext(ctx); ok && p.Addr != nil {
-		source = p.Addr.String()
-		if host, _, err := net.SplitHostPort(source); err == nil {
-			source = host
-		}
-	}
-	result, err := h.registration.Begin(ctx, in.CredentialProposal.ProtocolVersion, in.CredentialProposal.PublicKey, in.Association.SchemeVersion, in.Association.AssociationToken, source)
+	result, err := h.registration.Begin(ctx, in.CredentialProposal.ProtocolVersion, in.CredentialProposal.PublicKey, in.Association.SchemeVersion, in.Association.AssociationToken, authenticationPeer(ctx))
 	if err != nil {
 		return nil, registrationTransportError(err)
 	}

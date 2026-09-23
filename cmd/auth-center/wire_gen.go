@@ -61,12 +61,12 @@ func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 	}
 	resolveSystemPrincipalHandler := usecase3.NewResolveSystemPrincipalHandler(systemPrincipalRepository)
 	systemPrincipalService := transport.NewSystemPrincipalService(resolveSystemPrincipalHandler)
-	server, err := transport.NewGRPCServer(serverConfig, serviceIdentityVerifier, scopeCatalogService, developerStatusService, systemPrincipalService)
+	servers, err := transport.NewServers(serverConfig, serviceIdentityVerifier, scopeCatalogService, developerStatusService, systemPrincipalService)
 	if err != nil {
 		cleanup()
 		return nil, nil, err
 	}
-	app := provideApp(server)
+	app := provideApp(servers)
 	return app, func() {
 		cleanup()
 	}, nil

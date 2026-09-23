@@ -7,5 +7,5 @@ var ProviderSet = wire.NewSet(
 	NewDeveloperStatusService,
 	NewSystemPrincipalService,
 	NewServiceIdentityVerifier,
-	NewGRPCServer,
+	NewServers,
 )

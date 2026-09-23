@@ -9,7 +9,8 @@ The current catalog remains deliberately hard-coded. Developer and SYSTEM
 principals are read from Auth-owned MongoDB collection `auth_principals`.
 Internal business RPCs use caller-signed service JWS and a fixed permission
 allowlist. The optional UC005–009 user endpoints add profile editing, app-managed
-device registration/login, Session revocation and credential revocation. Their
+device registration/login, Session revocation and credential revocation over both
+HTTP/JSON and native gRPC. Their
 authentication is selected by exact full method, following
 `../../docs/platform/contracts/auth-device-session-v1.md`.
 
@@ -27,14 +28,15 @@ make test-mongo
 make run
 ```
 
-`make run` starts a native gRPC listener on `:9000` by default. There is no HTTP
-route and no gRPC-Web exposure in Auth Center; an eventual Gateway/Traefik edge
-owns external protocol mapping.
+`make run` starts HTTP on `:8000` and native gRPC on `:9000` by default.
+User HTTP routes require the user-endpoint switch below. Gateway/Traefik owns
+the public service prefix and gRPC-Web mapping.
 
 ## Environment
 
 | Variable | Required | Default | Meaning |
 | --- | --- | --- | --- |
+| `AUTH_CENTER_HTTP_ADDR` | no | `:8000` | HTTP listen address |
 | `AUTH_CENTER_GRPC_ADDR` | no | `:9000` | Native gRPC listen address |
 | `AUTH_CENTER_MONGO_URI` | no | `mongodb://127.0.0.1:27017` | MongoDB connection URI |
 | `AUTH_CENTER_MONGO_DATABASE` | no | `iwut_auth_center` | Auth-owned database name |
@@ -94,6 +96,50 @@ idempotently even when that correctly formatted token is expired or unknown.
 Gateway routes, email recovery, device migration and
 mobile key storage/UI remain separate deliveries. These are app-managed device
 keys, not WebAuthn Passkeys.
+
+## HTTP/JSON interface
+
+The Wire composition root starts both Kratos servers and reuses the same services
+and authentication dispatch. Set `AUTH_CENTER_HTTP_ADDR` (default `:8000`) and
+`AUTH_CENTER_GRPC_ADDR` (default `:9000`). `AUTH_USER_ENDPOINTS_ENABLED=false`
+leaves the HTTP user routes unregistered. Internal scope, developer, SYSTEM and
+Session-to-JWS APIs remain native gRPC only.
+
+The authoritative route mapping is [Auth API routing](../../docs/platform/contracts/auth-center-api-routing.md).
+Proto HTTP annotations use service-local `/v1/...` paths, like App Center;
+`/auth-center` belongs to Gateway prefix stripping and is not accepted by Auth.
+Gateway routing is a separate delivery.
+
+| Method | Service-local path | RPC |
+| --- | --- | --- |
+| POST | `/v1/registrations` | BeginUserRegistration |
+| POST | `/v1/registrations/{operation_id}/completion` | CompleteUserRegistration |
+| POST | `/v1/device-logins` | BeginDeviceLogin |
+| POST | `/v1/device-logins/{operation_id}/completion` | CompleteDeviceLogin |
+| DELETE | `/v1/sessions/current` | RevokeCurrentSession |
+| DELETE | `/v1/users/me/credentials/{credential_id}` | RevokeOwnCredential |
+| GET | `/v1/users/me/profile` | GetOwnProfile |
+| PATCH | `/v1/users/me/profile` | EditOwnProfile |
+| GET | `/v1/user-profile-schema` | GetProfileEditingSchema |
+
+POST/PATCH require `Content-Type: application/json` and standard ProtoJSON:
+`bytes` use Base64, `int64` output uses decimal strings, timestamps use RFC3339.
+For example, editing uses `{"expectedRevision":"1","set":[{"key":"field.key","value":{"stringValue":"value"}}]}`.
+Completion operation IDs and credential IDs come from the path. The existing
+`x-iwut-session` / `x-iwut-identity` rules apply equally to HTTP headers.
+Query parameters and GET/DELETE bodies are rejected. Compressed request bodies
+are unsupported. Input rejects unknown/duplicate fields and conflicting oneof
+values; body reads are bounded before allocation. Authentication bodies default
+to 16 KiB; profile edits allow 128 KiB. Business capacity checks still apply.
+All responses carry `Cache-Control: no-store`; registration/login completion
+return 201, other successes return 200 (revocation returns `{}`). Error JSON
+preserves the same stable reason as gRPC, with UC-specific 400/401/403/404/409/
+413/429/503 status mapping. Parser errors never echo raw submitted values.
+
+`cmd/auth-center/http_e2e_test.go` runs against the real Wire process and MongoDB,
+covering the nine routes, generated HTTP clients, strict JSON, Session headers,
+profile CAS, revocation retries, and isolation of internal methods. The existing
+gRPC provider tests exercise the same running composition root.
 
 ## Cold key rotation and storage
 

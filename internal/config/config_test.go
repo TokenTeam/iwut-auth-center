@@ -105,3 +105,30 @@ func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadHTTPAddress(t *testing.T) {
+	for _, tc := range []struct {
+		value   string
+		set     bool
+		want    string
+		invalid bool
+	}{
+		{want: DefaultHTTPAddr}, {value: " 127.0.0.1:18000 ", set: true, want: "127.0.0.1:18000"}, {value: " ", set: true, invalid: true},
+	} {
+		c, err := Load(withRequiredServiceCallers(func(key string) (string, bool) {
+			if key == HTTPAddrEnv {
+				return tc.value, tc.set
+			}
+			return "", false
+		}))
+		if tc.invalid {
+			if !errors.Is(err, ErrInvalidConfiguration) {
+				t.Fatalf("expected invalid HTTP address: %v", err)
+			}
+			continue
+		}
+		if err != nil || c.HTTPAddr != tc.want {
+			t.Fatalf("HTTP address: %q, %v", c.HTTPAddr, err)
+		}
+	}
+}

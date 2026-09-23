@@ -63,7 +63,7 @@ func TestE2E_UserEndpoints_ProductionWireAndColdRotation(t *testing.T) {
 	}
 	keysJSON, _ := json.Marshal(map[string]string{"test": keyFile})
 	dbName := fmt.Sprintf("iwut_user_wire_%d", time.Now().UnixNano())
-	env := map[string]string{config.UserEndpointsEnabledEnv: "true", config.MongoURIEnv: uri, config.MongoDatabaseEnv: dbName, config.ServiceCallersEnv: callers, config.GRPCAddrEnv: reserveAddress(t), "AUTH_AUTHENTICATION_SERVICE_ID": "iwut-auth-center:test", "AUTH_SESSION_TTL": "24h", "AUTH_ASSOC_KEY_VERSION": "v1", "AUTH_PROFILE_CATALOG_FILE": catalogFile, "AUTH_USER_IDENTITY_ISSUER": "test-auth-issuer", "AUTH_USER_IDENTITY_PUBLIC_KEYS_JSON": string(keysJSON)}
+	env := map[string]string{config.UserEndpointsEnabledEnv: "true", config.MongoURIEnv: uri, config.MongoDatabaseEnv: dbName, config.ServiceCallersEnv: callers, config.HTTPAddrEnv: reserveAddress(t), config.GRPCAddrEnv: reserveAddress(t), "AUTH_AUTHENTICATION_SERVICE_ID": "iwut-auth-center:test", "AUTH_SESSION_TTL": "24h", "AUTH_ASSOC_KEY_VERSION": "v1", "AUTH_PROFILE_CATALOG_FILE": catalogFile, "AUTH_USER_IDENTITY_ISSUER": "test-auth-issuer", "AUTH_USER_IDENTITY_PUBLIC_KEYS_JSON": string(keysJSON)}
 	setKeys := func(version string, enc, lookup byte) {
 		env["AUTH_ASSOC_KEY_VERSION"] = version
 		env["AUTH_ASSOC_ENCRYPT_KEY"] = base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{enc}, 32))
@@ -214,6 +214,7 @@ func TestE2E_UserEndpoints_ProductionWireAndColdRotation(t *testing.T) {
 	if err != nil || count != 2 {
 		t.Fatalf("association members: %d %v", count, err)
 	}
+	runHTTPUserFlow(t, "http://"+env[config.HTTPAddrEnv], identityKey)
 	currentStop()
 	setKeys("v2", 5, 6)
 	if _, unexpectedCleanup, err := wireApp(load()); err == nil {
