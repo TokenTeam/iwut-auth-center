@@ -3,7 +3,7 @@ package transport
 import (
 	"context"
 
-	developerstatusv1 "iwut-auth-center/api/gen/go/auth_center/v1/developer_status"
+	developerstatusv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_status"
 	"iwut-auth-center/internal/developer/domain"
 	developerusecase "iwut-auth-center/internal/developer/usecase"
 )

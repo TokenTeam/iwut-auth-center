@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 
-	authenticationv1 "iwut-auth-center/api/gen/go/auth_center/v1/authentication"
+	authenticationv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 	"iwut-auth-center/internal/authentication/port"
 )
 

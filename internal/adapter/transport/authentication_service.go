@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	authv1 "iwut-auth-center/api/gen/go/auth_center/v1/authentication"
+	authv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 )
 
 // These interfaces keep the RPC facade independent from the implementation

@@ -3,9 +3,9 @@ package transport
 import (
 	"context"
 	"errors"
+	identityv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/identity"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
-	identityv1 "iwut-auth-center/api/gen/go/auth_center/v1/identity"
 	"iwut-auth-center/internal/identity/domain"
 	"iwut-auth-center/internal/identity/usecase"
 )

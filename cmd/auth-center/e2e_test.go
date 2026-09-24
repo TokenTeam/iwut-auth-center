@@ -25,9 +25,9 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	developerstatusv1 "iwut-auth-center/api/gen/go/auth_center/v1/developer_status"
-	scopecatalogv1 "iwut-auth-center/api/gen/go/auth_center/v1/scope_catalog"
-	systemprincipalv1 "iwut-auth-center/api/gen/go/auth_center/v1/system_principal"
+	developerstatusv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_status"
+	scopecatalogv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/scope_catalog"
+	systemprincipalv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/system_principal"
 	"iwut-auth-center/internal/adapter/catalog"
 	mongoadapter "iwut-auth-center/internal/adapter/mongo"
 	"iwut-auth-center/internal/config"

@@ -11,8 +11,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	developerstatusv1 "iwut-auth-center/api/gen/go/auth_center/v1/developer_status"
-	scopecatalogv1 "iwut-auth-center/api/gen/go/auth_center/v1/scope_catalog"
+	developerstatusv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_status"
+	scopecatalogv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/scope_catalog"
 	developerdomain "iwut-auth-center/internal/developer/domain"
 	developerport "iwut-auth-center/internal/developer/port"
 	developerusecase "iwut-auth-center/internal/developer/usecase"

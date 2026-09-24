@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	api "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	drivermongo "go.mongodb.org/mongo-driver/v2/mongo"
@@ -21,7 +22,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
-	api "iwut-auth-center/api/gen/go/auth_center/v1/authentication"
 	"iwut-auth-center/internal/adapter/associationcrypto"
 	"iwut-auth-center/internal/adapter/deviceprotocol"
 	mongoadapter "iwut-auth-center/internal/adapter/mongo"

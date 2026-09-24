@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"fmt"
+	pb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/user_profile"
 	kgrpc "github.com/go-kratos/kratos/v2/transport/grpc"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"google.golang.org/grpc"
@@ -10,7 +11,6 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	pb "iwut-auth-center/api/gen/go/auth_center/v1/user_profile"
 	"iwut-auth-center/internal/adapter/catalog"
 	ma "iwut-auth-center/internal/adapter/mongo"
 	"iwut-auth-center/internal/config"

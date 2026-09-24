@@ -7,7 +7,7 @@ import (
 
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 
-	authv1 "iwut-auth-center/api/gen/go/auth_center/v1/authentication"
+	authv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 	"iwut-auth-center/internal/authentication/domain"
 	"iwut-auth-center/internal/authentication/port"
 	"iwut-auth-center/internal/authentication/usecase"

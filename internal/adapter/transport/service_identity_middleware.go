@@ -3,16 +3,16 @@ package transport
 import (
 	"context"
 	"errors"
-	identityv1 "iwut-auth-center/api/gen/go/auth_center/v1/identity"
+	identityv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/identity"
 	"strings"
 
 	"github.com/go-kratos/kratos/v2/middleware"
 	kratostransport "github.com/go-kratos/kratos/v2/transport"
 	"google.golang.org/grpc/codes"
 
-	developerstatusv1 "iwut-auth-center/api/gen/go/auth_center/v1/developer_status"
-	scopecatalogv1 "iwut-auth-center/api/gen/go/auth_center/v1/scope_catalog"
-	systemprincipalv1 "iwut-auth-center/api/gen/go/auth_center/v1/system_principal"
+	developerstatusv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_status"
+	scopecatalogv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/scope_catalog"
+	systemprincipalv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/system_principal"
 )
 
 type serviceIdentityContextKey struct{}

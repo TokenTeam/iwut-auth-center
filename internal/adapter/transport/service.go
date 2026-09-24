@@ -6,7 +6,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	scopecatalogv1 "iwut-auth-center/api/gen/go/auth_center/v1/scope_catalog"
+	scopecatalogv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/scope_catalog"
 	"iwut-auth-center/internal/scope/domain"
 )
 

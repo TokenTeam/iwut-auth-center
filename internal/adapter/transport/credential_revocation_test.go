@@ -15,7 +15,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	authv1 "iwut-auth-center/api/gen/go/auth_center/v1/authentication"
+	authv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 	"iwut-auth-center/internal/authentication/domain"
 	"iwut-auth-center/internal/authentication/port"
 	"iwut-auth-center/internal/authentication/usecase"

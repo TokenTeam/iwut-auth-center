@@ -1,9 +1,9 @@
 package transport
 
 import (
+	pb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/user_profile"
 	"google.golang.org/grpc/encoding"
 	"google.golang.org/protobuf/encoding/protowire"
-	pb "iwut-auth-center/api/gen/go/auth_center/v1/user_profile"
 	"iwut-auth-center/internal/profile/domain"
 )
 

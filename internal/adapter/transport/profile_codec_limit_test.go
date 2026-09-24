@@ -1,7 +1,7 @@
 package transport
 
 import (
-	pb "iwut-auth-center/api/gen/go/auth_center/v1/user_profile"
+	pb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/user_profile"
 	"iwut-auth-center/internal/profile/domain"
 	"testing"
 )

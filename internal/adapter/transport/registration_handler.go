@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 
+	api "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/proto"
-	api "iwut-auth-center/api/gen/go/auth_center/v1/authentication"
 	auth "iwut-auth-center/internal/authentication/domain"
 	"iwut-auth-center/internal/registration/port"
 )

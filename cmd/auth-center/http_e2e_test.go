@@ -14,12 +14,12 @@ import (
 	"testing"
 	"time"
 
+	authv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
+	profilev1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/user_profile"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
-	authv1 "iwut-auth-center/api/gen/go/auth_center/v1/authentication"
-	profilev1 "iwut-auth-center/api/gen/go/auth_center/v1/user_profile"
 	"iwut-auth-center/internal/adapter/deviceprotocol"
 	authdomain "iwut-auth-center/internal/authentication/domain"
 )

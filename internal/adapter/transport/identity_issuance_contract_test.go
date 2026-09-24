@@ -1,7 +1,7 @@
 package transport
 
 import (
-	identityv1 "iwut-auth-center/api/gen/go/auth_center/v1/identity"
+	identityv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/identity"
 	"testing"
 )
 

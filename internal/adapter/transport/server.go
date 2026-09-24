@@ -17,12 +17,12 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
-	authv1 "iwut-auth-center/api/gen/go/auth_center/v1/authentication"
-	developerstatusv1 "iwut-auth-center/api/gen/go/auth_center/v1/developer_status"
-	identityv1 "iwut-auth-center/api/gen/go/auth_center/v1/identity"
-	scopecatalogv1 "iwut-auth-center/api/gen/go/auth_center/v1/scope_catalog"
-	systemprincipalv1 "iwut-auth-center/api/gen/go/auth_center/v1/system_principal"
-	profilev1 "iwut-auth-center/api/gen/go/auth_center/v1/user_profile"
+	authv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
+	developerstatusv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_status"
+	identityv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/identity"
+	scopecatalogv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/scope_catalog"
+	systemprincipalv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/system_principal"
+	profilev1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/user_profile"
 	profiledomain "iwut-auth-center/internal/profile/domain"
 )
 

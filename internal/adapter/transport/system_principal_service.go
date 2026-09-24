@@ -6,7 +6,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 
-	systemprincipalv1 "iwut-auth-center/api/gen/go/auth_center/v1/system_principal"
+	systemprincipalv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/system_principal"
 	"iwut-auth-center/internal/systemprincipal/domain"
 	"iwut-auth-center/internal/systemprincipal/port"
 	"iwut-auth-center/internal/systemprincipal/usecase"

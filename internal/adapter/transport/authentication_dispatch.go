@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/proto"
 
-	authv1 "iwut-auth-center/api/gen/go/auth_center/v1/authentication"
+	authv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 )
 
 // A nil user middleware fails closed. It never falls back to service identity

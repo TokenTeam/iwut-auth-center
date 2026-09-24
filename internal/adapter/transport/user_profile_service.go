@@ -3,10 +3,10 @@ package transport
 import (
 	"context"
 	"errors"
+	pb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/user_profile"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/types/known/timestamppb"
-	pb "iwut-auth-center/api/gen/go/auth_center/v1/user_profile"
 	"iwut-auth-center/internal/profile/domain"
 	"iwut-auth-center/internal/profile/usecase"
 )

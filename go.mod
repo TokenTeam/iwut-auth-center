@@ -6,19 +6,20 @@ require (
 	github.com/go-kratos/kratos/v2 v2.9.2
 	github.com/goforj/wire v1.2.0
 	go.mongodb.org/mongo-driver/v2 v2.8.2
-	google.golang.org/genproto/googleapis/api v0.0.0-20240318140521-94a12d6c2237
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240318140521-94a12d6c2237
 	google.golang.org/grpc v1.64.0
 	google.golang.org/protobuf v1.36.12
 )
 
+require google.golang.org/genproto/googleapis/api v0.0.0-20240318140521-94a12d6c2237 // indirect
+
 require (
+	github.com/TokenTeam/iwut-api-proto v0.0.0-20260923061622-ef8957505d98
 	github.com/go-kratos/aegis v0.2.0 // indirect
 	github.com/go-playground/form/v4 v4.2.0 // indirect
-	github.com/google/uuid v1.6.0 // indirect
+	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1 // indirect
 	github.com/klauspost/compress v1.17.6 // indirect
-	github.com/kr/text v0.2.0 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
 	github.com/xdg-go/scram v1.2.0 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect
@@ -30,3 +31,5 @@ require (
 	golang.org/x/text v0.22.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/TokenTeam/iwut-api-proto => ./api
