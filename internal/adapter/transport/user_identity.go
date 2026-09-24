@@ -77,34 +77,44 @@ func strictJSONObject(data []byte, target any) error {
 	}
 	return json.Unmarshal(data, target)
 }
+
+type verifiedUser struct {
+	AuthID      string
+	Permissions []string
+}
+
 func (v *UserIdentityVerifier) Verify(token string) (string, error) {
+	identity, err := v.verifyIdentity(token)
+	return identity.AuthID, err
+}
+func (v *UserIdentityVerifier) verifyIdentity(token string) (verifiedUser, error) {
 	invalid := errors.New("invalid user identity")
 	if v == nil || len(token) > 16384 {
-		return "", invalid
+		return verifiedUser{}, invalid
 	}
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return "", invalid
+		return verifiedUser{}, invalid
 	}
 	decoded := make([][]byte, 3)
 	for i, p := range parts {
 		b, e := base64.RawURLEncoding.Strict().DecodeString(p)
 		if e != nil || p == "" || base64.RawURLEncoding.EncodeToString(b) != p {
-			return "", invalid
+			return verifiedUser{}, invalid
 		}
 		decoded[i] = b
 	}
 	var h serviceJOSEHeader
 	if strictJSONObject(decoded[0], &h) != nil || h.Alg != "RS256" || h.Typ != "JWT" || h.Kid == "" {
-		return "", invalid
+		return verifiedUser{}, invalid
 	}
 	key := v.keys[h.Kid]
 	if key == nil {
-		return "", invalid
+		return verifiedUser{}, invalid
 	}
 	digest := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
 	if rsa.VerifyPKCS1v15(key, crypto.SHA256, digest[:], decoded[2]) != nil {
-		return "", invalid
+		return verifiedUser{}, invalid
 	}
 	var claims struct {
 		Iss             *string         `json:"iss"`
@@ -118,28 +128,28 @@ func (v *UserIdentityVerifier) Verify(token string) (string, error) {
 		Permissions     json.RawMessage `json:"permissions"`
 	}
 	if strictJSONObject(decoded[1], &claims) != nil || claims.Iss == nil || *claims.Iss != v.issuer || claims.Sub == nil || *claims.Sub == "" || claims.Jti == nil || *claims.Jti == "" || claims.Iat == nil || claims.Nbf == nil || claims.Exp == nil || !userAudienceContains(claims.Aud, "iwut-auth-center") {
-		return "", invalid
+		return verifiedUser{}, invalid
 	}
 	if claims.DeveloperStatus != nil {
 		var status string
 		if json.Unmarshal(claims.DeveloperStatus, &status) != nil {
-			return "", invalid
+			return verifiedUser{}, invalid
 		}
 		switch status {
 		case "PENDING", "APPROVED", "REJECTED", "SUSPENDED":
 		default:
-			return "", invalid
+			return verifiedUser{}, invalid
 		}
 	}
+	var permissions []string
 	if claims.Permissions != nil {
-		var permissions []string
 		if bytes.Equal(claims.Permissions, []byte("null")) || json.Unmarshal(claims.Permissions, &permissions) != nil {
-			return "", invalid
+			return verifiedUser{}, invalid
 		}
 		seen := map[string]bool{}
 		for _, p := range permissions {
 			if p == "" || p != strings.TrimSpace(p) || seen[p] {
-				return "", invalid
+				return verifiedUser{}, invalid
 			}
 			seen[p] = true
 		}
@@ -147,9 +157,9 @@ func (v *UserIdentityVerifier) Verify(token string) (string, error) {
 	now := float64(v.now().Unix())
 	skew := v.skew.Seconds()
 	if *claims.Exp <= *claims.Iat || *claims.Exp <= *claims.Nbf || *claims.Exp-*claims.Iat > v.maxTTL.Seconds() || now > *claims.Exp+skew || *claims.Nbf-skew > now || *claims.Iat > now+skew {
-		return "", invalid
+		return verifiedUser{}, invalid
 	}
-	return *claims.Sub, nil
+	return verifiedUser{AuthID: *claims.Sub, Permissions: permissions}, nil
 }
 
 func userAudienceContains(raw json.RawMessage, want string) bool {

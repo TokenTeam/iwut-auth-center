@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 
 	"iwut-auth-center/internal/config"
 )
@@ -14,6 +15,12 @@ func main() {
 }
 
 func run() error {
+	if len(os.Args) > 1 {
+		if os.Args[1] == "bootstrap-platform-admin" {
+			return bootstrapPlatformAdmin(os.Args[2:], os.Stdout)
+		}
+		return fmt.Errorf("unknown command")
+	}
 	configuration, err := config.LoadFromEnvironment()
 	if err != nil {
 		return fmt.Errorf("load configuration: %w", err)

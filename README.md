@@ -233,3 +233,47 @@ Mongo integration suite additionally injects signer and unknown-commit failures
 and exercises concurrent capability/revocation writes. Tests log bounded local
 RSA and RPC/Mongo measurements; they are not production capacity estimates.
 Gateway routing and UC004 permission-management commands remain separate work.
+
+## Reviewer permission management (UC-AUTH-004)
+
+User endpoint runtime also registers `ReviewerPermissionService` in both native
+gRPC and HTTP. Gateway uses SESSION policy with `iwut-auth-center` audience:
+
+- `GET /v1/users/{subject_auth_id}/reviewer-permission` reads the current state.
+- `PUT /v1/users/{subject_auth_id}/reviewer-permission` accepts `action` (`1` grant,
+  `2` revoke), positive `expectedRevision`, and a reason (trimmed, 1–1024 UTF-8
+  bytes). The path owns the subject ID. Both return `subjectAuthId`, `reviewer`,
+  and `permissionRevision` (ProtoJSON decimal string).
+
+A verified user JWS must contain `auth.reviewer.manage`; both operations also
+confirm the actor's current ACTIVE USER state and current grant in Mongo. Only
+ACTIVE USER subjects are eligible. Repeated actions and stale revisions return
+409; query current state after an uncertain response before deciding to retry.
+Permissions preserve unrelated capabilities and are unique and sorted. Mongo
+transactions atomically update the principal and insert an immutable audit event
+into `auth_permission_audit_events`. There is no audit update/delete API. Database
+operator privileges and backup retention remain deployment responsibilities.
+
+Provision the first administrator explicitly, after registering that user:
+
+```sh
+AUTH_CENTER_MONGO_URI='mongodb://127.0.0.1:27017/?replicaSet=rs0' \
+AUTH_CENTER_MONGO_DATABASE='iwut_auth_center' \
+go run ./cmd/auth-center bootstrap-platform-admin --auth-id '<existing-auth-id>'
+```
+
+The command requires only Mongo configuration and does not open listeners or load
+service/profile/signing configuration. JSON output contains `authId` and `applied`.
+A durable global marker permits a same-subject replay with `applied:false`, without
+restoring a later-revoked grant; another subject is rejected. Bootstrap grants only
+`auth.reviewer.manage`, never reviewer authority. Audit attribution uses
+`actorType:BOOTSTRAP_COMMAND` with no fabricated `actorAuthId`; ordinary management
+uses `actorType:USER` and the verified administrator ID. No generic administrator
+management API is provided here.
+
+All changes join the same Mongo transaction fence as Session-to-JWS issuance.
+Signing begun after a committed revoke sees the new permissions; existing JWSs
+continue to their natural expiry. Unknown commit outcomes never return a success
+result. Real Mongo tests cover rollback on audit failure, concurrent CAS, durable
+bootstrap and issuance synchronization; production Wire tests exercise native
+gRPC and HTTP plus real cryptographic identity issuance.

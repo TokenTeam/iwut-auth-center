@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"iwut-auth-center/internal/adapter/identitysigner"
 	identityusecase "iwut-auth-center/internal/identity/usecase"
+	reviewerusecase "iwut-auth-center/internal/reviewer/usecase"
 	"time"
 
 	drivermongo "go.mongodb.org/mongo-driver/v2/mongo"
@@ -67,6 +68,9 @@ func provideUserEndpoints(configuration config.Config, database *drivermongo.Dat
 	if err := mongoadapter.EnsureAuthenticationSchema(ctx, database); err != nil {
 		return nil, fmt.Errorf("ensure authentication schema: %w", err)
 	}
+	if err := mongoadapter.EnsureReviewerSchema(ctx, database); err != nil {
+		return nil, err
+	}
 	if err := repository.WithAuthTransaction(ctx, func(context.Context) error { return nil }); err != nil {
 		return nil, fmt.Errorf("verify Mongo transaction support: %w", err)
 	}
@@ -117,11 +121,16 @@ func provideUserEndpoints(configuration config.Config, database *drivermongo.Dat
 		}
 		issuance = transport.NewUserIdentityService(service)
 	}
+	reviewerRepo, err := mongoadapter.NewReviewerRepository(repository)
+	if err != nil {
+		return nil, err
+	}
 	return &transport.UserEndpoints{
+		Reviewer:                      transport.NewReviewerPermissionService(reviewerusecase.New(reviewerRepo)),
 		IdentityIssuance:              issuance,
 		Authentication:                authentication,
 		Profile:                       transport.NewUserProfileServer(profileusecase.NewProfileService(profileRepo, profileCatalog)),
-		ProfileIdentity:               transport.UserProfileIdentityMiddleware(profileIdentity),
+		ProfileIdentity:               transport.UserCapabilityIdentityMiddleware(profileIdentity),
 		SessionIdentity:               transport.UserSessionMiddleware(login),
 		MaxAuthenticationMessageBytes: c.Authentication.MaxMessageBytes,
 	}, nil

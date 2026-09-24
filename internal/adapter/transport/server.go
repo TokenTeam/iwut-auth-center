@@ -20,6 +20,7 @@ import (
 	authv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 	developerstatusv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_status"
 	identityv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/identity"
+	reviewerpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/reviewer_permission"
 	scopecatalogv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/scope_catalog"
 	systemprincipalv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/system_principal"
 	profilev1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/user_profile"
@@ -34,6 +35,7 @@ type ServerConfig struct {
 
 // UserEndpoints is an optional, fully validated runtime assembled before listening.
 type UserEndpoints struct {
+	Reviewer                      *ReviewerPermissionService
 	IdentityIssuance              *UserIdentityService
 	Authentication                *AuthenticationService
 	Profile                       *UserProfileServer
@@ -108,6 +110,9 @@ func newGRPCServer(
 	if endpoints := configuration.UserEndpoints; endpoints != nil {
 		authv1.RegisterAuthenticationServiceServer(server, endpoints.Authentication)
 		profilev1.RegisterUserProfileServiceServer(server, endpoints.Profile)
+		if endpoints.Reviewer != nil {
+			reviewerpb.RegisterReviewerPermissionServiceServer(server, endpoints.Reviewer)
+		}
 		if endpoints.IdentityIssuance != nil {
 			identityv1.RegisterUserIdentityServiceServer(server, endpoints.IdentityIssuance)
 		}
@@ -138,6 +143,9 @@ func newHTTPServer(configuration ServerConfig, verifier *ServiceIdentityVerifier
 	if endpoints != nil {
 		authv1.RegisterAuthenticationServiceHTTPServer(server, endpoints.Authentication)
 		profilev1.RegisterUserProfileServiceHTTPServer(server, endpoints.Profile)
+		if endpoints.Reviewer != nil {
+			reviewerpb.RegisterReviewerPermissionServiceHTTPServer(server, endpoints.Reviewer)
+		}
 	}
 	return server
 }
@@ -210,6 +218,8 @@ func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 func invalidHTTPInput(r *http.Request) error {
 	reason := "INVALID_LOGIN_INPUT"
 	switch {
+	case strings.HasSuffix(r.URL.Path, "/reviewer-permission"):
+		reason = "INVALID_REVIEWER_PERMISSION_INPUT"
 	case strings.HasPrefix(r.URL.Path, "/v1/registrations"):
 		reason = "INVALID_REGISTRATION_INPUT"
 	case r.URL.Path == "/v1/users/me/profile" || r.URL.Path == "/v1/user-profile-schema":

@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	authv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
+	reviewerpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/reviewer_permission"
 )
 
 // A nil user middleware fails closed. It never falls back to service identity
@@ -48,7 +49,9 @@ func userEndpointAuthenticationMiddleware(service *ServiceIdentityVerifier, prof
 				return session(handler)(ctx, request)
 			case "/auth_center.v1.user_profile.UserProfileService/EditOwnProfile",
 				"/auth_center.v1.user_profile.UserProfileService/GetOwnProfile",
-				"/auth_center.v1.user_profile.UserProfileService/GetProfileEditingSchema":
+				"/auth_center.v1.user_profile.UserProfileService/GetProfileEditingSchema",
+				reviewerpb.ReviewerPermissionService_ManageReviewerPermission_FullMethodName,
+				reviewerpb.ReviewerPermissionService_GetReviewerPermission_FullMethodName:
 				if profile == nil {
 					return nil, transportStatus(codes.Unauthenticated, "USER_IDENTITY_REQUIRED", "user identity is required")
 				}

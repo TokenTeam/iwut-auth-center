@@ -8,9 +8,9 @@ so. Authoritative design lives outside this repository at `../../docs/`.
 
 ## Current work package
 
-**UC-AUTH-005–010: user profile, device registration/login, revocation and Session-to-JWS issuance.** Before changing behavior, read:
+**UC-AUTH-004–010: reviewer administration, user profile, device registration/login, revocation and Session-to-JWS issuance.** Before changing behavior, read:
 
-1. The corresponding `../../docs/auth-center/briefs/UC-AUTH-005.md` through `UC-AUTH-010.md`.
+1. `../../docs/auth-center/briefs/UC-AUTH-004.md` and the corresponding `../../docs/auth-center/briefs/UC-AUTH-005.md` through `UC-AUTH-010.md`.
 2. `../../docs/platform/contracts/auth-device-session-v1.md` and its test vectors.
 3. `../../docs/platform/contracts/trusted-identity-v1.md` for profile user authentication.
 4. `../../docs/platform/contracts/trusted-service-identity-v1.md` for existing internal methods.
@@ -67,3 +67,7 @@ composition root.
 
 Do not push. Keep API and Auth commits local until the user chooses a
 publication batch.
+
+UC004 reviewer mutations and bootstrap must use the shared authentication transaction
+fence. Audit insertion and permissions CAS commit together. Bootstrap is an explicit
+database-only command with a durable global consumed marker, never a startup grant.
