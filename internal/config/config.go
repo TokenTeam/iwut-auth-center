@@ -32,6 +32,7 @@ var ErrInvalidConfiguration = errors.New("invalid auth center configuration")
 type LookupEnv func(key string) (value string, found bool)
 
 type Config struct {
+	EmailBinding             *EmailBinding
 	IdentityIssuance         *IdentityIssuance
 	UserEndpoints            *UserEndpoints
 	HTTPAddr                 string
@@ -126,11 +127,16 @@ func Load(lookup LookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	emailBinding, err := loadEmailBinding(lookup, userEndpoints)
+	if err != nil {
+		return Config{}, err
+	}
 	issuance, err := loadIdentityIssuance(lookup, userEndpoints, callers)
 	if err != nil {
 		return Config{}, err
 	}
 	return Config{
+		EmailBinding:     emailBinding,
 		IdentityIssuance: issuance,
 		UserEndpoints:    userEndpoints,
 		HTTPAddr:         httpAddress, GRPCAddr: address, MongoURI: mongoURI, MongoDatabase: database,

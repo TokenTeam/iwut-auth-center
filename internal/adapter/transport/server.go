@@ -19,6 +19,7 @@ import (
 
 	authv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 	developerstatusv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_status"
+	emailv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_binding"
 	identityv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/identity"
 	reviewerpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/reviewer_permission"
 	scopecatalogv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/scope_catalog"
@@ -35,6 +36,7 @@ type ServerConfig struct {
 
 // UserEndpoints is an optional, fully validated runtime assembled before listening.
 type UserEndpoints struct {
+	EmailBinding                  *EmailBindingService
 	Reviewer                      *ReviewerPermissionService
 	IdentityIssuance              *UserIdentityService
 	Authentication                *AuthenticationService
@@ -104,9 +106,14 @@ func newGRPCServer(
 			kgrpc.Options(grpc.ForceServerCodec(NewProfileStrictCodec()), grpc.MaxRecvMsgSize(max(profiledomain.MaxMessageBytes, endpoints.MaxAuthenticationMessageBytes))),
 		)
 	} else {
-		options = append(options, kgrpc.Middleware(serviceIdentityMiddleware(verifier)))
+		options = append(options, kgrpc.Middleware(userEndpointAuthenticationMiddleware(verifier, nil, nil, false)))
 	}
 	server := kgrpc.NewServer(options...)
+	emailService := NewEmailBindingService(nil)
+	if endpoints := configuration.UserEndpoints; endpoints != nil && endpoints.EmailBinding != nil {
+		emailService = endpoints.EmailBinding
+	}
+	emailv1.RegisterEmailBindingServiceServer(server, emailService)
 	if endpoints := configuration.UserEndpoints; endpoints != nil {
 		authv1.RegisterAuthenticationServiceServer(server, endpoints.Authentication)
 		profilev1.RegisterUserProfileServiceServer(server, endpoints.Profile)
@@ -141,6 +148,9 @@ func newHTTPServer(configuration ServerConfig, verifier *ServiceIdentityVerifier
 	}
 	server := khttp.NewServer(options...)
 	if endpoints != nil {
+		if endpoints.EmailBinding != nil {
+			emailv1.RegisterEmailBindingServiceHTTPServer(server, endpoints.EmailBinding)
+		}
 		authv1.RegisterAuthenticationServiceHTTPServer(server, endpoints.Authentication)
 		profilev1.RegisterUserProfileServiceHTTPServer(server, endpoints.Profile)
 		if endpoints.Reviewer != nil {
@@ -218,6 +228,8 @@ func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 func invalidHTTPInput(r *http.Request) error {
 	reason := "INVALID_LOGIN_INPUT"
 	switch {
+	case emailHTTPPath(r.URL.Path):
+		reason = "INVALID_EMAIL_REQUEST"
 	case strings.HasSuffix(r.URL.Path, "/reviewer-permission"):
 		reason = "INVALID_REVIEWER_PERMISSION_INPUT"
 	case strings.HasPrefix(r.URL.Path, "/v1/registrations"):
@@ -234,6 +246,9 @@ func invalidHTTPInput(r *http.Request) error {
 
 func oversizedHTTPInput(r *http.Request) error {
 	reason := "AUTHENTICATION_INPUT_TOO_LARGE"
+	if emailHTTPPath(r.URL.Path) {
+		reason = "EMAIL_REQUEST_TOO_LARGE"
+	}
 	if strings.HasPrefix(r.URL.Path, "/v1/registrations") {
 		reason = "REGISTRATION_INPUT_TOO_LARGE"
 	}
@@ -258,12 +273,15 @@ func authHTTPErrorEncoder(w http.ResponseWriter, r *http.Request, err error) {
 	// RESOURCE_EXHAUSTED covers both rate limiting (429) and payload limits
 	// (413); the UC's stable reason determines which HTTP status applies.
 	switch converted.Reason {
-	case "REGISTRATION_INPUT_TOO_LARGE", "AUTHENTICATION_INPUT_TOO_LARGE", profiledomain.ErrLimit.Error():
+	case "EMAIL_REQUEST_TOO_LARGE", "REGISTRATION_INPUT_TOO_LARGE", "AUTHENTICATION_INPUT_TOO_LARGE", profiledomain.ErrLimit.Error():
 		converted.Code = http.StatusRequestEntityTooLarge
-	case profiledomain.ErrExhausted.Error():
+	case "EMAIL_FLOW_MISMATCH", profiledomain.ErrExhausted.Error():
 		converted.Code = http.StatusConflict
 	case "CODEC":
 		converted = kerrors.FromError(invalidHTTPInput(r))
+	}
+	if retry := converted.Metadata["retryAfterSeconds"]; retry != "" {
+		w.Header().Set("Retry-After", retry)
 	}
 	khttp.DefaultErrorEncoder(w, r, converted)
 }
@@ -296,4 +314,8 @@ func validateProfileJSON(data []byte) error {
 			return profileError(profiledomain.ErrInvalidEdit)
 		}
 	}
+}
+
+func emailHTTPPath(path string) bool {
+	return path == "/v1/users/me/email-binding" || path == "/v1/email-bindings" || strings.HasPrefix(path, "/v1/email-bindings/")
 }

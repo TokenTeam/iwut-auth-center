@@ -277,3 +277,81 @@ continue to their natural expiry. Unknown commit outcomes never return a success
 result. Real Mongo tests cover rollback on audit failure, concurrent CAS, durable
 bootstrap and issuance synchronization; production Wire tests exercise native
 gRPC and HTTP plus real cryptographic identity issuance.
+
+## Email registration and binding (UC011)
+
+`AUTH_EMAIL_BINDING_ENABLED` defaults to `false`. Enabling it requires the complete
+user endpoint runtime plus an independent email HMAC key and SMTP settings below.
+Disabled HTTP routes are absent and the three native gRPC methods return
+UNIMPLEMENTED. Startup validates configuration, CA certificates, database indexes
+and migration state without sending probe mail.
+
+| Variable | Meaning |
+| --- | --- |
+| `AUTH_EMAIL_BINDING_HMAC_KEY` | Required canonical standard Base64 of an independent random 32-byte key; must differ from current/previous association keys |
+| `AUTH_SMTP_ADDR` | Required SMTP `host:port`, with a certificate valid for that host |
+| `AUTH_SMTP_FROM` | Required single lowercase platform sender address |
+| `AUTH_SMTP_TLS_MODE` | Required `implicit_tls` or `starttls`; verified TLS is mandatory |
+| `AUTH_SMTP_USERNAME`, `AUTH_SMTP_PASSWORD` | Both supplied or both empty |
+| `AUTH_SMTP_CA_FILE` | Optional trusted CA PEM file; otherwise system roots |
+| `AUTH_SMTP_TIMEOUT` | Positive duration, default `10s`, bounds the whole send |
+| `AUTH_EMAIL_OWNER_HOURLY` | Positive sliding hourly account/public-key send quota, default `5` |
+| `AUTH_EMAIL_ADDRESS_HOURLY` | Positive sliding hourly target-email send quota, default `5` |
+| `AUTH_EMAIL_SOURCE_HOURLY` | Positive sliding hourly direct network peer send quota, default `20` |
+| `AUTH_EMAIL_MAX_BUCKETS` | Positive total persistent quota bucket capacity, default `10000`; live buckets are never evicted |
+
+The three exact `auth_center.v1.email_binding.EmailBindingService` methods are
+`BeginSetEmail`, `CompleteSetEmail` and `GetOwnEmailBinding`, mapped respectively to
+`POST /v1/email-bindings`, `POST /v1/email-bindings/{operation_id}/completion` and
+`GET /v1/users/me/email-binding`. Both completion modes return HTTP 200. Gateway
+uses DIRECT forwarding with the `/auth-center` prefix stripped; Gateway and
+mobile implementation are separate work packages.
+
+Absent `x-iwut-session` selects email registration; a valid token selects binding
+to the current account. Empty, malformed, duplicate, expired or revoked tokens
+are rejected. The operation's mode cannot change. Registration requires the
+existing `iwut-device-v1` public-key proposal and student association declaration,
+then both the email code and an independent `iwut-email-registration-v1` device
+proof. Begin creates no account. Complete creates USER, device, association,
+first Session and revision-1 email binding in one Mongo transaction. BIND requires
+an explicit nonnegative `expectedRevision` (including initial zero) and a current
+same-account Session at completion. Replacing an email preserves the old binding
+until the new address is verified and committed. Query always requires Session.
+
+Codes are eight ASCII digits (including leading zeros), expire at ten minutes,
+and share a five-failure limit with device proof failures. Each owner/public key
+and target email has a fixed 60-second resend cooldown. Send quotas are persistent
+sliding 60-minute windows. General authentication request limits also apply.
+The peer address is taken from the transport connection, never caller-supplied
+forwarding headers. Size is bounded at 16 KiB; JSON and protobuf reject unknown
+and ambiguous fields. Responses carry `Cache-Control: no-store`.
+
+`requestId` deduplication lasts at least 24 hours and never sends the same operation
+again. A delivery rejection, timeout or lost SMTP acknowledgement returns
+EMAIL_DELIVERY_UNAVAILABLE while preserving the operation and consumed quota.
+Retry the same request ID to recover operation metadata; resend explicitly with
+a new ID after cooldown. REGISTER completion never returns its Session token on
+replay: keep the original device private key and use ordinary device login if
+the first completion response is lost or the commit outcome is unknown. BIND
+completion can recover its historical result with the original code and a valid
+same-account Session; query returns the current binding.
+
+Mongo uses `auth_email_bindings`, `auth_email_operations`, `auth_email_quotas` and
+`auth_email_audit`, plus the shared authentication operation collection for
+REGISTER_WITH_EMAIL encrypted association snapshots. Unique indexes guard owner
+and activated email. All activation/revocation checks and quota debits use the
+shared authentication transaction fence. TTL removes retained operation history
+and expired quota buckets; expiry/state checks never rely on TTL timing. A cold
+HMAC key change closes old pending operations and clears association ciphertext,
+without changing activated bindings or releasing retained request IDs. Completed
+registration markers survive the key change. Association-key rotation includes
+both ordinary and email registration snapshots.
+
+SMTP sending occurs once, after a confirmed Begin transaction, and uses fixed
+purpose templates. No plaintext code, student association token, signing payload
+or Session secret is persisted. Audit contains only account/operation IDs,
+revision, timestamp and result. SMTP failures never return server response text.
+Tests use only loopback TLS SMTP capture and `.test` addresses, never real users.
+Public vectors, real Mongo rollback/concurrency/rotation/quota tests and production
+Wire HTTP/gRPC tests cover the implementation. This delivers neither UC012 email
+login nor UC013 Developer enrollment, and does not claim public client delivery.

@@ -22,6 +22,9 @@ func userEndpointAuthenticationMiddleware(service *ServiceIdentityVerifier, prof
 	return func(handler middleware.Handler) middleware.Handler {
 		internal := serviceIdentityMiddleware(service)(handler)
 		return func(ctx context.Context, request any) (any, error) {
+			if tr, ok := kratostransport.FromServerContext(ctx); ok && emailMethod(tr.Operation()) {
+				return handler(ctx, request)
+			}
 			if !enabled {
 				return internal(ctx, request)
 			}

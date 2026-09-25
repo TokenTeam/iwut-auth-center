@@ -16,6 +16,7 @@ import (
 	"iwut-auth-center/internal/adapter/deviceprotocol"
 	"iwut-auth-center/internal/authentication/domain"
 	"iwut-auth-center/internal/authentication/port"
+	email "iwut-auth-center/internal/emailbinding/domain"
 )
 
 const (
@@ -143,7 +144,7 @@ func (r *AuthenticationRepository) WithAuthTransaction(ctx context.Context, fn f
 		return nil, fn(tx)
 	}, options.Transaction().SetReadConcern(readconcern.Snapshot()).SetWriteConcern(writeconcern.Majority()).SetReadPreference(readpref.Primary()))
 	if err != nil {
-		for _, known := range []error{port.ErrCredentialRegistered, port.ErrAuthenticationFailed, port.ErrSessionInvalid, port.ErrAlreadyCompleted, port.ErrLimitExceeded, port.ErrNotFound} {
+		for _, known := range append(email.Errors, port.ErrCredentialRegistered, port.ErrAuthenticationFailed, port.ErrSessionInvalid, port.ErrAlreadyCompleted, port.ErrLimitExceeded, port.ErrNotFound) {
 			if errors.Is(err, known) {
 				return known
 			}
@@ -398,46 +399,9 @@ func (r *AuthenticationRepository) CheckSession(ctx context.Context, digest []by
 	}
 	var result domain.Session
 	err := r.WithAuthTransaction(ctx, func(tx context.Context) error {
-		now := r.currentTime(now)
-		var doc SessionDocument
-		err := r.database.Collection(SessionCollection).FindOne(tx, bson.M{"tokenDigest": digest, "revokedAt": nil, "expiresAt": bson.M{"$gt": now}}).Decode(&doc)
-		if errors.Is(err, drivermongo.ErrNoDocuments) {
-			return port.ErrSessionInvalid
-		}
-		if err != nil {
-			return err
-		}
-		if !validSession(doc) {
-			return port.ErrSessionInvalid
-		}
-		var credential CredentialDocument
-		err = r.database.Collection(CredentialCollection).FindOne(tx, bson.M{"credentialId": doc.CredentialID, "authId": doc.AuthID, "revokedAt": nil}).Decode(&credential)
-		if errors.Is(err, drivermongo.ErrNoDocuments) {
-			return port.ErrSessionInvalid
-		}
-		if err != nil {
-			return err
-		}
-		if !validCredential(credential) {
-			return port.ErrSessionInvalid
-		}
-		if err := r.ConfirmPrincipalCredentialTx(tx, doc.AuthID, doc.CredentialID, now); errors.Is(err, port.ErrAuthenticationFailed) {
-			return port.ErrSessionInvalid
-		} else if err != nil {
-			return err
-		}
-		updated, err := r.database.Collection(SessionCollection).UpdateOne(tx, bson.M{"sessionId": doc.SessionID, "revokedAt": nil, "expiresAt": bson.M{"$gt": now}}, bson.M{"$max": bson.M{"lastUsedAt": now}})
-		if err != nil {
-			return err
-		}
-		if updated.MatchedCount != 1 {
-			return port.ErrSessionInvalid
-		}
-		if now.After(doc.LastUsedAt) {
-			doc.LastUsedAt = now
-		}
-		result = doc.Domain()
-		return nil
+		var err error
+		result, err = r.CheckSessionTx(tx, digest, now)
+		return err
 	})
 	return result, err
 }
@@ -461,3 +425,45 @@ func validSession(doc SessionDocument) bool {
 }
 
 var _ port.LoginRepository = (*AuthenticationRepository)(nil)
+
+func (r *AuthenticationRepository) CheckSessionTx(tx context.Context, digest []byte, now time.Time) (domain.Session, error) {
+	now = r.currentTime(now)
+	var doc SessionDocument
+	err := r.database.Collection(SessionCollection).FindOne(tx, bson.M{"tokenDigest": digest, "revokedAt": nil, "expiresAt": bson.M{"$gt": now}}).Decode(&doc)
+	if errors.Is(err, drivermongo.ErrNoDocuments) {
+		return domain.Session{}, port.ErrSessionInvalid
+	}
+	if err != nil {
+		return domain.Session{}, err
+	}
+	if !validSession(doc) {
+		return domain.Session{}, port.ErrSessionInvalid
+	}
+	var credential CredentialDocument
+	err = r.database.Collection(CredentialCollection).FindOne(tx, bson.M{"credentialId": doc.CredentialID, "authId": doc.AuthID, "revokedAt": nil}).Decode(&credential)
+	if errors.Is(err, drivermongo.ErrNoDocuments) {
+		return domain.Session{}, port.ErrSessionInvalid
+	}
+	if err != nil {
+		return domain.Session{}, err
+	}
+	if !validCredential(credential) {
+		return domain.Session{}, port.ErrSessionInvalid
+	}
+	if err := r.ConfirmPrincipalCredentialTx(tx, doc.AuthID, doc.CredentialID, now); errors.Is(err, port.ErrAuthenticationFailed) {
+		return domain.Session{}, port.ErrSessionInvalid
+	} else if err != nil {
+		return domain.Session{}, err
+	}
+	updated, err := r.database.Collection(SessionCollection).UpdateOne(tx, bson.M{"sessionId": doc.SessionID, "revokedAt": nil, "expiresAt": bson.M{"$gt": now}}, bson.M{"$max": bson.M{"lastUsedAt": now}})
+	if err != nil {
+		return domain.Session{}, err
+	}
+	if updated.MatchedCount != 1 {
+		return domain.Session{}, port.ErrSessionInvalid
+	}
+	if now.After(doc.LastUsedAt) {
+		doc.LastUsedAt = now
+	}
+	return doc.Domain(), nil
+}

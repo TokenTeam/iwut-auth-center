@@ -70,7 +70,7 @@ func (r *AssociationMigrationRepository) EnsureMigrationSchema(ctx context.Conte
 }
 
 func (r *AssociationMigrationRepository) PrepareOperations(ctx context.Context, rotate bool, now time.Time) error {
-	filter := bson.M{"purpose": "REGISTER", "status": "PENDING"}
+	filter := bson.M{"purpose": bson.M{"$in": bson.A{"REGISTER", "REGISTER_WITH_EMAIL"}}, "status": "PENDING"}
 	if !rotate {
 		filter["expiresAt"] = bson.M{"$lte": now}
 	}
@@ -78,7 +78,7 @@ func (r *AssociationMigrationRepository) PrepareOperations(ctx context.Context, 
 	if err != nil {
 		return errors.New("association migration: cannot close operations")
 	}
-	_, err = r.operations.UpdateMany(ctx, bson.M{"purpose": "REGISTER", "status": bson.M{"$ne": "PENDING"}}, bson.M{"$unset": bson.M{"nonce": "", "ciphertext": "", "lookupKey": ""}})
+	_, err = r.operations.UpdateMany(ctx, bson.M{"purpose": bson.M{"$in": bson.A{"REGISTER", "REGISTER_WITH_EMAIL"}}, "status": bson.M{"$ne": "PENDING"}}, bson.M{"$unset": bson.M{"nonce": "", "ciphertext": "", "lookupKey": ""}})
 	if err != nil {
 		return errors.New("association migration: cannot clear operations")
 	}
@@ -86,7 +86,7 @@ func (r *AssociationMigrationRepository) PrepareOperations(ctx context.Context, 
 }
 
 func (r *AssociationMigrationRepository) ValidateOperationSnapshots(ctx context.Context, c port.AssociationCipher, now time.Time) error {
-	cur, err := r.operations.Find(ctx, bson.M{"purpose": "REGISTER"}, options.Find().SetBatchSize(500))
+	cur, err := r.operations.Find(ctx, bson.M{"purpose": bson.M{"$in": bson.A{"REGISTER", "REGISTER_WITH_EMAIL"}}}, options.Find().SetBatchSize(500))
 	if err != nil {
 		return errors.New("association migration: operation scan unavailable")
 	}

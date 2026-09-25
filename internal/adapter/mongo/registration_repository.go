@@ -47,49 +47,56 @@ func (r *RegistrationRepository) CompleteRegistration(ctx context.Context, c por
 		if err := r.ConsumeOperationTx(tx, op.OperationID, auth.Register, c.Credential.AuthID, c.Credential.CredentialID, c.Session.SessionID, now); err != nil {
 			return err
 		}
-		// The shared transaction fence serializes concurrent registrations; the
-		// fingerprint index remains the durable guard after operation cleanup.
-		existing, err := r.db.Collection(CredentialCollection).CountDocuments(tx, bson.M{"fingerprint": c.Credential.Fingerprint})
-		if err != nil {
-			return err
-		}
-		if existing > 0 {
-			return authport.ErrCredentialRegistered
-		}
-		_, err = r.db.Collection(PrincipalCollection).InsertOne(tx, bson.M{
-			"authId": c.Credential.AuthID, "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": nil, "permissions": bson.A{}, "permissionRevision": int64(1), "createdAt": now, "updatedAt": now,
-			"profile": bson.M{"entries": bson.A{}, "revision": int64(1), "updatedAt": now},
-		})
-		if err != nil {
-			return err
-		}
-		if err = r.InsertCredentialTx(tx, c.Credential); err != nil {
-			if drivermongo.IsDuplicateKeyError(err) {
-				return authport.ErrCredentialRegistered
-			}
-			return err
-		}
-		var group associationDocument
-		err = r.db.Collection(AssociationCollection).FindOne(tx, bson.M{"keyVersion": c.Association.KeyVersion, "lookupKey": c.Association.LookupKey}).Decode(&group)
-		if errors.Is(err, drivermongo.ErrNoDocuments) {
-			group = associationDoc(c.Association)
-			if _, err = r.db.Collection(AssociationCollection).InsertOne(tx, group); err != nil {
-				return err
-			}
-		} else if err != nil {
-			return err
-		}
-		if group.AssociationID == "" || group.SchemeVersion != op.SchemeVersion || len(group.Nonce) != 12 || len(group.Ciphertext) != 48 {
-			return authport.ErrUnavailable
-		}
-		_, err = r.db.Collection(AssociationMemberCollection).InsertOne(tx, bson.M{"authId": c.Credential.AuthID, "associationId": group.AssociationID, "trustLevel": "CLIENT_ASSERTED", "createdAt": now})
-		if err != nil {
-			return err
-		}
-		return r.CreateSessionTx(tx, c.Session, now)
+		return r.CreateRegisteredUserTx(tx, c, now)
 	})
 }
 
 func sameRegistrationSnapshot(a, b auth.Operation) bool {
 	return a.OperationID == b.OperationID && a.ProtocolVersion == b.ProtocolVersion && a.ServiceID == b.ServiceID && a.ApplicationID == b.ApplicationID && a.ExpiresAt.Equal(b.ExpiresAt) && a.LocatorKind == b.LocatorKind && a.SchemeVersion == b.SchemeVersion && a.KeyVersion == b.KeyVersion && bytes.Equal(a.Challenge, b.Challenge) && bytes.Equal(a.PublicKey, b.PublicKey) && bytes.Equal(a.LocatorValue, b.LocatorValue) && bytes.Equal(a.LookupKey, b.LookupKey) && bytes.Equal(a.Nonce, b.Nonce) && bytes.Equal(a.Ciphertext, b.Ciphertext)
+}
+
+// CreateRegisteredUserTx is shared by device and email registration; the caller owns the transaction and proof consumption.
+func (r *RegistrationRepository) CreateRegisteredUserTx(tx context.Context, c port.RegistrationCommit, now time.Time) error {
+	op := c.Operation
+	var err error
+	// The shared transaction fence serializes concurrent registrations; the
+	// fingerprint index remains the durable guard after operation cleanup.
+	existing, err := r.db.Collection(CredentialCollection).CountDocuments(tx, bson.M{"fingerprint": c.Credential.Fingerprint})
+	if err != nil {
+		return err
+	}
+	if existing > 0 {
+		return authport.ErrCredentialRegistered
+	}
+	_, err = r.db.Collection(PrincipalCollection).InsertOne(tx, bson.M{
+		"authId": c.Credential.AuthID, "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": nil, "permissions": bson.A{}, "permissionRevision": int64(1), "createdAt": now, "updatedAt": now,
+		"profile": bson.M{"entries": bson.A{}, "revision": int64(1), "updatedAt": now},
+	})
+	if err != nil {
+		return err
+	}
+	if err = r.InsertCredentialTx(tx, c.Credential); err != nil {
+		if drivermongo.IsDuplicateKeyError(err) {
+			return authport.ErrCredentialRegistered
+		}
+		return err
+	}
+	var group associationDocument
+	err = r.db.Collection(AssociationCollection).FindOne(tx, bson.M{"keyVersion": c.Association.KeyVersion, "lookupKey": c.Association.LookupKey}).Decode(&group)
+	if errors.Is(err, drivermongo.ErrNoDocuments) {
+		group = associationDoc(c.Association)
+		if _, err = r.db.Collection(AssociationCollection).InsertOne(tx, group); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
+	if group.AssociationID == "" || group.SchemeVersion != op.SchemeVersion || len(group.Nonce) != 12 || len(group.Ciphertext) != 48 {
+		return authport.ErrUnavailable
+	}
+	_, err = r.db.Collection(AssociationMemberCollection).InsertOne(tx, bson.M{"authId": c.Credential.AuthID, "associationId": group.AssociationID, "trustLevel": "CLIENT_ASSERTED", "createdAt": now})
+	if err != nil {
+		return err
+	}
+	return r.CreateSessionTx(tx, c.Session, now)
 }

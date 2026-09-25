@@ -13,6 +13,9 @@ type profileStrictCodec struct{ encoding.Codec }
 // earlier wire branches. Install using grpc.ForceServerCodec alongside MaxRecvMsgSize.
 func NewProfileStrictCodec() encoding.Codec { return profileStrictCodec{encoding.GetCodec("proto")} }
 func (c profileStrictCodec) Unmarshal(data []byte, v any) error {
+	if e := emailWire(data, v); e != nil {
+		return e
+	}
 	switch v.(type) {
 	case *pb.EditOwnProfileRequest, *pb.GetOwnProfileRequest, *pb.GetProfileEditingSchemaRequest:
 		if len(data) > domain.MaxMessageBytes {
