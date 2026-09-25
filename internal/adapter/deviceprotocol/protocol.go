@@ -115,17 +115,32 @@ func (p *Protocol) SigningPayload(op domain.Operation, associationDigest []byte)
 	return payload, nil
 }
 
+type signatureScalars struct{ R, S *big.Int }
+
+// ValidSignature checks the common strict DER encoding without authenticating a proof.
+func ValidSignature(signature []byte) bool { _, ok := parseSignature(signature); return ok }
+func parseSignature(signature []byte) (signatureScalars, bool) {
+	var rs signatureScalars
+	if len(signature) == 0 || len(signature) > 72 {
+		return rs, false
+	}
+	rest, err := asn1.Unmarshal(signature, &rs)
+	if err != nil || len(rest) != 0 || rs.R == nil || rs.S == nil || rs.R.Sign() <= 0 || rs.S.Sign() <= 0 || rs.R.Cmp(elliptic.P256().Params().N) >= 0 || rs.S.Cmp(elliptic.P256().Params().N) >= 0 {
+		return rs, false
+	}
+	canonical, err := asn1.Marshal(rs)
+	if err != nil || !bytes.Equal(canonical, signature) {
+		return rs, false
+	}
+	return rs, true
+}
+
 func (p *Protocol) Verify(publicKey, payload, signature []byte) bool {
 	if p.ValidatePublicKey(publicKey) != nil || len(payload) == 0 || len(payload) > 1024 || len(signature) == 0 || len(signature) > 72 {
 		return false
 	}
-	var rs struct{ R, S *big.Int }
-	rest, err := asn1.Unmarshal(signature, &rs)
-	if err != nil || len(rest) != 0 || rs.R == nil || rs.S == nil || rs.R.Sign() <= 0 || rs.S.Sign() <= 0 || rs.R.Cmp(elliptic.P256().Params().N) >= 0 || rs.S.Cmp(elliptic.P256().Params().N) >= 0 {
-		return false
-	}
-	canonical, err := asn1.Marshal(rs)
-	if err != nil || !bytes.Equal(canonical, signature) {
+	rs, ok := parseSignature(signature)
+	if !ok {
 		return false
 	}
 	x, y := elliptic.Unmarshal(elliptic.P256(), publicKey)

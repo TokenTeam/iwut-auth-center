@@ -42,6 +42,7 @@ type Credential struct {
 type Session struct {
 	SessionID, AuthID, AuthenticationMethod, CredentialID string
 	TokenDigest                                           []byte
+	EmailBindingRevision                                  int64
 	AuthenticatedAt, CreatedAt, LastUsedAt, ExpiresAt     time.Time
 	RevokedAt                                             *time.Time
 }
