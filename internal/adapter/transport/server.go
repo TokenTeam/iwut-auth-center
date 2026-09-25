@@ -18,6 +18,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	authv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
+	developerapplicationpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_application"
 	developerstatusv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_status"
 	emailv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_binding"
 	emailloginv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_login"
@@ -37,6 +38,7 @@ type ServerConfig struct {
 
 // UserEndpoints is an optional, fully validated runtime assembled before listening.
 type UserEndpoints struct {
+	DeveloperApplication          *DeveloperApplicationService
 	EmailBinding                  *EmailBindingService
 	EmailLogin                    *EmailLoginService
 	Reviewer                      *ReviewerPermissionService
@@ -122,6 +124,9 @@ func newGRPCServer(
 	}
 	emailloginv1.RegisterEmailLoginServiceServer(server, loginService)
 	if endpoints := configuration.UserEndpoints; endpoints != nil {
+		if endpoints.DeveloperApplication != nil {
+			developerapplicationpb.RegisterDeveloperApplicationServiceServer(server, endpoints.DeveloperApplication)
+		}
 		authv1.RegisterAuthenticationServiceServer(server, endpoints.Authentication)
 		profilev1.RegisterUserProfileServiceServer(server, endpoints.Profile)
 		if endpoints.Reviewer != nil {
@@ -160,6 +165,9 @@ func newHTTPServer(configuration ServerConfig, verifier *ServiceIdentityVerifier
 		}
 		if endpoints.EmailBinding != nil {
 			emailv1.RegisterEmailBindingServiceHTTPServer(server, endpoints.EmailBinding)
+		}
+		if endpoints.DeveloperApplication != nil {
+			developerapplicationpb.RegisterDeveloperApplicationServiceHTTPServer(server, endpoints.DeveloperApplication)
 		}
 		authv1.RegisterAuthenticationServiceHTTPServer(server, endpoints.Authentication)
 		profilev1.RegisterUserProfileServiceHTTPServer(server, endpoints.Profile)
@@ -238,6 +246,8 @@ func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 func invalidHTTPInput(r *http.Request) error {
 	reason := "INVALID_LOGIN_INPUT"
 	switch {
+	case developerApplicationHTTPPath(r.URL.Path):
+		reason = "INVALID_DEVELOPER_APPLICATION_REQUEST"
 	case strings.HasPrefix(r.URL.Path, "/v1/email-logins"):
 		reason = "INVALID_EMAIL_LOGIN_REQUEST"
 	case emailHTTPPath(r.URL.Path):
@@ -258,6 +268,9 @@ func invalidHTTPInput(r *http.Request) error {
 
 func oversizedHTTPInput(r *http.Request) error {
 	reason := "AUTHENTICATION_INPUT_TOO_LARGE"
+	if developerApplicationHTTPPath(r.URL.Path) {
+		reason = "DEVELOPER_APPLICATION_REQUEST_TOO_LARGE"
+	}
 	if emailHTTPPath(r.URL.Path) {
 		reason = "EMAIL_REQUEST_TOO_LARGE"
 	}
@@ -288,9 +301,9 @@ func authHTTPErrorEncoder(w http.ResponseWriter, r *http.Request, err error) {
 	// RESOURCE_EXHAUSTED covers both rate limiting (429) and payload limits
 	// (413); the UC's stable reason determines which HTTP status applies.
 	switch converted.Reason {
-	case "EMAIL_LOGIN_REQUEST_TOO_LARGE", "EMAIL_REQUEST_TOO_LARGE", "REGISTRATION_INPUT_TOO_LARGE", "AUTHENTICATION_INPUT_TOO_LARGE", profiledomain.ErrLimit.Error():
+	case "DEVELOPER_APPLICATION_REQUEST_TOO_LARGE", "EMAIL_LOGIN_REQUEST_TOO_LARGE", "EMAIL_REQUEST_TOO_LARGE", "REGISTRATION_INPUT_TOO_LARGE", "AUTHENTICATION_INPUT_TOO_LARGE", profiledomain.ErrLimit.Error():
 		converted.Code = http.StatusRequestEntityTooLarge
-	case "EMAIL_FLOW_MISMATCH", profiledomain.ErrExhausted.Error():
+	case "DEVELOPER_EMAIL_REQUIRED", "EMAIL_FLOW_MISMATCH", profiledomain.ErrExhausted.Error():
 		converted.Code = http.StatusConflict
 	case "CODEC":
 		converted = kerrors.FromError(invalidHTTPInput(r))
@@ -333,4 +346,8 @@ func validateProfileJSON(data []byte) error {
 
 func emailHTTPPath(path string) bool {
 	return path == "/v1/users/me/email-binding" || path == "/v1/email-bindings" || strings.HasPrefix(path, "/v1/email-bindings/")
+}
+
+func developerApplicationHTTPPath(path string) bool {
+	return path == "/v1/users/me/developer-application" || path == "/v1/users/me/developer-eligibility"
 }

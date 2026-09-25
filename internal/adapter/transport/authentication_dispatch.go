@@ -32,6 +32,9 @@ func userEndpointAuthenticationMiddleware(service *ServiceIdentityVerifier, prof
 			if !ok {
 				return nil, transportStatus(codes.Unauthenticated, "AUTHENTICATION_FAILED", "authentication context is required")
 			}
+			if developerApplicationMethod(tr.Operation()) {
+				return handler(ctx, request)
+			}
 			switch tr.Operation() {
 			case authv1.AuthenticationService_BeginUserRegistration_FullMethodName,
 				authv1.AuthenticationService_CompleteUserRegistration_FullMethodName,

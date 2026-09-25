@@ -8,9 +8,9 @@ so. Authoritative design lives outside this repository at `../../docs/`.
 
 ## Current work package
 
-**UC-AUTH-004–012: reviewer administration, user profile, device authentication, Session-to-JWS issuance, email registration/binding and email login.** Before changing behavior, read:
+**UC-AUTH-004–013: reviewer administration, user profile, device authentication, Session-to-JWS issuance, email registration/binding, email login and Developer self-enrollment.** Before changing behavior, read:
 
-1. `../../docs/auth-center/briefs/UC-AUTH-012.md` and `../../docs/platform/contracts/auth-email-login-v1.md`, then `../../docs/auth-center/briefs/UC-AUTH-011.md`, `../../docs/platform/contracts/auth-email-binding-v1.md` and its public vectors; preserve UC004–010 behavior.
+1. `../../docs/auth-center/briefs/UC-AUTH-013.md` and `../../docs/platform/contracts/auth-developer-application-v1.md`, then `../../docs/auth-center/briefs/UC-AUTH-012.md` and `../../docs/platform/contracts/auth-email-login-v1.md`, then `../../docs/auth-center/briefs/UC-AUTH-011.md`, `../../docs/platform/contracts/auth-email-binding-v1.md` and its public vectors; preserve UC004–010 behavior.
 2. `../../docs/auth-center/briefs/UC-AUTH-004.md` and the corresponding `../../docs/auth-center/briefs/UC-AUTH-005.md` through `UC-AUTH-010.md`.
 3. `../../docs/platform/contracts/auth-device-session-v1.md` and its test vectors.
 4. `../../docs/platform/contracts/trusted-identity-v1.md` for profile user authentication.
@@ -41,8 +41,8 @@ internal/scope/usecase/      UC orchestration
 internal/scope/port/         consumer-owned interfaces
 internal/adapter/catalog/    temporary hardcoded provider
 internal/developer/domain/   principal/status business values
-internal/developer/usecase/  batch query orchestration
-internal/developer/port/     principal repository port
+internal/developer/usecase/  batch query and self-enrollment orchestration
+internal/developer/port/     principal and enrollment repository ports
 internal/adapter/mongo/      Auth-owned MongoDB repository
 internal/adapter/transport/  Proto/HTTP/gRPC conversion and Kratos servers
 internal/config/             environment parsing and validation
@@ -79,4 +79,9 @@ Association migration must include REGISTER_WITH_EMAIL snapshots. SMTP runs only
 after confirmed operation commit, never inside transaction retries. Transport
 must distinguish an absent Session carrier from every invalid supplied carrier.
 UC012 reuses those facilities and extends all Session consumers for EMAIL_CODE_AND_DEVICE.
-UC013, Gateway routes and mobile clients remain separate delivery packages.
+UC013 uses the same transaction fence for current Session/binding/status confirmation,
+principal activation, unique activation history and immutable audit. Never restore
+PENDING/REJECTED/SUSPENDED through Apply; preserve nullable historical activation time.
+Developer enrollment and recovery-ready flags default off; operator readiness is not
+an automatic UI health check. No additional reviewer/admin privileges are granted.
+Gateway routes and mobile clients remain separate delivery packages.

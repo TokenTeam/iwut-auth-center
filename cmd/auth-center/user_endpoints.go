@@ -7,6 +7,7 @@ import (
 	"iwut-auth-center/internal/adapter/emailprotocol"
 	"iwut-auth-center/internal/adapter/identitysigner"
 	"iwut-auth-center/internal/adapter/smtpmail"
+	developerusecase "iwut-auth-center/internal/developer/usecase"
 	emaildomain "iwut-auth-center/internal/emailbinding/domain"
 	emailusecase "iwut-auth-center/internal/emailbinding/usecase"
 	emailloginusecase "iwut-auth-center/internal/emaillogin/usecase"
@@ -178,7 +179,23 @@ func provideUserEndpoints(configuration config.Config, database *drivermongo.Dat
 		}
 		emailLoginService = transport.NewEmailLoginService(service, c.Authentication.MaxMessageBytes)
 	}
+	var developerApplication *transport.DeveloperApplicationService
+	if dc := configuration.DeveloperApplication; dc != nil {
+		if err = mongoadapter.EnsureDeveloperApplicationSchema(ctx, database); err != nil {
+			return nil, err
+		}
+		repo, err := mongoadapter.NewDeveloperApplicationRepository(repository)
+		if err != nil {
+			return nil, err
+		}
+		gate, err := deviceprotocol.NewLimiter(deviceprotocol.RateLimits{BeginGlobal: dc.GlobalPerMinute, CompleteGlobal: dc.GlobalPerMinute, BeginSource: dc.SourcePerMinute, CompleteLocator: dc.AccountPerMinute, MaxBuckets: dc.MaxBuckets})
+		if err != nil {
+			return nil, err
+		}
+		developerApplication = transport.NewDeveloperApplicationService(developerusecase.NewApplication(repo, gate, dc.RecoveryReady && emailLoginService != nil), c.Authentication.MaxMessageBytes)
+	}
 	return &transport.UserEndpoints{
+		DeveloperApplication:          developerApplication,
 		EmailBinding:                  emailService,
 		EmailLogin:                    emailLoginService,
 		Reviewer:                      transport.NewReviewerPermissionService(reviewerusecase.New(reviewerRepo)),

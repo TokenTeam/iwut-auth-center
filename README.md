@@ -354,7 +354,7 @@ revision, timestamp and result. SMTP failures never return server response text.
 Tests use only loopback TLS SMTP capture and `.test` addresses, never real users.
 Public vectors, real Mongo rollback/concurrency/rotation/quota tests and production
 Wire HTTP/gRPC tests cover the implementation. UC012 email login is described
-below; UC013 Developer enrollment and public client delivery remain separate.
+below; UC013 Developer enrollment is described next. Public client delivery remains separate.
 
 
 ## Email login and device authorization (UC012)
@@ -401,3 +401,67 @@ Validation includes the public login/registration/device vectors, real Mongo
 transactions and concurrency, production Wire HTTP/gRPC with controlled TLS SMTP,
 login-only startup, mixed-method LRU and Session consumers. All tests use isolated
 resources and test addresses; this does not claim Gateway or mobile delivery.
+
+
+## Developer self-enrollment (UC013)
+
+`AUTH_DEVELOPER_APPLICATION_ENABLED=false` by default. Enable it only together
+with `AUTH_USER_ENDPOINTS_ENABLED=true`; invalid combinations refuse startup.
+The two exact `auth_center.v1.developer_application.DeveloperApplicationService`
+methods are registered on both transports only when enabled:
+
+- `ApplyForDeveloper`: `POST /v1/users/me/developer-application`, body `{}`.
+- `GetOwnDeveloperEligibility`: `GET /v1/users/me/developer-eligibility`, no body.
+
+Both return HTTP 200 and require exactly one canonical `x-iwut-session`.
+Both device and email/device Sessions work. They reject unknown JSON/Proto fields,
+query parameters and alternative identity carriers; neither accepts a target ID.
+Optional status/activation time retain presence: an ordinary user has no status;
+a historical Developer without a verifiable activation record has no timestamp.
+All responses use `Cache-Control: no-store`.
+
+First enrollment requires the current activated email and a recovery capability
+composed from validated `AUTH_EMAIL_LOGIN_ENABLED=true` configuration and the
+real TLS SMTP adapter. It additionally requires `AUTH_EMAIL_RECOVERY_READY=true`.
+That flag defaults false and is an operator declaration that Gateway/client
+email login and device recovery entry points have been delivered and verified.
+Auth does not probe UI readiness or send a test email during enrollment. Keep the
+flag false in production until public recovery delivery is complete. Email binding
+routes need not be enabled to use an already activated email. Legitimately disabled
+recovery produces an eligibility blocker; malformed configuration refuses startup.
+
+Only explicit `null -> APPROVED` changes state. Repeated APPROVED is idempotent
+(including when recovery is disabled), PENDING conflicts, and REJECTED/SUSPENDED
+cannot reapply here. Current Session, principal, binding and status are confirmed
+under the shared authentication transaction fence. `auth_developer_activations`
+has a unique authId; `auth_developer_application_audit` has a unique subjectAuthId.
+Both records and the principal status commit atomically. Audit stores decision
+revision, actor/subject, transition and UTC time; no email address or secrets.
+Unknown commits return unavailable, permitting query/retry with the existing
+Session. Permissions, permissionRevision, profile, association and Session lifetime
+are preserved. UC002 and subsequent UC010 JWS read the current authoritative state.
+
+The shared Apply/query limits use fixed minute windows and bounded memory:
+
+| Environment | Default | Meaning |
+| --- | --- | --- |
+| `AUTH_DEVELOPER_GLOBAL_PER_MINUTE` | 600 | All admitted requests |
+| `AUTH_DEVELOPER_SOURCE_PER_MINUTE` | 120 | Requests per socket peer address |
+| `AUTH_DEVELOPER_ACCOUNT_PER_MINUTE` | 30 | Requests per authenticated authId |
+| `AUTH_DEVELOPER_MAX_BUCKETS` | 4096 | Combined source/account bucket capacity |
+
+Values must be integers in 1..1,000,000. Stale buckets are reclaimed when needed;
+full capacity fails closed with 429 rather than evicting live buckets. Invalid
+Session requests consume source/global admission, never arbitrary account buckets.
+Database transaction retries debit the account only once. The conservative
+`retryAfterSeconds=60` metadata also appears as HTTP `Retry-After`. Forwarding
+headers are not trusted, so configure source limits for Gateway aggregate traffic.
+
+`make test-mongo` includes production Wire HTTP/gRPC, real email binding/login
+through local TLS capture, atomic Mongo concurrency/audit failures/unknown commits,
+and same-Session UC010/UC002 verification. When the sibling App Center checkout is
+available, it also builds and starts its actual production binary and migrations
+in a separate database, checks application creation with the newly issued JWS,
+and verifies its quota and reviewer permission gates. Set `APP_CENTER_SOURCE_DIR`
+to override the sibling path; that subtest explicitly skips if no checkout exists.
+No App source is modified. Gateway routes and mobile UX remain separate delivery.
