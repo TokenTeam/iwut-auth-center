@@ -2,11 +2,13 @@ package transport
 
 import (
 	pb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_binding"
+	loginpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_login"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	d "iwut-auth-center/internal/emailbinding/domain"
+	login "iwut-auth-center/internal/emaillogin/domain"
 )
 
 func emailWire(data []byte, v any) error {
@@ -78,4 +80,23 @@ func strictEmailWire(data []byte, md protoreflect.MessageDescriptor) bool {
 		data = data[size:]
 	}
 	return true
+}
+
+func emailLoginWire(data []byte, v any, limit int) error {
+	var msg proto.Message
+	switch x := v.(type) {
+	case *loginpb.BeginEmailLoginRequest:
+		msg = x
+	case *loginpb.CompleteEmailLoginRequest:
+		msg = x
+	default:
+		return nil
+	}
+	if len(data) > limit {
+		return transportStatus(codes.ResourceExhausted, "EMAIL_LOGIN_REQUEST_TOO_LARGE", "request is too large")
+	}
+	if !strictEmailWire(data, msg.ProtoReflect().Descriptor()) {
+		return emailLoginError(login.ErrInvalid)
+	}
+	return nil
 }

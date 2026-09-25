@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"iwut-auth-center/internal/adapter/emailloginprotocol"
 	"iwut-auth-center/internal/adapter/emailprotocol"
 	"iwut-auth-center/internal/adapter/identitysigner"
 	"iwut-auth-center/internal/adapter/smtpmail"
+	emaildomain "iwut-auth-center/internal/emailbinding/domain"
 	emailusecase "iwut-auth-center/internal/emailbinding/usecase"
+	emailloginusecase "iwut-auth-center/internal/emaillogin/usecase"
 	identityusecase "iwut-auth-center/internal/identity/usecase"
 	reviewerusecase "iwut-auth-center/internal/reviewer/usecase"
 	"time"
@@ -151,8 +154,33 @@ func provideUserEndpoints(configuration config.Config, database *drivermongo.Dat
 		}
 		emailService = transport.NewEmailBindingService(service)
 	}
+
+	var emailLoginService *transport.EmailLoginService
+	if ec := configuration.EmailLogin; ec != nil {
+		ep, err := emailloginprotocol.New(c.Authentication.ServiceID, ec.HMACKey, emaildomain.NormalizeEmail)
+		if err != nil {
+			return nil, err
+		}
+		sender, err := smtpmail.New(smtpmail.Config{Address: ec.SMTPAddress, From: ec.SMTPFrom, TLSMode: ec.SMTPTLSMode, Username: ec.SMTPUsername, Password: ec.SMTPPassword, Roots: ec.SMTPRoots, Timeout: ec.SMTPTimeout})
+		if err != nil {
+			return nil, err
+		}
+		repo, err := mongoadapter.NewEmailLoginRepository(registrationRepo, ep.KeyID(), mongoadapter.EmailLimits{OwnerHourly: ec.OwnerHourly, EmailHourly: ec.EmailHourly, SourceHourly: ec.SourceHourly, MaxBuckets: ec.MaxBuckets})
+		if err != nil {
+			return nil, err
+		}
+		if err = repo.Initialize(ctx, time.Now().UTC()); err != nil {
+			return nil, err
+		}
+		service, err := emailloginusecase.New(repo, ep, protocol, sender, limiter, c.Authentication.ServiceID, c.Authentication.SessionTTL)
+		if err != nil {
+			return nil, err
+		}
+		emailLoginService = transport.NewEmailLoginService(service, c.Authentication.MaxMessageBytes)
+	}
 	return &transport.UserEndpoints{
 		EmailBinding:                  emailService,
+		EmailLogin:                    emailLoginService,
 		Reviewer:                      transport.NewReviewerPermissionService(reviewerusecase.New(reviewerRepo)),
 		IdentityIssuance:              issuance,
 		Authentication:                authentication,

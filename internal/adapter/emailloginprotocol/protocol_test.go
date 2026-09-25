@@ -13,6 +13,7 @@ import (
 
 	"iwut-auth-center/internal/adapter/deviceprotocol"
 	auth "iwut-auth-center/internal/authentication/domain"
+	emaildomain "iwut-auth-center/internal/emailbinding/domain"
 	"iwut-auth-center/internal/emaillogin/domain"
 )
 
@@ -25,15 +26,7 @@ func unhex(t *testing.T, s string) []byte {
 	return b
 }
 
-// The protocol consumes normalized addresses, with UC011 normalization injected.
-// This isolated fixture adapter contains no directory or account behavior.
-func fixtureNormalize(s string) (string, error) {
-	switch s {
-	case "student+login@example.test", "graduate.name+second@example.test":
-		return s, nil
-	}
-	return "", domain.ErrInvalid
-}
+func fixtureNormalize(s string) (string, error) { return emaildomain.NormalizeEmail(s) }
 func TestPublicVectors(t *testing.T) {
 	raw, e := os.ReadFile("testdata/auth-email-login-v1.json")
 	if e != nil {

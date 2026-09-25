@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	d "iwut-auth-center/internal/emailbinding/domain"
+	login "iwut-auth-center/internal/emaillogin/domain"
 	"net"
 	"net/smtp"
 	"strconv"
@@ -38,7 +39,7 @@ func New(c Config) (*Sender, error) {
 }
 func (s *Sender) Send(ctx context.Context, to, purpose, code string, expires time.Time) error {
 	address, e := d.NormalizeEmail(to)
-	if e != nil || address != to || !d.ValidCode(code) || (purpose != d.RegistrationPurpose && purpose != d.BindingPurpose) {
+	if e != nil || address != to || !d.ValidCode(code) || (purpose != d.RegistrationPurpose && purpose != d.BindingPurpose && purpose != login.Purpose) {
 		return errDelivery
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.c.Timeout)
@@ -91,6 +92,9 @@ func (s *Sender) Send(ctx context.Context, to, purpose, code string, expires tim
 	action := "set your email"
 	if purpose == d.RegistrationPurpose {
 		action = "register a new account"
+	}
+	if purpose == login.Purpose {
+		action = "sign in and authorize this device"
 	}
 	// All dynamic headers are validated addresses; code and purpose never enter a header.
 	body := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: iWUT email verification\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\nYou requested to %s.\r\nVerification code: %s\r\nExpires at: %s\r\nIf you did not request this, ignore this message.\r\n", s.c.From, to, action, code, expires.UTC().Format(time.RFC3339))

@@ -22,7 +22,10 @@ type EmailBinding struct {
 }
 
 func loadEmailBinding(lookup LookupEnv, user *UserEndpoints) (*EmailBinding, error) {
-	raw, found := lookup("AUTH_EMAIL_BINDING_ENABLED")
+	return loadEmailCapability(lookup, user, "AUTH_EMAIL_BINDING_ENABLED", "AUTH_EMAIL_BINDING_HMAC_KEY")
+}
+func loadEmailCapability(lookup LookupEnv, user *UserEndpoints, enabledKey, keyName string) (*EmailBinding, error) {
+	raw, found := lookup(enabledKey)
 	if !found {
 		return nil, nil
 	}
@@ -37,7 +40,7 @@ func loadEmailBinding(lookup LookupEnv, user *UserEndpoints) (*EmailBinding, err
 		return nil, fmt.Errorf("%w: email requires user endpoints", ErrInvalidConfiguration)
 	}
 	c := &EmailBinding{SMTPTimeout: 10 * time.Second, OwnerHourly: 5, EmailHourly: 5, SourceHourly: 20, MaxBuckets: 10000}
-	raw, _ = lookup("AUTH_EMAIL_BINDING_HMAC_KEY")
+	raw, _ = lookup(keyName)
 	c.HMACKey, e = base64.StdEncoding.Strict().DecodeString(raw)
 	if e != nil || len(c.HMACKey) != 32 || base64.StdEncoding.EncodeToString(c.HMACKey) != raw {
 		return nil, fmt.Errorf("%w: invalid email HMAC key", ErrInvalidConfiguration)

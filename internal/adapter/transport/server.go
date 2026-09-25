@@ -20,6 +20,7 @@ import (
 	authv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 	developerstatusv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_status"
 	emailv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_binding"
+	emailloginv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_login"
 	identityv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/identity"
 	reviewerpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/reviewer_permission"
 	scopecatalogv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/scope_catalog"
@@ -37,6 +38,7 @@ type ServerConfig struct {
 // UserEndpoints is an optional, fully validated runtime assembled before listening.
 type UserEndpoints struct {
 	EmailBinding                  *EmailBindingService
+	EmailLogin                    *EmailLoginService
 	Reviewer                      *ReviewerPermissionService
 	IdentityIssuance              *UserIdentityService
 	Authentication                *AuthenticationService
@@ -103,7 +105,7 @@ func newGRPCServer(
 	if endpoints := configuration.UserEndpoints; endpoints != nil {
 		options = append(options,
 			kgrpc.Middleware(userEndpointAuthenticationMiddleware(verifier, endpoints.ProfileIdentity, endpoints.SessionIdentity, true, endpoints.MaxAuthenticationMessageBytes)),
-			kgrpc.Options(grpc.ForceServerCodec(NewProfileStrictCodec()), grpc.MaxRecvMsgSize(max(profiledomain.MaxMessageBytes, endpoints.MaxAuthenticationMessageBytes))),
+			kgrpc.Options(grpc.ForceServerCodec(NewProfileStrictCodec(endpoints.MaxAuthenticationMessageBytes)), grpc.MaxRecvMsgSize(max(profiledomain.MaxMessageBytes, endpoints.MaxAuthenticationMessageBytes))),
 		)
 	} else {
 		options = append(options, kgrpc.Middleware(userEndpointAuthenticationMiddleware(verifier, nil, nil, false)))
@@ -114,6 +116,11 @@ func newGRPCServer(
 		emailService = endpoints.EmailBinding
 	}
 	emailv1.RegisterEmailBindingServiceServer(server, emailService)
+	loginService := NewEmailLoginService(nil, 16*1024)
+	if endpoints := configuration.UserEndpoints; endpoints != nil && endpoints.EmailLogin != nil {
+		loginService = endpoints.EmailLogin
+	}
+	emailloginv1.RegisterEmailLoginServiceServer(server, loginService)
 	if endpoints := configuration.UserEndpoints; endpoints != nil {
 		authv1.RegisterAuthenticationServiceServer(server, endpoints.Authentication)
 		profilev1.RegisterUserProfileServiceServer(server, endpoints.Profile)
@@ -148,6 +155,9 @@ func newHTTPServer(configuration ServerConfig, verifier *ServiceIdentityVerifier
 	}
 	server := khttp.NewServer(options...)
 	if endpoints != nil {
+		if endpoints.EmailLogin != nil {
+			emailloginv1.RegisterEmailLoginServiceHTTPServer(server, endpoints.EmailLogin)
+		}
 		if endpoints.EmailBinding != nil {
 			emailv1.RegisterEmailBindingServiceHTTPServer(server, endpoints.EmailBinding)
 		}
@@ -228,6 +238,8 @@ func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 func invalidHTTPInput(r *http.Request) error {
 	reason := "INVALID_LOGIN_INPUT"
 	switch {
+	case strings.HasPrefix(r.URL.Path, "/v1/email-logins"):
+		reason = "INVALID_EMAIL_LOGIN_REQUEST"
 	case emailHTTPPath(r.URL.Path):
 		reason = "INVALID_EMAIL_REQUEST"
 	case strings.HasSuffix(r.URL.Path, "/reviewer-permission"):
@@ -249,6 +261,9 @@ func oversizedHTTPInput(r *http.Request) error {
 	if emailHTTPPath(r.URL.Path) {
 		reason = "EMAIL_REQUEST_TOO_LARGE"
 	}
+	if strings.HasPrefix(r.URL.Path, "/v1/email-logins") {
+		reason = "EMAIL_LOGIN_REQUEST_TOO_LARGE"
+	}
 	if strings.HasPrefix(r.URL.Path, "/v1/registrations") {
 		reason = "REGISTRATION_INPUT_TOO_LARGE"
 	}
@@ -261,7 +276,7 @@ func oversizedHTTPInput(r *http.Request) error {
 func authHTTPResponseEncoder(w http.ResponseWriter, r *http.Request, value any) error {
 	w.Header().Set("Cache-Control", "no-store")
 	switch value.(type) {
-	case *authv1.UserRegistrationResult, *authv1.SessionEstablished:
+	case *authv1.UserRegistrationResult, *authv1.SessionEstablished, *emailloginv1.EmailLoginResult:
 		w.WriteHeader(http.StatusCreated)
 	}
 	return khttp.DefaultResponseEncoder(w, r, value)
@@ -273,7 +288,7 @@ func authHTTPErrorEncoder(w http.ResponseWriter, r *http.Request, err error) {
 	// RESOURCE_EXHAUSTED covers both rate limiting (429) and payload limits
 	// (413); the UC's stable reason determines which HTTP status applies.
 	switch converted.Reason {
-	case "EMAIL_REQUEST_TOO_LARGE", "REGISTRATION_INPUT_TOO_LARGE", "AUTHENTICATION_INPUT_TOO_LARGE", profiledomain.ErrLimit.Error():
+	case "EMAIL_LOGIN_REQUEST_TOO_LARGE", "EMAIL_REQUEST_TOO_LARGE", "REGISTRATION_INPUT_TOO_LARGE", "AUTHENTICATION_INPUT_TOO_LARGE", profiledomain.ErrLimit.Error():
 		converted.Code = http.StatusRequestEntityTooLarge
 	case "EMAIL_FLOW_MISMATCH", profiledomain.ErrExhausted.Error():
 		converted.Code = http.StatusConflict

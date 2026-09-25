@@ -134,3 +134,17 @@ func (u *Login) fail(ctx context.Context, id string, now time.Time) error {
 	}
 	return domain.ErrFailed
 }
+
+// Reject counts a transport-level invalid request in the same bounded request
+// buckets as a well-formed request, without reading account or Session data.
+func (u *Login) Reject(source string, begin bool) error {
+	now := u.now().UTC().Truncate(time.Millisecond)
+	if begin {
+		if !u.limiter.AllowBegin(source, now) {
+			return domain.ErrRate
+		}
+	} else if !u.limiter.AllowComplete("source:"+source, now) {
+		return domain.ErrRate
+	}
+	return domain.ErrInvalid
+}

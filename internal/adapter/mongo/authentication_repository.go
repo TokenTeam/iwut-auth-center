@@ -17,6 +17,7 @@ import (
 	"iwut-auth-center/internal/authentication/domain"
 	"iwut-auth-center/internal/authentication/port"
 	email "iwut-auth-center/internal/emailbinding/domain"
+	emaillogin "iwut-auth-center/internal/emaillogin/domain"
 )
 
 const (
@@ -67,6 +68,7 @@ type SessionDocument struct {
 	SessionID            string     `bson:"sessionId"`
 	AuthID               string     `bson:"authId"`
 	AuthenticationMethod string     `bson:"authenticationMethod"`
+	EmailBindingRevision int64      `bson:"emailBindingRevision,omitempty"`
 	CredentialID         string     `bson:"credentialId"`
 	TokenDigest          []byte     `bson:"tokenDigest"`
 	AuthenticatedAt      time.Time  `bson:"authenticatedAt"`
@@ -144,7 +146,7 @@ func (r *AuthenticationRepository) WithAuthTransaction(ctx context.Context, fn f
 		return nil, fn(tx)
 	}, options.Transaction().SetReadConcern(readconcern.Snapshot()).SetWriteConcern(writeconcern.Majority()).SetReadPreference(readpref.Primary()))
 	if err != nil {
-		for _, known := range append(email.Errors, port.ErrCredentialRegistered, port.ErrAuthenticationFailed, port.ErrSessionInvalid, port.ErrAlreadyCompleted, port.ErrLimitExceeded, port.ErrNotFound) {
+		for _, known := range append(append(append([]error{}, email.Errors...), emaillogin.Errors...), port.ErrCredentialRegistered, port.ErrAuthenticationFailed, port.ErrSessionInvalid, port.ErrAlreadyCompleted, port.ErrLimitExceeded, port.ErrNotFound) {
 			if errors.Is(err, known) {
 				return known
 			}
@@ -365,7 +367,7 @@ func (r *AuthenticationRepository) CreateSessionTx(ctx context.Context, session 
 	if err := credentials.Err(); err != nil {
 		return err
 	}
-	cursor, err := r.database.Collection(SessionCollection).Find(ctx, bson.M{"authId": session.AuthID, "revokedAt": nil, "expiresAt": bson.M{"$gt": now}, "credentialId": bson.M{"$in": ids}, "authenticationMethod": "DEVICE_CREDENTIAL"}, options.Find().SetSort(bson.D{{Key: "lastUsedAt", Value: 1}, {Key: "createdAt", Value: 1}, {Key: "sessionId", Value: 1}}))
+	cursor, err := r.database.Collection(SessionCollection).Find(ctx, bson.M{"authId": session.AuthID, "revokedAt": nil, "expiresAt": bson.M{"$gt": now}, "credentialId": bson.M{"$in": ids}, "authenticationMethod": bson.M{"$in": bson.A{"DEVICE_CREDENTIAL", emaillogin.AuthenticationMethod}}}, options.Find().SetSort(bson.D{{Key: "lastUsedAt", Value: 1}, {Key: "createdAt", Value: 1}, {Key: "sessionId", Value: 1}}))
 	if err != nil {
 		return err
 	}
@@ -421,7 +423,7 @@ func validCredential(doc CredentialDocument) bool {
 	return err == nil && bytes.Equal(fingerprint, doc.Fingerprint) && deviceprotocol.ValidID(doc.CredentialID) && doc.AuthID != "" && doc.ProtocolVersion == domain.ProtocolVersion && !doc.CreatedAt.IsZero() && doc.RevokedAt == nil
 }
 func validSession(doc SessionDocument) bool {
-	return deviceprotocol.ValidID(doc.SessionID) && doc.AuthID != "" && deviceprotocol.ValidID(doc.CredentialID) && doc.AuthenticationMethod == "DEVICE_CREDENTIAL" && len(doc.TokenDigest) == 32 && !doc.CreatedAt.IsZero() && doc.AuthenticatedAt.Equal(doc.CreatedAt) && !doc.LastUsedAt.Before(doc.CreatedAt) && doc.LastUsedAt.Before(doc.ExpiresAt) && doc.ExpiresAt.After(doc.CreatedAt) && doc.RevokedAt == nil
+	return deviceprotocol.ValidID(doc.SessionID) && doc.AuthID != "" && validSessionMethod(doc) && len(doc.TokenDigest) == 32 && !doc.CreatedAt.IsZero() && doc.AuthenticatedAt.Equal(doc.CreatedAt) && !doc.LastUsedAt.Before(doc.CreatedAt) && doc.LastUsedAt.Before(doc.ExpiresAt) && doc.ExpiresAt.After(doc.CreatedAt) && doc.RevokedAt == nil
 }
 
 var _ port.LoginRepository = (*AuthenticationRepository)(nil)
@@ -466,4 +468,8 @@ func (r *AuthenticationRepository) CheckSessionTx(tx context.Context, digest []b
 		doc.LastUsedAt = now
 	}
 	return doc.Domain(), nil
+}
+
+func validSessionMethod(doc SessionDocument) bool {
+	return deviceprotocol.ValidID(doc.CredentialID) && (doc.AuthenticationMethod == "DEVICE_CREDENTIAL" || doc.AuthenticationMethod == emaillogin.AuthenticationMethod && doc.EmailBindingRevision > 0)
 }

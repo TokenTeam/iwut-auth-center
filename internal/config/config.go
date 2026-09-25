@@ -33,6 +33,7 @@ type LookupEnv func(key string) (value string, found bool)
 
 type Config struct {
 	EmailBinding             *EmailBinding
+	EmailLogin               *EmailBinding
 	IdentityIssuance         *IdentityIssuance
 	UserEndpoints            *UserEndpoints
 	HTTPAddr                 string
@@ -131,12 +132,20 @@ func Load(lookup LookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	emailLogin, err := loadEmailCapability(lookup, userEndpoints, "AUTH_EMAIL_LOGIN_ENABLED", "AUTH_EMAIL_LOGIN_CODE_KEY")
+	if err != nil {
+		return Config{}, err
+	}
+	if emailBinding != nil && emailLogin != nil && string(emailBinding.HMACKey) == string(emailLogin.HMACKey) {
+		return Config{}, fmt.Errorf("%w: email login key must be independent", ErrInvalidConfiguration)
+	}
 	issuance, err := loadIdentityIssuance(lookup, userEndpoints, callers)
 	if err != nil {
 		return Config{}, err
 	}
 	return Config{
 		EmailBinding:     emailBinding,
+		EmailLogin:       emailLogin,
 		IdentityIssuance: issuance,
 		UserEndpoints:    userEndpoints,
 		HTTPAddr:         httpAddress, GRPCAddr: address, MongoURI: mongoURI, MongoDatabase: database,

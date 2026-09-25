@@ -7,12 +7,24 @@ import (
 	"iwut-auth-center/internal/profile/domain"
 )
 
-type profileStrictCodec struct{ encoding.Codec }
+type profileStrictCodec struct {
+	encoding.Codec
+	maxAuthentication int
+}
 
 // NewProfileStrictCodec preserves oneof presence validation before Proto discards
 // earlier wire branches. Install using grpc.ForceServerCodec alongside MaxRecvMsgSize.
-func NewProfileStrictCodec() encoding.Codec { return profileStrictCodec{encoding.GetCodec("proto")} }
+func NewProfileStrictCodec(limits ...int) encoding.Codec {
+	n := 16 * 1024
+	if len(limits) > 0 && limits[0] > 0 {
+		n = limits[0]
+	}
+	return profileStrictCodec{encoding.GetCodec("proto"), n}
+}
 func (c profileStrictCodec) Unmarshal(data []byte, v any) error {
+	if e := emailLoginWire(data, v, c.maxAuthentication); e != nil {
+		return e
+	}
 	if e := emailWire(data, v); e != nil {
 		return e
 	}

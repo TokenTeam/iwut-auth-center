@@ -67,7 +67,9 @@ func NewEmailRepository(r *RegistrationRepository, keyID string, limits EmailLim
 	}
 	return &EmailRepository{r, keyID, limits}, nil
 }
-func (r *EmailRepository) Initialize(ctx context.Context, now time.Time) error {
+
+// EnsureEmailSchema shares directory/quota storage without loading or rotating a binding key.
+func EnsureEmailSchema(ctx context.Context, db *m.Database) error {
 	indexes := map[string][]m.IndexModel{
 		EmailBindingCollection:            {{Keys: bson.D{{Key: "authId", Value: 1}}, Options: options.Index().SetUnique(true)}, {Keys: bson.D{{Key: "email", Value: 1}}, Options: options.Index().SetUnique(true).SetPartialFilterExpression(bson.M{"email": bson.M{"$type": "string"}})}},
 		EmailOperationCollection:          {{Keys: bson.D{{Key: "operationId", Value: 1}}, Options: options.Index().SetUnique(true)}, {Keys: bson.D{{Key: "mode", Value: 1}, {Key: "owner", Value: 1}, {Key: "requestId", Value: 1}}, Options: options.Index().SetUnique(true)}, {Keys: bson.D{{Key: "retainUntil", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)}},
@@ -75,9 +77,15 @@ func (r *EmailRepository) Initialize(ctx context.Context, now time.Time) error {
 		AuthenticationOperationCollection: {{Keys: bson.D{{Key: "purgeAfter", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)}},
 	}
 	for name, models := range indexes {
-		if _, e := r.db.Collection(name).Indexes().CreateMany(ctx, models); e != nil {
+		if _, e := db.Collection(name).Indexes().CreateMany(ctx, models); e != nil {
 			return d.ErrUnavailable
 		}
+	}
+	return nil
+}
+func (r *EmailRepository) Initialize(ctx context.Context, now time.Time) error {
+	if err := EnsureEmailSchema(ctx, r.db); err != nil {
+		return err
 	}
 	return r.WithAuthTransaction(ctx, func(tx context.Context) error {
 		cur, e := r.db.Collection(EmailOperationCollection).Find(tx, bson.M{"keyId": bson.M{"$ne": r.keyID}})

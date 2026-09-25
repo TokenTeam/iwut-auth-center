@@ -2,6 +2,8 @@ package mongo
 
 import (
 	"context"
+	"errors"
+	m "go.mongodb.org/mongo-driver/v2/mongo"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -16,7 +18,21 @@ func (r *AuthenticationRepository) RevokeCurrentSession(ctx context.Context, dig
 		return port.ErrInvalidSessionToken
 	}
 	return r.WithAuthTransaction(ctx, func(tx context.Context) error {
-		_, err := r.database.Collection(SessionCollection).UpdateOne(tx,
+		var session SessionDocument
+		err := r.database.Collection(SessionCollection).FindOne(tx, bson.M{"tokenDigest": digest}).Decode(&session)
+		if errors.Is(err, m.ErrNoDocuments) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		// Revocation does not require an active owner, unexpired Session or usable
+		// credential, but a corrupt/unknown authentication method is never trusted.
+		if !validSessionMethod(session) {
+			return port.ErrUnavailable
+		}
+
+		_, err = r.database.Collection(SessionCollection).UpdateOne(tx,
 			bson.M{"tokenDigest": digest, "revokedAt": nil},
 			bson.M{"$set": bson.M{"revokedAt": r.currentTime(now)}})
 		return err
