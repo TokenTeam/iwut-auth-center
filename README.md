@@ -93,8 +93,8 @@ Profile RPCs require `x-iwut-identity` with a trusted-user JWS for
 `RevokeCurrentSession` accepts only its `x-iwut-session` token and succeeds
 idempotently even when that correctly formatted token is expired or unknown.
 `RevokeOwnCredential` requires a currently valid Session in that header.
-Gateway routes, email recovery, device migration and
-mobile key storage/UI remain separate deliveries. These are app-managed device
+Gateway routes, old-device authorization and mobile key storage/UI remain
+separate deliveries. Email recovery through a new device is implemented by UC012 below. These are app-managed device
 keys, not WebAuthn Passkeys.
 
 ## HTTP/JSON interface
@@ -353,5 +353,51 @@ or Session secret is persisted. Audit contains only account/operation IDs,
 revision, timestamp and result. SMTP failures never return server response text.
 Tests use only loopback TLS SMTP capture and `.test` addresses, never real users.
 Public vectors, real Mongo rollback/concurrency/rotation/quota tests and production
-Wire HTTP/gRPC tests cover the implementation. This delivers neither UC012 email
-login nor UC013 Developer enrollment, and does not claim public client delivery.
+Wire HTTP/gRPC tests cover the implementation. UC012 email login is described
+below; UC013 Developer enrollment and public client delivery remain separate.
+
+
+## Email login and device authorization (UC012)
+
+`AUTH_EMAIL_LOGIN_ENABLED` defaults to `false`. When enabled it requires
+`AUTH_USER_ENDPOINTS_ENABLED=true`, `AUTH_EMAIL_LOGIN_CODE_KEY` (canonical standard
+Base64 of an independent random 32-byte key), and the SMTP settings documented
+above. The login key must differ from association keys and the binding HMAC key
+when both email capabilities are enabled. Login can be enabled without binding
+routes or the binding HMAC key. Disabled HTTP routes are absent; the two gRPC
+methods return UNIMPLEMENTED.
+
+The exact `auth_center.v1.email_login.EmailLoginService` methods are
+`BeginEmailLogin` and `CompleteEmailLogin`, exposed at `POST /v1/email-logins`
+(HTTP 200) and `POST /v1/email-logins/{operation_id}/completion` (HTTP 201).
+Both reject any supplied `x-iwut-session`, including empty or valid tokens.
+Gateway routing remains a separate delivery; the intended policy is DIRECT.
+
+The client supplies its persistent device public key and email, then the emailed
+code and the independent `iwut-email-login-v1` signature. The server keeps the
+original email ownership/revision and eligibility fixed for the operation,
+rechecks them at commit, and atomically registers or reuses the device credential,
+consumes the operation, applies Session LRU and inserts the Session and audit.
+No USER or student association is created. Unknown/disabled targets receive the
+same challenge/mail shape and cannot become eligible during that operation.
+
+The resulting Session uses `EMAIL_CODE_AND_DEVICE`, a required device credential
+reference and positive `emailBindingRevision` provenance. All Session consumers
+support it, including revocation, binding and identity issuance. An email change
+invalidates pending login operations but does not revoke authorized devices or
+their Sessions; revoke the device credential to remove that access. Later UC007
+automatic login uses the ordinary `DEVICE_CREDENTIAL` method. The same account-wide
+10-Session limit covers both methods.
+
+Login reuses UC011's authoritative binding directory, TLS SMTP, authentication
+transaction fence, pending-operation capacity and shared email/source send quotas.
+It uses separate purpose-bound request/code HMAC and key-change invalidation.
+Repeated Begin requests never resend mail; completed login operations never replay
+a Session token. On a lost completion response, retain the original private key
+and recover through device login. A login HMAC key change closes pending login
+operations without revoking already authorized devices or Sessions.
+
+Validation includes the public login/registration/device vectors, real Mongo
+transactions and concurrency, production Wire HTTP/gRPC with controlled TLS SMTP,
+login-only startup, mixed-method LRU and Session consumers. All tests use isolated
+resources and test addresses; this does not claim Gateway or mobile delivery.
