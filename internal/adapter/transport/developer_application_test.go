@@ -23,7 +23,7 @@ type applicationRepoStub struct {
 	retries int
 }
 
-func (r *applicationRepoStub) Evaluate(_ context.Context, _ []byte, decide func(d.ApplicationState) (bool, error)) (d.ApplicationState, error) {
+func (r *applicationRepoStub) Evaluate(_ context.Context, _ []byte, decide func(d.ApplicationState) (d.HandleClaim, error)) (d.ApplicationState, error) {
 	r.calls++
 	for range r.retries {
 		if _, e := decide(r.state); e != nil {
@@ -34,7 +34,8 @@ func (r *applicationRepoStub) Evaluate(_ context.Context, _ []byte, decide func(
 	if e != nil {
 		return d.ApplicationState{}, e
 	}
-	if activate {
+	if activate.DeveloperHandle != "" {
+		r.state.DeveloperHandle = activate.DeveloperHandle
 		now := time.Now()
 		r.state.Status = d.DeveloperStatusApproved
 		r.state.ActivatedAt = &now
@@ -49,10 +50,10 @@ func TestDeveloperApplicationAccountAdmissionAndRetries(t *testing.T) {
 	if _, e := s.GetOwnDeveloperEligibility(ctx, &pb.GetOwnDeveloperEligibilityRequest{}); e != nil {
 		t.Fatal(e)
 	}
-	if _, e := s.ApplyForDeveloper(ctx, &pb.ApplyForDeveloperRequest{}); e != nil {
+	if _, e := s.ApplyForDeveloper(ctx, &pb.ApplyForDeveloperRequest{DeveloperHandle: "Alice"}); e != nil {
 		t.Fatal(e)
 	}
-	_, e := s.ApplyForDeveloper(ctx, &pb.ApplyForDeveloperRequest{})
+	_, e := s.ApplyForDeveloper(ctx, &pb.ApplyForDeveloperRequest{DeveloperHandle: "Alice"})
 	if status.Code(e) != codes.ResourceExhausted || kerrors.FromError(e).Metadata["retryAfterSeconds"] != "60" {
 		t.Fatal(e)
 	}
@@ -64,11 +65,11 @@ func TestDeveloperApplicationSourceAndBoundedCapacity(t *testing.T) {
 	s := NewDeveloperApplicationService(a, 16384)
 	// Invalid tokens consume bounded source admission but create no account bucket.
 	for range 2 {
-		if _, e := s.ApplyForDeveloper(t.Context(), &pb.ApplyForDeveloperRequest{}); status.Code(e) != codes.Unauthenticated {
+		if _, e := s.ApplyForDeveloper(t.Context(), &pb.ApplyForDeveloperRequest{DeveloperHandle: "Alice"}); status.Code(e) != codes.Unauthenticated {
 			t.Fatal(e)
 		}
 	}
-	if _, e := s.ApplyForDeveloper(t.Context(), &pb.ApplyForDeveloperRequest{}); status.Code(e) != codes.ResourceExhausted {
+	if _, e := s.ApplyForDeveloper(t.Context(), &pb.ApplyForDeveloperRequest{DeveloperHandle: "Alice"}); status.Code(e) != codes.ResourceExhausted {
 		t.Fatal(e)
 	}
 	if repo.calls != 0 {

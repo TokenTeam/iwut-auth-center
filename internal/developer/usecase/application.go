@@ -25,7 +25,7 @@ func (a *Application) AdmitSource(source string) error {
 	}
 	return nil
 }
-func (a *Application) Execute(ctx context.Context, digest []byte, apply bool) (domain.ApplicationState, []domain.ApplicationBlocker, error) {
+func (a *Application) Execute(ctx context.Context, digest []byte, apply bool, candidate string) (domain.ApplicationState, []domain.ApplicationBlocker, error) {
 	if a == nil || a.repository == nil || a.limiter == nil {
 		return domain.ApplicationState{}, nil, domain.ErrApplicationUnavailable
 	}
@@ -33,21 +33,26 @@ func (a *Application) Execute(ctx context.Context, digest []byte, apply bool) (d
 		return domain.ApplicationState{}, nil, domain.ErrApplicationSession
 	}
 	admitted := ""
-	s, err := a.repository.Evaluate(ctx, digest, func(s domain.ApplicationState) (bool, error) {
+	s, err := a.repository.Evaluate(ctx, digest, func(s domain.ApplicationState) (domain.HandleClaim, error) {
 		if !s.Valid() {
-			return false, domain.ErrApplicationUnavailable
+			return domain.HandleClaim{}, domain.ErrApplicationUnavailable
 		}
 		// Mongo retries do not consume additional account quota.
 		if admitted != s.AuthID {
 			if !a.limiter.AllowLocator(s.AuthID, time.Now().UTC()) {
-				return false, domain.ErrApplicationRate
+				return domain.HandleClaim{}, domain.ErrApplicationRate
 			}
 			admitted = s.AuthID
 		}
 		if apply {
-			return s.Apply(a.ready)
+			claim, err := s.Apply(a.ready, candidate)
+			if err != nil || !claim {
+				return domain.HandleClaim{}, err
+			}
+			handle, _ := domain.NormalizeDeveloperHandle(candidate)
+			return domain.HandleClaim{DeveloperHandle: handle}, nil
 		}
-		return false, nil
+		return domain.HandleClaim{}, nil
 	})
 	if err != nil {
 		return domain.ApplicationState{}, nil, err

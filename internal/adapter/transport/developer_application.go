@@ -66,7 +66,7 @@ func (s *DeveloperApplicationService) ApplyForDeveloper(ctx context.Context, r *
 	if err != nil {
 		return nil, err
 	}
-	state, _, err := s.service.Execute(ctx, digest, true)
+	state, _, err := s.service.Execute(ctx, digest, true, r.GetDeveloperHandle())
 	if err != nil {
 		return nil, developerApplicationError(err)
 	}
@@ -74,7 +74,7 @@ func (s *DeveloperApplicationService) ApplyForDeveloper(ctx context.Context, r *
 	if !ok || state.Status != d.DeveloperStatusApproved {
 		return nil, developerApplicationError(d.ErrApplicationUnavailable)
 	}
-	out := &pb.DeveloperApplicationResult{DeveloperStatus: status}
+	out := &pb.DeveloperApplicationResult{DeveloperStatus: status, DeveloperHandle: state.DeveloperHandle}
 	if state.ActivatedAt != nil {
 		v := state.ActivatedAt.UnixMilli()
 		out.ActivatedAtUnixMs = &v
@@ -86,11 +86,14 @@ func (s *DeveloperApplicationService) GetOwnDeveloperEligibility(ctx context.Con
 	if err != nil {
 		return nil, err
 	}
-	state, blockers, err := s.service.Execute(ctx, digest, false)
+	state, blockers, err := s.service.Execute(ctx, digest, false, "")
 	if err != nil {
 		return nil, developerApplicationError(err)
 	}
 	out := &pb.OwnDeveloperEligibility{CanApply: len(blockers) == 0}
+	if state.DeveloperHandle != "" {
+		out.DeveloperHandle = &state.DeveloperHandle
+	}
 	if state.Status != "" {
 		status, ok := developerStatusToProto(state.Status)
 		if !ok {
@@ -113,6 +116,12 @@ func (s *DeveloperApplicationService) GetOwnDeveloperEligibility(ctx context.Con
 }
 func developerApplicationError(err error) error {
 	switch {
+	case errors.Is(err, d.ErrInvalidHandle):
+		return transportStatus(codes.InvalidArgument, d.ErrInvalidHandle.Error(), "invalid developer handle")
+	case errors.Is(err, d.ErrHandleTaken):
+		return transportStatus(codes.AlreadyExists, d.ErrHandleTaken.Error(), "developer handle is already taken")
+	case errors.Is(err, d.ErrHandleChange):
+		return transportStatus(codes.FailedPrecondition, d.ErrHandleChange.Error(), "developer handle cannot be changed")
 	case errors.Is(err, d.ErrApplicationInvalid):
 		return transportStatus(codes.InvalidArgument, d.ErrApplicationInvalid.Error(), "invalid request")
 	case errors.Is(err, d.ErrApplicationSession):

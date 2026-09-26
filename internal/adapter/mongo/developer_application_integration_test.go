@@ -32,8 +32,20 @@ func developerFixture(t *testing.T) (*DeveloperApplicationRepository, *m.Databas
 	r, _ := NewDeveloperApplicationRepository(a)
 	return r, db, s
 }
-func developerApply(s d.ApplicationState) (bool, error) { return s.Apply(true) }
-func developerRead(s d.ApplicationState) (bool, error)  { return false, nil }
+func developerApply(s d.ApplicationState) (d.HandleClaim, error) {
+	return developerApplyName("Alice")(s)
+}
+func developerApplyName(name string) func(d.ApplicationState) (d.HandleClaim, error) {
+	return func(s d.ApplicationState) (d.HandleClaim, error) {
+		claim, err := s.Apply(true, name)
+		if err != nil || !claim {
+			return d.HandleClaim{}, err
+		}
+		handle, _ := d.NormalizeDeveloperHandle(name)
+		return d.HandleClaim{DeveloperHandle: handle}, nil
+	}
+}
+func developerRead(s d.ApplicationState) (d.HandleClaim, error) { return d.HandleClaim{}, nil }
 func TestDeveloperMongoConcurrentActivationPreservesAccount(t *testing.T) {
 	r, db, s := developerFixture(t)
 	var before bson.M
@@ -216,9 +228,9 @@ func TestDeveloperMongoUsesSharedSessionAndEmailFence(t *testing.T) {
 			result := make(chan error, 1)
 			var once sync.Once
 			go func() {
-				_, e := r.Evaluate(t.Context(), s.TokenDigest, func(state d.ApplicationState) (bool, error) {
+				_, e := r.Evaluate(t.Context(), s.TokenDigest, func(state d.ApplicationState) (d.HandleClaim, error) {
 					once.Do(func() { close(entered); <-release })
-					return state.Apply(true)
+					return developerApply(state)
 				})
 				result <- e
 			}()

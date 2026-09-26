@@ -410,7 +410,8 @@ with `AUTH_USER_ENDPOINTS_ENABLED=true`; invalid combinations refuse startup.
 The two exact `auth_center.v1.developer_application.DeveloperApplicationService`
 methods are registered on both transports only when enabled:
 
-- `ApplyForDeveloper`: `POST /v1/users/me/developer-application`, body `{}`.
+- `ApplyForDeveloper`: `POST /v1/users/me/developer-application`, body
+  `{"developerHandle":"Alice"}` (returns the canonical `alice`).
 - `GetOwnDeveloperEligibility`: `GET /v1/users/me/developer-eligibility`, no body.
 
 Both return HTTP 200 and require exactly one canonical `x-iwut-session`.
@@ -418,6 +419,8 @@ Both device and email/device Sessions work. They reject unknown JSON/Proto field
 query parameters and alternative identity carriers; neither accepts a target ID.
 Optional status/activation time retain presence: an ordinary user has no status;
 a historical Developer without a verifiable activation record has no timestamp.
+Eligibility omits `developerHandle` until a name is claimed. Apply always requires
+a handle, including retries: old `{}` requests now fail `INVALID_DEVELOPER_HANDLE`.
 All responses use `Cache-Control: no-store`.
 
 First enrollment requires the current activated email and a recovery capability
@@ -430,12 +433,39 @@ flag false in production until public recovery delivery is complete. Email bindi
 routes need not be enabled to use an already activated email. Legitimately disabled
 recovery produces an eligibility blocker; malformed configuration refuses startup.
 
-Only explicit `null -> APPROVED` changes state. Repeated APPROVED is idempotent
-(including when recovery is disabled), PENDING conflicts, and REJECTED/SUSPENDED
-cannot reapply here. Current Session, principal, binding and status are confirmed
-under the shared authentication transaction fence. `auth_developer_activations`
-has a unique authId; `auth_developer_application_audit` has a unique subjectAuthId.
-Both records and the principal status commit atomically. Audit stores decision
+The user chooses a public developer ID, `developerHandle`: 3–32 ASCII characters,
+first character a letter, then letters, digits, `_` or `-`. Input is not trimmed;
+only valid input is lowercased. The namespace is globally unique and each authId
+can claim one name. There are no reserved words or implied official privileges;
+`admin` and `official` are ordinary names. Names cannot be renamed, transferred,
+released or recycled, including after account disable or Developer suspension.
+Application UUIDs, ownership authId and JWS/UC002 claims remain unchanged. Public
+`developerHandle/nameKey` lookup and routing are separate work.
+
+Only explicit `null -> APPROVED` changes qualification. APPROVED with the same
+canonical handle is idempotent, including when recovery is disabled. A different
+handle returns `DEVELOPER_HANDLE_CHANGE_NOT_ALLOWED`; another account's name
+returns `DEVELOPER_HANDLE_TAKEN` only after the caller's email/readiness gates.
+PENDING conflicts and REJECTED/SUSPENDED cannot reapply. APPROVED legacy accounts
+that have never claimed a handle can explicitly claim once through the same
+command, requiring current email and recovery readiness. That operation preserves
+activation time (including absence) and old activation/audit records, and writes
+a separate `CLAIM_DEVELOPER_HANDLE` audit. Eligibility advertises this path via
+canApply/blockers; it never claims a name or promises candidate availability.
+
+Current Session, principal, binding and status are confirmed under the shared
+authentication transaction fence. `auth_developer_handles` is the sole ownership
+authority, with separate binary
+unique indexes on authId and canonical developerHandle and no TTL. New activation
+records and audit contain immutable handle evidence; missing, mismatched or
+corrupt ownership fails closed and cannot become a legacy rename opportunity.
+Indexed historical evidence also prevents another account from taking that name
+when its authority row is missing.
+`auth_developer_activations` has a unique authId. Audit uniqueness is now
+`(subjectAuthId, action)`: startup creates that replacement index before dropping
+the old single-subject unique index. This idempotent upgrade retains every event;
+conflicting indexes/data stop startup. Name claim, status/updatedAt, activation
+when applicable, and audit commit atomically. Audit stores handle, decision
 revision, actor/subject, transition and UTC time; no email address or secrets.
 Unknown commits return unavailable, permitting query/retry with the existing
 Session. Permissions, permissionRevision, profile, association and Session lifetime
@@ -458,7 +488,9 @@ Database transaction retries debit the account only once. The conservative
 headers are not trusted, so configure source limits for Gateway aggregate traffic.
 
 `make test-mongo` includes production Wire HTTP/gRPC, real email binding/login
-through local TLS capture, atomic Mongo concurrency/audit failures/unknown commits,
+through local TLS capture, case-equivalent cross-account name races, same-account
+name conflicts, legacy claim/index upgrade, corrupt ownership detection, atomic
+Mongo concurrency/audit failures/unknown commits,
 and same-Session UC010/UC002 verification. When the sibling App Center checkout is
 available, it also builds and starts its actual production binary and migrations
 in a separate database, checks application creation with the newly issued JWS,

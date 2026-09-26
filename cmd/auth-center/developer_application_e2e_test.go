@@ -96,10 +96,10 @@ func TestE2E_DeveloperApplication_ProductionWireAndAppCenter(t *testing.T) {
 	user, _ := registerUser(t, auth, device, bytes.Repeat([]byte{9}, 32))
 	ctx := sessionCallContext(t.Context(), user.Session.SessionToken)
 	query, e := client.GetOwnDeveloperEligibility(ctx, &pb.GetOwnDeveloperEligibilityRequest{})
-	if e != nil || query.DeveloperStatus != nil || query.ActivatedAtUnixMs != nil || query.CanApply || len(query.Blockers) != 1 || query.Blockers[0] != pb.DeveloperApplicationBlocker_DEVELOPER_APPLICATION_BLOCKER_EMAIL_REQUIRED {
+	if e != nil || query.DeveloperStatus != nil || query.ActivatedAtUnixMs != nil || query.DeveloperHandle != nil || query.CanApply || len(query.Blockers) != 1 || query.Blockers[0] != pb.DeveloperApplicationBlocker_DEVELOPER_APPLICATION_BLOCKER_EMAIL_REQUIRED {
 		t.Fatal(query, e)
 	}
-	if _, e = client.ApplyForDeveloper(ctx, &pb.ApplyForDeveloperRequest{}); status.Code(e) != codes.FailedPrecondition {
+	if _, e = client.ApplyForDeveloper(ctx, &pb.ApplyForDeveloperRequest{DeveloperHandle: "Alice"}); status.Code(e) != codes.FailedPrecondition {
 		t.Fatal(e)
 	}
 	base := "http://" + env[config.HTTPAddrEnv]
@@ -123,13 +123,13 @@ func TestE2E_DeveloperApplication_ProductionWireAndAppCenter(t *testing.T) {
 		return resp.StatusCode, resp.Header, b
 	}
 	headers := http.Header{"X-Iwut-Session": []string{user.Session.SessionToken}}
-	code, h, body := rawHTTP("POST", "/v1/users/me/developer-application", "{}", headers)
+	code, h, body := rawHTTP("POST", "/v1/users/me/developer-application", `{"developerHandle":"Alice"}`, headers)
 	if code != 409 || !bytes.Contains(body, []byte("DEVELOPER_EMAIL_REQUIRED")) || h.Get("Cache-Control") != "no-store" {
 		t.Fatal(code, string(body), h)
 	}
 	for _, values := range [][]string{nil, {""}, {"bad"}, {user.Session.SessionToken, user.Session.SessionToken}} {
 		badctx := metadata.NewOutgoingContext(t.Context(), metadata.MD{"x-iwut-session": values})
-		if _, e = client.ApplyForDeveloper(badctx, &pb.ApplyForDeveloperRequest{}); status.Code(e) != codes.Unauthenticated {
+		if _, e = client.ApplyForDeveloper(badctx, &pb.ApplyForDeveloperRequest{DeveloperHandle: "Alice"}); status.Code(e) != codes.Unauthenticated {
 			t.Fatal(values, e)
 		}
 	}
@@ -139,10 +139,21 @@ func TestE2E_DeveloperApplication_ProductionWireAndAppCenter(t *testing.T) {
 			t.Fatal(carrier, e)
 		}
 	}
-	for _, payload := range []string{"", "null", "[]", `{"authId":"other"}`, `{"canApply":true}`, `{"requestId":"x"}`, `{"email":"x@example.test"}`} {
+	for _, payload := range []string{"", "null", "[]", `{"authId":"other"}`, `{"canApply":true}`, `{"requestId":"x"}`, `{"email":"x@example.test"}`, `{"developerHandle":"Alice","developer_handle":"Bob"}`} {
 		code, _, body := rawHTTP("POST", "/v1/users/me/developer-application", payload, headers)
 		if code != 400 || !bytes.Contains(body, []byte("INVALID_DEVELOPER_APPLICATION_REQUEST")) {
 			t.Fatal(payload, code, string(body))
+		}
+	}
+	for _, payload := range []string{`{}`, `{"developerHandle":null}`, `{"developerHandle":""}`, `{"developerHandle":"ab"}`, `{"developerHandle":" Alice"}`, `{"developerHandle":"Ａlice"}`, `{"developerHandle":"alice.name"}`, `{"developer_handle":"1abc"}`} {
+		code, _, body := rawHTTP("POST", "/v1/users/me/developer-application", payload, headers)
+		if code != 400 || !bytes.Contains(body, []byte("INVALID_DEVELOPER_HANDLE")) {
+			t.Fatal(payload, code, string(body))
+		}
+	}
+	for _, handle := range []string{"", "ab", " Alice", "Ａlice", "alice/name"} {
+		if _, e = client.ApplyForDeveloper(ctx, &pb.ApplyForDeveloperRequest{DeveloperHandle: handle}); status.Code(e) != codes.InvalidArgument {
+			t.Fatal(handle, e)
 		}
 	}
 	code, _, body = rawHTTP("GET", "/v1/users/me/developer-eligibility?authId=other", "", headers)
@@ -153,16 +164,16 @@ func TestE2E_DeveloperApplication_ProductionWireAndAppCenter(t *testing.T) {
 	if code != 413 || !bytes.Contains(body, []byte("DEVELOPER_APPLICATION_REQUEST_TOO_LARGE")) {
 		t.Fatal(code, string(body))
 	}
-	unknown := &pb.ApplyForDeveloperRequest{}
-	unknown.ProtoReflect().SetUnknown([]byte{0x0a, 1, 'x'})
+	unknown := &pb.ApplyForDeveloperRequest{DeveloperHandle: "Alice"}
+	unknown.ProtoReflect().SetUnknown([]byte{0x12, 1, 'x'})
 	if _, e = client.ApplyForDeveloper(ctx, unknown); status.Code(e) != codes.InvalidArgument {
 		t.Fatal(e)
 	}
-	unknown.ProtoReflect().SetUnknown(bytes.Repeat([]byte{0x08, 1}, 9000))
+	unknown.ProtoReflect().SetUnknown(bytes.Repeat([]byte{0x10, 1}, 9000))
 	if _, e = client.ApplyForDeveloper(ctx, unknown); status.Code(e) != codes.ResourceExhausted {
 		t.Fatal(e)
 	}
-	if e = conn.Invoke(ctx, "/auth_center.v1.developer_application.DeveloperApplicationService/Unknown", &pb.ApplyForDeveloperRequest{}, &pb.DeveloperApplicationResult{}); status.Code(e) != codes.Unimplemented {
+	if e = conn.Invoke(ctx, "/auth_center.v1.developer_application.DeveloperApplicationService/Unknown", &pb.ApplyForDeveloperRequest{DeveloperHandle: "Alice"}, &pb.DeveloperApplicationResult{}); status.Code(e) != codes.Unimplemented {
 		t.Fatal(e)
 	}
 	nextCode := func() string {
@@ -211,13 +222,21 @@ func TestE2E_DeveloperApplication_ProductionWireAndAppCenter(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	result, e := client.ApplyForDeveloper(sessionCallContext(t.Context(), logged.Session.SessionToken), &pb.ApplyForDeveloperRequest{})
-	if e != nil || result.DeveloperStatus != statuspb.DeveloperStatus_DEVELOPER_STATUS_APPROVED || result.GetActivatedAtUnixMs() <= 0 {
+	result, e := client.ApplyForDeveloper(sessionCallContext(t.Context(), logged.Session.SessionToken), &pb.ApplyForDeveloperRequest{DeveloperHandle: "Alice"})
+	if e != nil || result.DeveloperStatus != statuspb.DeveloperStatus_DEVELOPER_STATUS_APPROVED || result.GetActivatedAtUnixMs() <= 0 || result.DeveloperHandle != "alice" {
 		t.Fatal(result, e)
 	}
-	repeat, e := client.ApplyForDeveloper(ctx, &pb.ApplyForDeveloperRequest{})
+	repeat, e := client.ApplyForDeveloper(ctx, &pb.ApplyForDeveloperRequest{DeveloperHandle: "Alice"})
 	if e != nil || repeat.GetActivatedAtUnixMs() != result.GetActivatedAtUnixMs() {
 		t.Fatal(repeat, e)
+	}
+	caseRetry, e := client.ApplyForDeveloper(ctx, &pb.ApplyForDeveloperRequest{DeveloperHandle: "ALICE"})
+	if e != nil || caseRetry.DeveloperHandle != "alice" {
+		t.Fatal(caseRetry, e)
+	}
+	code, _, body = rawHTTP("POST", "/v1/users/me/developer-application", `{"developerHandle":"OtherName"}`, headers)
+	if code != 409 || !bytes.Contains(body, []byte("DEVELOPER_HANDLE_CHANGE_NOT_ALLOWED")) {
+		t.Fatal(code, string(body))
 	}
 	httpTransport, e := khttp.NewClient(t.Context(), khttp.WithEndpoint(base))
 	if e != nil {
@@ -226,8 +245,8 @@ func TestE2E_DeveloperApplication_ProductionWireAndAppCenter(t *testing.T) {
 	defer httpTransport.Close()
 	httpClient := pb.NewDeveloperApplicationServiceHTTPClient(httpTransport)
 	clientHeaders := headers.Clone()
-	httpResult, e := httpClient.ApplyForDeveloper(t.Context(), &pb.ApplyForDeveloperRequest{}, khttp.Header(&clientHeaders))
-	if e != nil || httpResult.GetActivatedAtUnixMs() != result.GetActivatedAtUnixMs() {
+	httpResult, e := httpClient.ApplyForDeveloper(t.Context(), &pb.ApplyForDeveloperRequest{DeveloperHandle: "Alice"}, khttp.Header(&clientHeaders))
+	if e != nil || httpResult.GetActivatedAtUnixMs() != result.GetActivatedAtUnixMs() || httpResult.DeveloperHandle != "alice" {
 		t.Fatal(httpResult, e)
 	}
 	code, _, body = rawHTTP("GET", "/v1/users/me/developer-eligibility", "", headers)
@@ -237,6 +256,9 @@ func TestE2E_DeveloperApplication_ProductionWireAndAppCenter(t *testing.T) {
 	var fields map[string]any
 	if e = json.Unmarshal(body, &fields); e != nil {
 		t.Fatal(e)
+	}
+	if fields["developerHandle"] != "alice" {
+		t.Fatal(fields)
 	}
 	if _, ok := fields["activatedAtUnixMs"].(string); !ok {
 		t.Fatal("int64 JSON presence", fields)
@@ -256,6 +278,42 @@ func TestE2E_DeveloperApplication_ProductionWireAndAppCenter(t *testing.T) {
 	t.Run("actual App Center", func(t *testing.T) {
 		developerActualAppFlow(t, uri, keyFile, env[config.GRPCAddrEnv], serviceKey, user.AuthId, issue)
 	})
+	// Simulate an imported APPROVED principal without activation history, then
+	// bind through the actual email flow and explicitly claim its first handle.
+	legacyDevice, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	legacy, _ := registerUser(t, auth, legacyDevice, bytes.Repeat([]byte{6}, 32))
+	legacyCtx := sessionCallContext(t.Context(), legacy.Session.SessionToken)
+	legacyEmail, e := emailClient.BeginSetEmail(legacyCtx, &emailpb.BeginSetEmailRequest{RequestId: uuid.NewString(), Email: "legacy@example.test", Intent: &emailpb.BeginSetEmailRequest_Binding{Binding: &emailpb.BindEmailIntent{ExpectedRevision: &revision}}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = emailClient.CompleteSetEmail(legacyCtx, &emailpb.CompleteSetEmailRequest{OperationId: legacyEmail.OperationId, Code: nextCode()}); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = db.Collection(mongo.PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": legacy.AuthId}, bson.M{"$set": bson.M{"developerStatus": "APPROVED"}}); e != nil {
+		t.Fatal(e)
+	}
+	legacyEligibility, e := client.GetOwnDeveloperEligibility(legacyCtx, &pb.GetOwnDeveloperEligibilityRequest{})
+	if e != nil || !legacyEligibility.CanApply || legacyEligibility.DeveloperHandle != nil || legacyEligibility.ActivatedAtUnixMs != nil {
+		t.Fatal(legacyEligibility, e)
+	}
+	legacyHeaders := http.Header{"X-Iwut-Session": []string{legacy.Session.SessionToken}}
+	code, _, body = rawHTTP("POST", "/v1/users/me/developer-application", `{"developerHandle":"ALICE"}`, legacyHeaders)
+	if code != 409 || !bytes.Contains(body, []byte("DEVELOPER_HANDLE_TAKEN")) || bytes.Contains(body, []byte(user.AuthId)) {
+		t.Fatal(code, string(body))
+	}
+	legacyClaim, e := client.ApplyForDeveloper(legacyCtx, &pb.ApplyForDeveloperRequest{DeveloperHandle: "Legacy_Name"})
+	if e != nil || legacyClaim.DeveloperHandle != "legacy_name" || legacyClaim.ActivatedAtUnixMs != nil {
+		t.Fatal(legacyClaim, e)
+	}
+	legacyJSON, e := protojson.Marshal(legacyClaim)
+	if e != nil || bytes.Contains(legacyJSON, []byte("activatedAtUnixMs")) {
+		t.Fatal(string(legacyJSON), e)
+	}
+	if _, e = client.ApplyForDeveloper(ctx, &pb.ApplyForDeveloperRequest{}); status.Code(e) != codes.InvalidArgument {
+		t.Fatal("existing handle bypassed required input", e)
+	}
+
 	stop()
 	// Closing readiness and all UC012 capability keeps current APPROVED idempotent,
 	// but blocks first application. Disabled registration is a separate gate.
@@ -271,14 +329,14 @@ func TestE2E_DeveloperApplication_ProductionWireAndAppCenter(t *testing.T) {
 	closedConn, closedStop := startUserApp(t, closed, closedCleanup, env[config.GRPCAddrEnv])
 	defer closedStop()
 	closedClient := pb.NewDeveloperApplicationServiceClient(closedConn)
-	if r, e := closedClient.ApplyForDeveloper(ctx, &pb.ApplyForDeveloperRequest{}); e != nil || r.GetActivatedAtUnixMs() != result.GetActivatedAtUnixMs() {
+	if r, e := closedClient.ApplyForDeveloper(ctx, &pb.ApplyForDeveloperRequest{DeveloperHandle: "Alice"}); e != nil || r.GetActivatedAtUnixMs() != result.GetActivatedAtUnixMs() {
 		t.Fatal(r, e)
 	}
 	if _, e = closedClient.GetOwnDeveloperEligibility(ctx, &pb.GetOwnDeveloperEligibilityRequest{}); e != nil {
 		t.Fatal(e)
 	}
 	base = "http://" + env[config.HTTPAddrEnv]
-	code, h, body = rawHTTP("POST", "/v1/users/me/developer-application", "{}", headers)
+	code, h, body = rawHTTP("POST", "/v1/users/me/developer-application", `{"developerHandle":"Alice"}`, headers)
 	if code != 429 || h.Get("Retry-After") != "60" || !bytes.Contains(body, []byte("DEVELOPER_APPLICATION_RATE_LIMITED")) {
 		t.Fatal(code, string(body), h)
 	}
@@ -293,7 +351,7 @@ func TestE2E_DeveloperApplication_ProductionWireAndAppCenter(t *testing.T) {
 	if _, e = db.Collection(mongo.PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": ordinary.AuthId}, bson.M{"$set": bson.M{"developerStatus": "APPROVED"}}); e != nil {
 		t.Fatal(e)
 	}
-	historical, e := closedClient.ApplyForDeveloper(ordinaryCtx, &pb.ApplyForDeveloperRequest{})
+	historical, e := closedClient.GetOwnDeveloperEligibility(ordinaryCtx, &pb.GetOwnDeveloperEligibilityRequest{})
 	if e != nil || historical.ActivatedAtUnixMs != nil {
 		t.Fatal(historical, e)
 	}
@@ -311,7 +369,7 @@ func TestE2E_DeveloperApplication_ProductionWireAndAppCenter(t *testing.T) {
 	}
 	disabledConn, disabledStop := startUserApp(t, disabled, disabledCleanup, env[config.GRPCAddrEnv])
 	defer disabledStop()
-	if _, e = pb.NewDeveloperApplicationServiceClient(disabledConn).ApplyForDeveloper(ctx, &pb.ApplyForDeveloperRequest{}); status.Code(e) != codes.Unimplemented {
+	if _, e = pb.NewDeveloperApplicationServiceClient(disabledConn).ApplyForDeveloper(ctx, &pb.ApplyForDeveloperRequest{DeveloperHandle: "Alice"}); status.Code(e) != codes.Unimplemented {
 		t.Fatal(e)
 	}
 	resp, e := http.Get("http://" + env[config.HTTPAddrEnv] + "/v1/users/me/developer-eligibility")
