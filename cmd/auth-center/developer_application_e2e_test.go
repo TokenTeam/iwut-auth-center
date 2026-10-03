@@ -385,7 +385,7 @@ func TestE2E_DeveloperApplication_ProductionWireAndAppCenter(t *testing.T) {
 
 // Build and run the actual sibling App Center, including its production Wire
 // composition and Mongo migrations. No App source files or stubs are installed.
-func startActualApp(t *testing.T, uri, keyFile, authTarget string, serviceKey *rsa.PrivateKey) (*grpc.ClientConn, string, *drivermongo.Database) {
+func startActualApp(t *testing.T, uri, keyFile, authTarget string, serviceKey *rsa.PrivateKey, overrides ...map[string]string) (*grpc.ClientConn, string, *drivermongo.Database) {
 	source := os.Getenv("APP_CENTER_SOURCE_DIR")
 	if source == "" {
 		source = filepath.Join("..", "..", "..", "iwut-app-center-ddd")
@@ -399,7 +399,29 @@ func startActualApp(t *testing.T, uri, keyFile, authTarget string, serviceKey *r
 	}
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "app-center")
-	build := exec.CommandContext(t.Context(), "go", "build", "-o", binary, "./cmd/app-center")
+	buildArgs := []string{"build", "-o", binary}
+	// A test-only overlay changes DNS transport, not App policy or repositories.
+	// It is never written to the App checkout or compiled by production builds.
+	for _, override := range overrides {
+		if override["AUTH_E2E_DNS_ADDR"] != "" {
+			fixture := filepath.Join(dir, "oauth_dns_fixture.go")
+			code := []byte(`package main
+import("context";"net";"os")
+func init(){net.DefaultResolver=&net.Resolver{PreferGo:true,Dial:func(ctx context.Context,network,address string)(net.Conn,error){return (&net.Dialer{}).DialContext(ctx,network,os.Getenv("AUTH_E2E_DNS_ADDR"))}}}
+`)
+			if e := os.WriteFile(fixture, code, 0600); e != nil {
+				t.Fatal(e)
+			}
+			overlay, _ := json.Marshal(map[string]any{"Replace": map[string]string{filepath.Join(source, "cmd/app-center/oauth_dns_fixture.go"): fixture}})
+			path := filepath.Join(dir, "overlay.json")
+			if e := os.WriteFile(path, overlay, 0600); e != nil {
+				t.Fatal(e)
+			}
+			buildArgs = append(buildArgs, "-overlay", path)
+		}
+	}
+	buildArgs = append(buildArgs, "./cmd/app-center")
+	build := exec.CommandContext(t.Context(), "go", buildArgs...)
 	build.Dir = source
 	if output, e := build.CombinedOutput(); e != nil {
 		t.Fatalf("build actual App Center: %v\n%s", e, output)
@@ -418,6 +440,19 @@ func startActualApp(t *testing.T, uri, keyFile, authTarget string, serviceKey *r
 	}
 	httpAddr, grpcAddr := reserveAddress(t), reserveAddress(t)
 	values := map[string]string{"APP_CENTER_MONGO_URI": uri, "APP_CENTER_MONGO_DATABASE": database, "APP_CENTER_HTTP_ADDR": httpAddr, "APP_CENTER_GRPC_ADDR": grpcAddr, "APP_CENTER_IDENTITY_ISSUER": "identity-test", "APP_CENTER_IDENTITY_PUBLIC_KEYS": "identity-k1=" + keyFile, "APP_CENTER_AUTH_SCOPE_CATALOG_GRPC_TARGET": authTarget, "APP_CENTER_SERVICE_IDENTITY_ID": "app-center", "APP_CENTER_SERVICE_IDENTITY_KID": "app-center-2026-01", "APP_CENTER_SERVICE_IDENTITY_PRIVATE_KEY_PEM_B64": base64.StdEncoding.EncodeToString(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(serviceKey)})), "APP_CENTER_INITIAL_APPLICATION_QUOTA": "1"}
+	publicDER, e := x509.MarshalPKIXPublicKey(&serviceKey.PublicKey)
+	if e != nil {
+		t.Fatal(e)
+	}
+	callerRegistry, _ := json.Marshal(map[string]any{"iwut-auth-center": map[string]any{"status": "ACTIVE", "keys": map[string]any{"auth-service": map[string]string{"publicKeyPemB64": base64.StdEncoding.EncodeToString(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicDER}))}}, "permissions": []string{"app.oauth.client.read", "app.oauth.client.verify", "app.oauth.runtime.resolve", "app.oauth.context.resolve", "app.oauth.redirects.read"}}})
+	values["APP_CENTER_SERVICE_CALLERS_B64"] = base64.StdEncoding.EncodeToString(callerRegistry)
+	for _, override := range overrides {
+		for k, v := range override {
+			values[k] = v
+		}
+	}
+	grpcAddr = values["APP_CENTER_GRPC_ADDR"]
+	httpAddr = values["APP_CENTER_HTTP_ADDR"]
 	for k, v := range values {
 		env = append(env, k+"="+v)
 	}

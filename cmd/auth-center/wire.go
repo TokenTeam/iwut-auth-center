@@ -7,7 +7,6 @@ import (
 	"github.com/go-kratos/kratos/v2"
 	"github.com/goforj/wire"
 
-	"iwut-auth-center/internal/adapter/catalog"
 	"iwut-auth-center/internal/adapter/mongo"
 	"iwut-auth-center/internal/adapter/transport"
 	"iwut-auth-center/internal/config"
@@ -18,7 +17,8 @@ import (
 
 func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 	panic(wire.Build(
-		catalog.ProviderSet,
+		provideOAuth,
+		provideScopeCatalog,
 		mongo.ProviderSet,
 		transport.ProviderSet,
 		usecase.NewGetScopeCatalogSnapshotHandler,

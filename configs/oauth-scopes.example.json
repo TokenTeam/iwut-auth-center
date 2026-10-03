@@ -1,0 +1,5 @@
+[
+  {"Name":"openid","Label":"登录应用","Description":"允许应用识别你的平台账号；向应用提供独立的用户标识。","Kind":"PROTOCOL","Audience":"","Enabled":true},
+  {"Name":"email","Label":"已验证邮箱","Description":"允许应用读取你当前绑定并验证的邮箱地址。","Kind":"PROTOCOL","Audience":"","Enabled":true},
+  {"Name":"offline_access","Label":"后台访问","Description":"允许应用在你退出平台后续签访问凭据；你可以随时收回授权。","Kind":"PROTOCOL","Audience":"","Enabled":true}
+]

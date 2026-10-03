@@ -50,8 +50,8 @@ func provideMongoDatabase(client *drivermongo.Client, configuration config.Confi
 	return database, nil
 }
 
-func provideServerConfig(configuration config.Config, endpoints *transport.UserEndpoints) transport.ServerConfig {
-	return transport.ServerConfig{HTTPAddr: configuration.HTTPAddr, GRPCAddr: configuration.GRPCAddr, UserEndpoints: endpoints}
+func provideServerConfig(configuration config.Config, endpoints *transport.UserEndpoints, oauth *oauthRuntime) transport.ServerConfig {
+	return transport.ServerConfig{HTTPAddr: configuration.HTTPAddr, GRPCAddr: configuration.GRPCAddr, UserEndpoints: endpoints, OAuth: oauth.HTTP, OAuthGrant: oauth.Grant, OAuthDelegation: oauth.Delegation}
 }
 
 func provideApp(servers *transport.Servers) *kratos.App {

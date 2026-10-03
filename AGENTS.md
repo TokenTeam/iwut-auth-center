@@ -34,6 +34,16 @@ separate work packages. Backend verification must not claim their completion.
 
 ## Code boundaries
 
+UC014–019 additionally follow `../../docs/auth-center/briefs/UC-AUTH-014.md`
+through `UC-AUTH-019.md`, and the OAuth/OIDC, App OAuth client, delegation and
+route-policy contracts selected by those briefs. OAuth Domain/Port/UseCase live
+under `internal/oauth/`; concrete storage, cryptography, clock and App provider
+adapters remain under `internal/adapter/`. Preserve independent key purposes,
+the shared authentication transaction fence, exact internal method allowlists,
+current App/Catalog checks and default-closed public deployment gates.
+Scope Catalog is persistent when the explicit OAuth manifest is configured;
+the old hardcoded adapter remains a development-only fallback.
+
 ```text
 cmd/auth-center/             composition root only
 internal/scope/domain/       protocol-independent business values

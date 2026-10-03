@@ -23,6 +23,7 @@ import (
 	d "iwut-auth-center/internal/emaillogin/domain"
 	uc "iwut-auth-center/internal/emaillogin/usecase"
 	identity "iwut-auth-center/internal/identity/domain"
+	regport "iwut-auth-center/internal/registration/port"
 	regusecase "iwut-auth-center/internal/registration/usecase"
 )
 
@@ -417,7 +418,7 @@ func TestEmailLoginCrossAccountRevokedAndCompetingRegistration(t *testing.T) {
 	for e := range results {
 		if e == nil {
 			successes++
-		} else if !errors.Is(e, d.ErrCredential) && !errors.Is(e, ap.ErrCredentialRegistered) {
+		} else if !errors.Is(e, d.ErrCredential) && !errors.Is(e, regport.ErrCredentialRegistered) {
 			t.Fatal("unexpected competing proof error", e)
 		}
 	}

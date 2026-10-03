@@ -32,7 +32,7 @@ func userEndpointAuthenticationMiddleware(service *ServiceIdentityVerifier, prof
 			if !ok {
 				return nil, transportStatus(codes.Unauthenticated, "AUTHENTICATION_FAILED", "authentication context is required")
 			}
-			if developerApplicationMethod(tr.Operation()) {
+			if developerApplicationMethod(tr.Operation()) || oauthGrantMethod(tr.Operation()) {
 				return handler(ctx, request)
 			}
 			switch tr.Operation() {

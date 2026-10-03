@@ -513,3 +513,31 @@ in a separate database, checks application creation with the newly issued JWS,
 and verifies its quota and reviewer permission gates. Set `APP_CENTER_SOURCE_DIR`
 to override the sibling path; that subtest explicitly skips if no checkout exists.
 No App source is modified. Gateway routes and mobile UX remain separate delivery.
+
+## OAuth / OIDC (UC014–019)
+
+Set `AUTH_CENTER_OAUTH_CONFIG_FILE` to an explicit JSON deployment manifest;
+see `configs/oauth.example.json` and
+[`oauth-runtime-implementation.md`](../../docs/auth-center/design-notes/oauth-runtime-implementation.md).
+The manifest selects the persistent Mongo scope catalog, real App019 provider,
+independent OIDC/delegation/service keys, official portal login URL and route policy.
+Without it, existing endpoints retain their previous configuration.
+
+The backend provides authorization code consent, PUBLIC_PKCE and confidential
+client exchange, opaque access/rotating refresh credentials, OIDC discovery/JWKS
+and UserInfo, Session-authenticated grant management, and internal delegation
+issuance. Standard OIDC HTTP endpoints use standard responses, not Proto envelopes.
+Grant and token mutations share the authentication transaction fence.
+
+Public OAuth defaults off. Enabling it requires explicit portal and Gateway
+readiness; resource scopes additionally require resource-service readiness and
+route/audience policy. Those flags do not verify deployment health. Official login
+frontend, Traefik/Gateway OAuth forwarding and resource delegation verification
+remain separate deliveries. Current App runtime supports TEST only.
+
+`make test-mongo` covers concurrent redemption/rotation, replay revocation,
+catalog changes, grant epochs, transaction failures and production Wire endpoints.
+The OAuth E2E starts the actual App Center, creates/reviews/publishes its fixtures
+through APIs, and uses a standard OIDC client to verify discovery, JWKS and ID
+tokens. Its isolated App build uses a deterministic public DNS resolver through a
+Go build overlay; it does not alter App source or system DNS.

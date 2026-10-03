@@ -23,6 +23,8 @@ import (
 	emailv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_binding"
 	emailloginv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_login"
 	identityv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/identity"
+	dp "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/oauth_delegation"
+	gp "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/oauth_grant"
 	reviewerpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/reviewer_permission"
 	scopecatalogv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/scope_catalog"
 	systemprincipalv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/system_principal"
@@ -31,9 +33,12 @@ import (
 )
 
 type ServerConfig struct {
-	HTTPAddr      string
-	GRPCAddr      string
-	UserEndpoints *UserEndpoints
+	OAuthGrant      *OAuthGrantService
+	OAuthDelegation *OAuthDelegationService
+	OAuth           *OAuthHTTP
+	HTTPAddr        string
+	GRPCAddr        string
+	UserEndpoints   *UserEndpoints
 }
 
 // UserEndpoints is an optional, fully validated runtime assembled before listening.
@@ -113,6 +118,12 @@ func newGRPCServer(
 		options = append(options, kgrpc.Middleware(userEndpointAuthenticationMiddleware(verifier, nil, nil, false)))
 	}
 	server := kgrpc.NewServer(options...)
+	if configuration.OAuthGrant != nil {
+		gp.RegisterOAuthGrantServiceServer(server, configuration.OAuthGrant)
+	}
+	if configuration.OAuthDelegation != nil {
+		dp.RegisterOAuthDelegationServiceServer(server, configuration.OAuthDelegation)
+	}
 	emailService := NewEmailBindingService(nil)
 	if endpoints := configuration.UserEndpoints; endpoints != nil && endpoints.EmailBinding != nil {
 		emailService = endpoints.EmailBinding
@@ -147,7 +158,16 @@ func newGRPCServer(
 func newHTTPServer(configuration ServerConfig, verifier *ServiceIdentityVerifier) *khttp.Server {
 	options := []khttp.ServerOption{
 		khttp.Address(configuration.HTTPAddr),
-		khttp.Filter(authHTTPFilter),
+		khttp.Filter(func(next http.Handler) http.Handler {
+			ordinary := authHTTPFilter(next)
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if configuration.OAuth != nil && configuration.OAuth.Handles(r) {
+					configuration.OAuth.ServeHTTP(w, r)
+					return
+				}
+				ordinary.ServeHTTP(w, r)
+			})
+		}),
 		khttp.ResponseEncoder(authHTTPResponseEncoder),
 		khttp.ErrorEncoder(authHTTPErrorEncoder),
 	}
@@ -159,6 +179,9 @@ func newHTTPServer(configuration ServerConfig, verifier *ServiceIdentityVerifier
 		)
 	}
 	server := khttp.NewServer(options...)
+	if configuration.OAuthGrant != nil {
+		gp.RegisterOAuthGrantServiceHTTPServer(server, configuration.OAuthGrant)
+	}
 	if endpoints != nil {
 		if endpoints.EmailLogin != nil {
 			emailloginv1.RegisterEmailLoginServiceHTTPServer(server, endpoints.EmailLogin)
@@ -246,6 +269,8 @@ func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 func invalidHTTPInput(r *http.Request) error {
 	reason := "INVALID_LOGIN_INPUT"
 	switch {
+	case strings.HasPrefix(r.URL.Path, "/v1/users/me/application-grants"):
+		reason = "OAUTH_INVALID_REQUEST"
 	case developerApplicationHTTPPath(r.URL.Path):
 		reason = "INVALID_DEVELOPER_APPLICATION_REQUEST"
 	case strings.HasPrefix(r.URL.Path, "/v1/email-logins"):

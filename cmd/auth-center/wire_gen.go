@@ -8,7 +8,6 @@ package main
 
 import (
 	"github.com/go-kratos/kratos/v2"
-	"iwut-auth-center/internal/adapter/catalog"
 	"iwut-auth-center/internal/adapter/mongo"
 	"iwut-auth-center/internal/adapter/transport"
 	"iwut-auth-center/internal/config"
@@ -34,21 +33,24 @@ func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 		cleanup()
 		return nil, nil, err
 	}
-	serverConfig := provideServerConfig(configuration, userEndpoints)
+	mainOauthRuntime, cleanup2, err := provideOAuth(configuration, database, userEndpoints)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	serverConfig := provideServerConfig(configuration, userEndpoints, mainOauthRuntime)
 	serviceIdentityVerifier, err := transport.NewServiceIdentityVerifier(configuration)
 	if err != nil {
+		cleanup2()
 		cleanup()
 		return nil, nil, err
 	}
-	hardcodedCatalog, err := catalog.NewHardcodedCatalog()
-	if err != nil {
-		cleanup()
-		return nil, nil, err
-	}
-	getScopeCatalogSnapshotHandler := usecase.NewGetScopeCatalogSnapshotHandler(hardcodedCatalog)
+	catalog := provideScopeCatalog(mainOauthRuntime)
+	getScopeCatalogSnapshotHandler := usecase.NewGetScopeCatalogSnapshotHandler(catalog)
 	scopeCatalogService := transport.NewScopeCatalogService(getScopeCatalogSnapshotHandler)
 	principalRepository, err := mongo.NewPrincipalRepository(database)
 	if err != nil {
+		cleanup2()
 		cleanup()
 		return nil, nil, err
 	}
@@ -56,6 +58,7 @@ func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 	developerStatusService := transport.NewDeveloperStatusService(batchGetDeveloperStatusesHandler)
 	systemPrincipalRepository, err := mongo.NewSystemPrincipalRepository(database)
 	if err != nil {
+		cleanup2()
 		cleanup()
 		return nil, nil, err
 	}
@@ -63,11 +66,13 @@ func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 	systemPrincipalService := transport.NewSystemPrincipalService(resolveSystemPrincipalHandler)
 	servers, err := transport.NewServers(serverConfig, serviceIdentityVerifier, scopeCatalogService, developerStatusService, systemPrincipalService)
 	if err != nil {
+		cleanup2()
 		cleanup()
 		return nil, nil, err
 	}
 	app := provideApp(servers)
 	return app, func() {
+		cleanup2()
 		cleanup()
 	}, nil
 }
