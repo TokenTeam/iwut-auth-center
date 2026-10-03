@@ -83,7 +83,7 @@ func TestE2E_IdentityIssuance_ProductionWire(t *testing.T) {
 	}
 	connection, stop := startUserApp(t, app, cleanup, env[config.GRPCAddrEnv])
 	defer stop()
-	runReviewerFlow(t, env, connection, serviceKey)
+	runReviewerFlow(t, env, connection, serviceKey, keyFile)
 	client := identityv1.NewUserIdentityServiceClient(connection)
 	auth := authv1.NewAuthenticationServiceClient(connection)
 	device, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

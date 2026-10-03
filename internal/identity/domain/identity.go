@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -68,13 +69,13 @@ func Project(s Snapshot, audience, jti string, now time.Time, ttl time.Duration)
 		return Claims{}, ErrSessionInvalid
 	}
 	c := Claims{AuthID: s.AuthID, Audience: audience, JTI: jti, IssuedAt: iat, ExpiresAt: exp, Permissions: []string{}}
-	allowed := "auth.reviewer.manage"
+	allowed := []string{"auth.reviewer.manage"}
 	if audience == AppAudience {
-		allowed = "app.version.review"
+		allowed = []string{"app.profile.review", "app.version.review"}
 		c.DeveloperStatus = s.DeveloperStatus
 	}
 	for _, p := range s.Permissions {
-		if p == allowed {
+		if slices.Contains(allowed, p) {
 			c.Permissions = append(c.Permissions, p)
 		}
 	}

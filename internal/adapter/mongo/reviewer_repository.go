@@ -132,11 +132,11 @@ func (r *ReviewerRepository) Manage(ctx context.Context, c domain.Command) (doma
 		if err != nil {
 			return err
 		}
-		next, err := domain.Change(before, domain.Reviewer, c.Action, c.ExpectedRevision)
+		next, err := domain.Change(before, c.Permission, c.Action, c.ExpectedRevision)
 		if err != nil {
 			return err
 		}
-		if err = r.write(tx, before, next, domain.Reviewer, c.Action, c.Reason, "USER", c.ActorAuthID, uuid.NewString()); err != nil {
+		if err = r.write(tx, before, next, c.Permission, c.Action, c.Reason, "USER", c.ActorAuthID, uuid.NewString()); err != nil {
 			return err
 		}
 		result = next

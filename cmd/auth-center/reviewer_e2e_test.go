@@ -9,9 +9,12 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	authpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 	identitypb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/identity"
 	pb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/reviewer_permission"
+	khttp "github.com/go-kratos/kratos/v2/transport/http"
+	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -20,11 +23,13 @@ import (
 	"io"
 	"iwut-auth-center/internal/config"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
-func runReviewerFlow(t *testing.T, env map[string]string, conn *grpc.ClientConn, serviceKey *rsa.PrivateKey) {
+func runReviewerFlow(t *testing.T, env map[string]string, conn *grpc.ClientConn, serviceKey *rsa.PrivateKey, keyFile string) {
 	t.Helper()
 	auth := authpb.NewAuthenticationServiceClient(conn)
 	issuer := identitypb.NewUserIdentityServiceClient(conn)
@@ -117,10 +122,177 @@ func runReviewerFlow(t *testing.T, env map[string]string, conn *grpc.ClientConn,
 	if err != nil || current.Reviewer || current.PermissionRevision != 3 {
 		t.Fatal(current, err)
 	}
+	runApplicationReviewFlow(t, env, conn, serviceKey, keyFile, subject, adminctx, token, issue)
 	// A modified payload cannot manufacture management authority.
 	pieces := strings.Split(ordinary, ".")
 	pieces[1] = strings.Split(token, ".")[1]
 	if _, err = review.GetReviewerPermission(userctx(strings.Join(pieces, ".")), &pb.GetReviewerPermissionRequest{SubjectAuthId: subject.AuthId}); status.Code(err) != codes.Unauthenticated {
 		t.Fatal(err)
 	}
+}
+
+// Cross-service acceptance uses Auth's real signer and the sibling App's real
+// verifier and review handlers. Missing review IDs deliberately stop at 404
+// after the capability gate, without manufacturing an App review fixture.
+func runApplicationReviewFlow(t *testing.T, env map[string]string, conn *grpc.ClientConn, serviceKey *rsa.PrivateKey, keyFile string, subject *authpb.UserRegistrationResult, adminctx context.Context, adminToken string, issue func(*authpb.UserRegistrationResult, string) string) {
+	t.Helper()
+	_, appURL, _ := startActualApp(t, env[config.MongoURIEnv], keyFile, env[config.GRPCAddrEnv], serviceKey)
+	client := pb.NewReviewerPermissionServiceClient(conn)
+	transport, err := khttp.NewClient(t.Context(), khttp.WithEndpoint("http://"+env[config.HTTPAddrEnv]), khttp.WithTimeout(5*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer transport.Close()
+	httpClient := pb.NewReviewerPermissionServiceHTTPClient(transport)
+	authHeader := func() khttp.CallOption {
+		headers := http.Header{"X-Iwut-Identity": []string{adminToken}}
+		return khttp.Header(&headers)
+	}
+	const profile, version = "app.profile.review", "app.version.review"
+	query := &pb.GetApplicationReviewPermissionsRequest{SubjectAuthId: subject.AuthId}
+	check := func(wantProfile, wantVersion bool, revision int64) {
+		t.Helper()
+		result, err := httpClient.GetApplicationReviewPermissions(t.Context(), query, authHeader())
+		if err != nil || result.SubjectAuthId != subject.AuthId || result.PermissionRevision != revision || len(result.Permissions) != 2 {
+			t.Fatal("generated combined query", result, err)
+		}
+		if result.Permissions[0].Permission != profile || result.Permissions[0].Granted != wantProfile || result.Permissions[1].Permission != version || result.Permissions[1].Granted != wantVersion {
+			t.Fatal(result)
+		}
+		old, err := httpClient.GetReviewerPermission(t.Context(), &pb.GetReviewerPermissionRequest{SubjectAuthId: subject.AuthId}, authHeader())
+		if err != nil || old.Reviewer != wantVersion || old.PermissionRevision != revision {
+			t.Fatal("generated legacy query", old, err)
+		}
+		token := issue(subject, "iwut-app-center")
+		wanted := []any{}
+		if wantProfile {
+			wanted = append(wanted, profile)
+		}
+		if wantVersion {
+			wanted = append(wanted, version)
+		}
+		payload := identityPayload(t, token)
+		if !slices.Equal(payload["permissions"].([]any), wanted) || payload["developer_status"] != nil {
+			t.Fatal(payload)
+		}
+		if payload := identityPayload(t, issue(subject, "iwut-auth-center")); len(payload["permissions"].([]any)) != 0 {
+			t.Fatal(payload)
+		}
+		appID, _ := uuid.NewV7()
+		revisionID, _ := uuid.NewV7()
+		reviewID, _ := uuid.NewV7()
+		for _, tc := range []struct {
+			path, body string
+			allowed    bool
+		}{
+			{fmt.Sprintf("/v1/applications/%s/profile-revisions/%s/reviews/%s/decision", appID, revisionID, reviewID), `{"outcome":"REJECT","expectedProfileRevisionRevision":"1","expectedPolicyVersion":"app-profile-review-v1","reason":"capability boundary test"}`, wantProfile},
+			{fmt.Sprintf("/v1/applications/%s/versions/%s/reviews/%s/decision", appID, revisionID, reviewID), `{"outcome":"REJECT","expectedPolicyVersion":"app-version-review-v2","reason":"capability boundary test"}`, wantVersion},
+		} {
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, appURL+tc.path, strings.NewReader(tc.body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("x-iwut-identity", token)
+			res, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			want := 403
+			if tc.allowed {
+				want = 404
+			}
+			if res.StatusCode != want {
+				t.Fatalf("actual App %s: %d want %d: %s", tc.path, res.StatusCode, want, data)
+			}
+		}
+	}
+	check(false, false, 3)
+
+	// Strict decoding must remain identical on the new route. None of these
+	// malformed calls may mutate revision 3 or select an implicit permission.
+	base := "http://" + env[config.HTTPAddrEnv] + "/v1/users/" + subject.AuthId
+	for _, tc := range []struct{ method, path, body string }{
+		{"GET", "/application-review-permissions?permission=app.profile.review", ""},
+		{"GET", "/application-review-permissions", `{}`},
+		{"PUT", "/application-review-permissions/" + profile, `{"action":1,"reason":"missing revision"}`},
+		{"PUT", "/application-review-permissions/" + profile, `{"action":1,"expectedRevision":"3","reason":"x","unknown":true}`},
+		{"PUT", "/application-review-permissions/" + profile, `{"action":1,"expectedRevision":"3","reason":"x","reason":"duplicate"}`},
+		{"PUT", "/reviewer-permission", `{"action":1,"expectedRevision":"3","reason":"x","permission":"app.profile.review"}`},
+	} {
+		req, err := http.NewRequestWithContext(t.Context(), tc.method, base+tc.path, strings.NewReader(tc.body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("x-iwut-identity", adminToken)
+		response, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != 400 || !bytes.Contains(data, []byte("INVALID_REVIEWER_PERMISSION_INPUT")) {
+			t.Fatal(tc.path, response.StatusCode, string(data))
+		}
+	}
+	unknown := &pb.ManageApplicationReviewPermissionRequest{SubjectAuthId: subject.AuthId, Permission: profile, Action: pb.ReviewerPermissionAction_REVIEWER_PERMISSION_ACTION_GRANT, ExpectedRevision: proto.Int64(3), Reason: "unknown"}
+	unknown.ProtoReflect().SetUnknown([]byte{0x32, 1, 'x'})
+	if _, err := client.ManageApplicationReviewPermission(adminctx, unknown); status.Code(err) != codes.InvalidArgument {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"", " app.profile.review", "app.*", "APP.PROFILE.REVIEW", "auth.reviewer.manage", "openid"} {
+		_, err := client.ManageApplicationReviewPermission(adminctx, &pb.ManageApplicationReviewPermissionRequest{SubjectAuthId: subject.AuthId, Permission: bad, Action: pb.ReviewerPermissionAction_REVIEWER_PERMISSION_ACTION_GRANT, ExpectedRevision: proto.Int64(3), Reason: "invalid target"})
+		if status.Code(err) != codes.InvalidArgument {
+			t.Fatal(bad, err)
+		}
+	}
+	if _, err := client.GetApplicationReviewPermissions(t.Context(), query); status.Code(err) != codes.Unauthenticated {
+		t.Fatal(err)
+	}
+	ordinary := metadata.NewOutgoingContext(t.Context(), metadata.Pairs("x-iwut-identity", issue(subject, "iwut-auth-center")))
+	if _, err := client.GetApplicationReviewPermissions(ordinary, query); status.Code(err) != codes.PermissionDenied {
+		t.Fatal(err)
+	}
+	request := &pb.ManageApplicationReviewPermissionRequest{SubjectAuthId: subject.AuthId, Permission: profile, Action: pb.ReviewerPermissionAction_REVIEWER_PERMISSION_ACTION_GRANT, ExpectedRevision: proto.Int64(3), Reason: "profile reviewer"}
+	result, err := httpClient.ManageApplicationReviewPermission(t.Context(), request, authHeader())
+	if err != nil || result.PermissionRevision != 4 {
+		t.Fatal("generated explicit grant", result, err)
+	}
+	check(true, false, 4)
+	if _, err := client.ManageApplicationReviewPermission(adminctx, request); status.Code(err) != codes.Aborted {
+		t.Fatal(err)
+	}
+	// Legacy GRANT/REVOKE must preserve the independent profile permission.
+	old := &pb.ManageReviewerPermissionRequest{SubjectAuthId: subject.AuthId, Action: pb.ReviewerPermissionAction_REVIEWER_PERMISSION_ACTION_GRANT, ExpectedRevision: proto.Int64(4), Reason: "version reviewer"}
+	if _, err := client.ManageReviewerPermission(adminctx, old); err != nil {
+		t.Fatal(err)
+	}
+	check(true, true, 5)
+	old.Action = pb.ReviewerPermissionAction_REVIEWER_PERMISSION_ACTION_REVOKE
+	old.ExpectedRevision = proto.Int64(5)
+	if _, err := client.ManageReviewerPermission(adminctx, old); err != nil {
+		t.Fatal(err)
+	}
+	check(true, false, 6)
+	old.Action = pb.ReviewerPermissionAction_REVIEWER_PERMISSION_ACTION_GRANT
+	old.ExpectedRevision = proto.Int64(6)
+	if _, err := client.ManageReviewerPermission(adminctx, old); err != nil {
+		t.Fatal(err)
+	}
+	request.Action = pb.ReviewerPermissionAction_REVIEWER_PERMISSION_ACTION_REVOKE
+	request.ExpectedRevision = proto.Int64(7)
+	if _, err := client.ManageApplicationReviewPermission(adminctx, request); err != nil {
+		t.Fatal(err)
+	}
+	check(false, true, 8)
+	request.Permission = version
+	request.ExpectedRevision = proto.Int64(8)
+	if _, err := client.ManageApplicationReviewPermission(adminctx, request); err != nil {
+		t.Fatal(err)
+	}
+	check(false, false, 9)
+	t.Log("Actual Auth grants and signer -> actual App verifier and both review handlers: independent permissions, legacy compatibility, revocation")
 }

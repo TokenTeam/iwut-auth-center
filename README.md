@@ -221,7 +221,8 @@ is persisted or cached. A signed result authorized before revocation remains
 valid through its short lifetime and consumer clock skew.
 
 The Auth audience receives only `auth.reviewer.manage`; the App audience receives
-only `app.version.review` plus a valid existing Developer status, when present.
+`app.profile.review` and `app.version.review`, plus a valid existing Developer
+status when present.
 These are intersections with current authoritative permissions, never grants.
 Ordinary users get `permissions: []` and no Developer claim. Session expiry bounds
 `exp`, so issuing never extends a Session. There is no Redis requirement.
@@ -232,24 +233,34 @@ verification, audience authorization and current capabilities/revocation. The
 Mongo integration suite additionally injects signer and unknown-commit failures
 and exercises concurrent capability/revocation writes. Tests log bounded local
 RSA and RPC/Mongo measurements; they are not production capacity estimates.
-Gateway routing and UC004 permission-management commands remain separate work.
+Gateway routing is verified separately by the Gateway protocol E2E suite.
 
-## Reviewer permission management (UC-AUTH-004)
+## Application review permission management (UC-AUTH-004)
 
 User endpoint runtime also registers `ReviewerPermissionService` in both native
 gRPC and HTTP. Gateway uses SESSION policy with `iwut-auth-center` audience:
 
-- `GET /v1/users/{subject_auth_id}/reviewer-permission` reads the current state.
+- `GET /v1/users/{subject_auth_id}/application-review-permissions` returns both
+  `app.profile.review` and `app.version.review` with independent `granted` values,
+  sorted by permission, and one shared `permissionRevision`.
+- `PUT /v1/users/{subject_auth_id}/application-review-permissions/{permission}`
+  changes exactly one of those permissions. Its body contains `action`,
+  `expectedRevision`, and `reason`; path values override corresponding body fields.
+  Unknown permissions, management capabilities and OAuth scopes are rejected.
+- Legacy `GET /v1/users/{subject_auth_id}/reviewer-permission` reads only the
+  version-review state; `reviewer` is never the OR of both permissions.
 - `PUT /v1/users/{subject_auth_id}/reviewer-permission` accepts `action` (`1` grant,
   `2` revoke), positive `expectedRevision`, and a reason (trimmed, 1–1024 UTF-8
   bytes). The path owns the subject ID. Both return `subjectAuthId`, `reviewer`,
   and `permissionRevision` (ProtoJSON decimal string).
 
-A verified user JWS must contain `auth.reviewer.manage`; both operations also
+A verified user JWS must contain `auth.reviewer.manage`; all four operations also
 confirm the actor's current ACTIVE USER state and current grant in Mongo. Only
 ACTIVE USER subjects are eligible. Repeated actions and stale revisions return
 409; query current state after an uncertain response before deciding to retry.
-Permissions preserve unrelated capabilities and are unique and sorted. Mongo
+Each mutation preserves the other review permission and all unrelated capabilities.
+Concurrent changes to different permissions still compete on the same revision.
+Permissions are unique and sorted. Mongo
 transactions atomically update the principal and insert an immutable audit event
 into `auth_permission_audit_events`. There is no audit update/delete API. Database
 operator privileges and backup retention remain deployment responsibilities.
@@ -276,7 +287,12 @@ Signing begun after a committed revoke sees the new permissions; existing JWSs
 continue to their natural expiry. Unknown commit outcomes never return a success
 result. Real Mongo tests cover rollback on audit failure, concurrent CAS, durable
 bootstrap and issuance synchronization; production Wire tests exercise native
-gRPC and HTTP plus real cryptographic identity issuance.
+gRPC and generated HTTP clients plus real cryptographic identity issuance.
+The UC010 E2E also starts the actual App Center from `APP_CENTER_SOURCE_DIR`
+(default: sibling `iwut-app-center-ddd`) and checks both review handlers against
+all four permission combinations. When that checkout is under active development,
+use an isolated committed App/API snapshot for reproducible cross-service checks.
+No existing account receives profile-review permission automatically.
 
 ## Email registration and binding (UC011)
 

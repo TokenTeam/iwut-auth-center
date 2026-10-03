@@ -252,7 +252,7 @@ func invalidHTTPInput(r *http.Request) error {
 		reason = "INVALID_EMAIL_LOGIN_REQUEST"
 	case emailHTTPPath(r.URL.Path):
 		reason = "INVALID_EMAIL_REQUEST"
-	case strings.HasSuffix(r.URL.Path, "/reviewer-permission"):
+	case strings.HasSuffix(r.URL.Path, "/reviewer-permission"), strings.Contains(r.URL.Path, "/application-review-permissions"):
 		reason = "INVALID_REVIEWER_PERMISSION_INPUT"
 	case strings.HasPrefix(r.URL.Path, "/v1/registrations"):
 		reason = "INVALID_REGISTRATION_INPUT"

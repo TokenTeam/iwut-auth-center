@@ -57,7 +57,9 @@ func userEndpointAuthenticationMiddleware(service *ServiceIdentityVerifier, prof
 				"/auth_center.v1.user_profile.UserProfileService/GetOwnProfile",
 				"/auth_center.v1.user_profile.UserProfileService/GetProfileEditingSchema",
 				reviewerpb.ReviewerPermissionService_ManageReviewerPermission_FullMethodName,
-				reviewerpb.ReviewerPermissionService_GetReviewerPermission_FullMethodName:
+				reviewerpb.ReviewerPermissionService_GetReviewerPermission_FullMethodName,
+				reviewerpb.ReviewerPermissionService_ManageApplicationReviewPermission_FullMethodName,
+				reviewerpb.ReviewerPermissionService_GetApplicationReviewPermissions_FullMethodName:
 				if profile == nil {
 					return nil, transportStatus(codes.Unauthenticated, "USER_IDENTITY_REQUIRED", "user identity is required")
 				}

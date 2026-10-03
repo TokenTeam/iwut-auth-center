@@ -22,6 +22,7 @@ import (
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	drivermongo "go.mongodb.org/mongo-driver/v2/mongo"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -384,7 +385,7 @@ func TestE2E_DeveloperApplication_ProductionWireAndAppCenter(t *testing.T) {
 
 // Build and run the actual sibling App Center, including its production Wire
 // composition and Mongo migrations. No App source files or stubs are installed.
-func developerActualAppFlow(t *testing.T, uri, keyFile, authTarget string, serviceKey *rsa.PrivateKey, authID string, issue func(string) string) {
+func startActualApp(t *testing.T, uri, keyFile, authTarget string, serviceKey *rsa.PrivateKey) (*grpc.ClientConn, string, *drivermongo.Database) {
 	source := os.Getenv("APP_CENTER_SOURCE_DIR")
 	if source == "" {
 		source = filepath.Join("..", "..", "..", "iwut-app-center-ddd")
@@ -403,7 +404,7 @@ func developerActualAppFlow(t *testing.T, uri, keyFile, authTarget string, servi
 	if output, e := build.CombinedOutput(); e != nil {
 		t.Fatalf("build actual App Center: %v\n%s", e, output)
 	}
-	database := "uc013_app_" + uuid.NewString()
+	database := "auth_app_integration_" + uuid.NewString()
 	client, e := mongo.NewClient(uri)
 	if e != nil {
 		t.Fatal(e)
@@ -429,7 +430,7 @@ func developerActualAppFlow(t *testing.T, uri, keyFile, authTarget string, servi
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer logFile.Close()
+	t.Cleanup(func() { _ = logFile.Close() })
 	process := exec.CommandContext(t.Context(), binary, "serve")
 	process.Env = env
 	process.Stdout = logFile
@@ -458,7 +459,12 @@ func developerActualAppFlow(t *testing.T, uri, keyFile, authTarget string, servi
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer conn.Close()
+	t.Cleanup(func() { _ = conn.Close() })
+	return conn, "http://" + httpAddr, client.Database(database)
+}
+
+func developerActualAppFlow(t *testing.T, uri, keyFile, authTarget string, serviceKey *rsa.PrivateKey, authID string, issue func(string) string) {
+	conn, _, db := startActualApp(t, uri, keyFile, authTarget, serviceKey)
 	token := issue("iwut-app-center")
 	call := metadata.NewOutgoingContext(t.Context(), metadata.Pairs("x-iwut-identity", token))
 	application := apppb.NewApplicationClient(conn)
@@ -476,7 +482,7 @@ func developerActualAppFlow(t *testing.T, uri, keyFile, authTarget string, servi
 		t.Fatal("developer gained reviewer access", e)
 	}
 	var stored bson.M
-	if e = client.Database(database).Collection("applications").FindOne(t.Context(), bson.M{"id": created.Id}).Decode(&stored); e != nil || stored["adminId"] != authID {
+	if e = db.Collection("applications").FindOne(t.Context(), bson.M{"id": created.Id}).Decode(&stored); e != nil || stored["adminId"] != authID {
 		t.Fatal(stored, e)
 	}
 	t.Log("Actual App Center production verifier accepted newly issued Auth JWS; real application creation persisted, quota and reviewer gate held")

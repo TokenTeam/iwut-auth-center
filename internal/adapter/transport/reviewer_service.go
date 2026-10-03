@@ -14,7 +14,9 @@ import (
 )
 
 func isReviewerOperation(op string) bool {
-	return op == pb.ReviewerPermissionService_ManageReviewerPermission_FullMethodName || op == pb.ReviewerPermissionService_GetReviewerPermission_FullMethodName
+	return op == pb.ReviewerPermissionService_ManageReviewerPermission_FullMethodName || op == pb.ReviewerPermissionService_GetReviewerPermission_FullMethodName ||
+		op == pb.ReviewerPermissionService_ManageApplicationReviewPermission_FullMethodName ||
+		op == pb.ReviewerPermissionService_GetApplicationReviewPermissions_FullMethodName
 }
 
 // Reuses the verifier without weakening profile's independent identity boundary.
@@ -73,7 +75,7 @@ func (s *ReviewerPermissionService) ManageReviewerPermission(ctx context.Context
 	case pb.ReviewerPermissionAction_REVIEWER_PERMISSION_ACTION_REVOKE:
 		action = "REVOKE"
 	}
-	result, err := s.service.Manage(ctx, domain.Command{ActorAuthID: actor, SubjectAuthID: r.SubjectAuthId, Action: action, Reason: r.Reason, ExpectedRevision: r.GetExpectedRevision()})
+	result, err := s.service.Manage(ctx, domain.Command{ActorAuthID: actor, SubjectAuthID: r.SubjectAuthId, Permission: domain.Reviewer, Action: action, Reason: r.Reason, ExpectedRevision: r.GetExpectedRevision()})
 	if err != nil {
 		return nil, reviewerError(err)
 	}
@@ -116,4 +118,46 @@ func reviewerError(err error) error {
 		code = codes.DeadlineExceeded
 	}
 	return transportStatus(code, reason, "reviewer permission request failed")
+}
+
+func (s *ReviewerPermissionService) ManageApplicationReviewPermission(ctx context.Context, r *pb.ManageApplicationReviewPermissionRequest) (*pb.ApplicationReviewPermissions, error) {
+	actor, err := profileAuthID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if r == nil || r.ExpectedRevision == nil || len(r.ProtoReflect().GetUnknown()) != 0 {
+		return nil, reviewerError(domain.ErrInvalid)
+	}
+	action := ""
+	switch r.Action {
+	case pb.ReviewerPermissionAction_REVIEWER_PERMISSION_ACTION_GRANT:
+		action = "GRANT"
+	case pb.ReviewerPermissionAction_REVIEWER_PERMISSION_ACTION_REVOKE:
+		action = "REVOKE"
+	}
+	result, err := s.service.Manage(ctx, domain.Command{ActorAuthID: actor, SubjectAuthID: r.SubjectAuthId, Permission: r.Permission, Action: action, Reason: r.Reason, ExpectedRevision: r.GetExpectedRevision()})
+	if err != nil {
+		return nil, reviewerError(err)
+	}
+	return applicationReviewResponse(result), nil
+}
+func (s *ReviewerPermissionService) GetApplicationReviewPermissions(ctx context.Context, r *pb.GetApplicationReviewPermissionsRequest) (*pb.ApplicationReviewPermissions, error) {
+	actor, err := profileAuthID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if r == nil || len(r.ProtoReflect().GetUnknown()) != 0 {
+		return nil, reviewerError(domain.ErrInvalid)
+	}
+	result, err := s.service.Get(ctx, actor, r.SubjectAuthId)
+	if err != nil {
+		return nil, reviewerError(err)
+	}
+	return applicationReviewResponse(result), nil
+}
+func applicationReviewResponse(s domain.State) *pb.ApplicationReviewPermissions {
+	return &pb.ApplicationReviewPermissions{SubjectAuthId: s.AuthID, PermissionRevision: s.Revision, Permissions: []*pb.ApplicationReviewPermission{
+		{Permission: domain.ProfileReviewer, Granted: s.Has(domain.ProfileReviewer)},
+		{Permission: domain.Reviewer, Granted: s.Has(domain.Reviewer)},
+	}}
 }

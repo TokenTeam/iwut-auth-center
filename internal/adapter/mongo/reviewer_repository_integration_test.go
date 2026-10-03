@@ -32,7 +32,7 @@ func reviewerFixture(t *testing.T) (*ReviewerRepository, *drivermongo.Database, 
 }
 func TestReviewerMongoAtomicAuditConcurrencyAndSubjectRules(t *testing.T) {
 	r, db, id := reviewerFixture(t)
-	c := domain.Command{ActorAuthID: "admin", SubjectAuthID: id, Action: "GRANT", Reason: "review onboarding", ExpectedRevision: 1}
+	c := domain.Command{Permission: domain.Reviewer, ActorAuthID: "admin", SubjectAuthID: id, Action: "GRANT", Reason: "review onboarding", ExpectedRevision: 1}
 	var wg sync.WaitGroup
 	results := make(chan error, 6)
 	for range 6 {
@@ -136,7 +136,7 @@ func TestReviewerMongoAuditFailureRollsBackAndRevisionExhaustion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := domain.Command{ActorAuthID: "admin", SubjectAuthID: id, Action: "GRANT", Reason: "test", ExpectedRevision: 1}
+	c := domain.Command{Permission: domain.Reviewer, ActorAuthID: "admin", SubjectAuthID: id, Action: "GRANT", Reason: "test", ExpectedRevision: 1}
 	if result, err := r.Manage(t.Context(), c); !errors.Is(err, domain.ErrUnavailable) || result.AuthID != "" {
 		t.Fatal(result, err)
 	}
@@ -154,47 +154,56 @@ func TestReviewerMongoAuditFailureRollsBackAndRevisionExhaustion(t *testing.T) {
 	}
 }
 func TestReviewerMongoRevokeSynchronizesIdentityIssuance(t *testing.T) {
-	issuer, db, session, _, _, _ := identityFixture(t)
-	if err := EnsureReviewerSchema(t.Context(), db); err != nil {
-		t.Fatal(err)
-	}
-	_, err := db.Collection(PrincipalCollection).InsertOne(t.Context(), bson.M{"authId": "admin", "principalType": "USER", "accountStatus": "ACTIVE", "permissions": bson.A{domain.Manager}, "permissionRevision": int64(1)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	repo, _ := NewReviewerRepository(issuer.authentication)
-	entered, release := make(chan struct{}), make(chan struct{})
-	done := make(chan error, 1)
-	go func() {
-		done <- issuer.WithSession(t.Context(), session.TokenDigest, func(s identitydomain.Snapshot, _ time.Time) error { close(entered); <-release; return nil })
-	}()
-	<-entered
-	revoked := make(chan error, 1)
-	go func() {
-		_, err := repo.Manage(t.Context(), domain.Command{ActorAuthID: "admin", SubjectAuthID: session.AuthID, Action: "REVOKE", Reason: "access ended", ExpectedRevision: 1})
-		revoked <- err
-	}()
-	select {
-	case err := <-revoked:
-		t.Fatal("revoke passed uncommitted signing boundary", err)
-	case <-time.After(50 * time.Millisecond):
-	}
-	close(release)
-	if err = <-done; err != nil {
-		t.Fatal(err)
-	}
-	if err = <-revoked; err != nil {
-		t.Fatal(err)
-	}
-	if err = issuer.WithSession(t.Context(), session.TokenDigest, func(s identitydomain.Snapshot, _ time.Time) error {
-		if len(s.Permissions) != 0 || s.PermissionRevision != 2 {
-			t.Fatal(s)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
+	for _, permission := range []string{domain.ProfileReviewer, domain.Reviewer} {
+		t.Run(permission, func(t *testing.T) {
+			issuer, db, session, _, _, _ := identityFixture(t)
+			if err := EnsureReviewerSchema(t.Context(), db); err != nil {
+				t.Fatal(err)
+			}
+			_, err := db.Collection(PrincipalCollection).InsertOne(t.Context(), bson.M{"authId": "admin", "principalType": "USER", "accountStatus": "ACTIVE", "permissions": bson.A{domain.Manager}, "permissionRevision": int64(1)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": session.AuthID}, bson.M{"$set": bson.M{"permissions": bson.A{domain.ProfileReviewer, domain.Reviewer}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			repo, _ := NewReviewerRepository(issuer.authentication)
+			entered, release := make(chan struct{}), make(chan struct{})
+			done := make(chan error, 1)
+			go func() {
+				done <- issuer.WithSession(t.Context(), session.TokenDigest, func(s identitydomain.Snapshot, _ time.Time) error { close(entered); <-release; return nil })
+			}()
+			<-entered
+			revoked := make(chan error, 1)
+			go func() {
+				_, err := repo.Manage(t.Context(), domain.Command{Permission: permission, ActorAuthID: "admin", SubjectAuthID: session.AuthID, Action: "REVOKE", Reason: "access ended", ExpectedRevision: 1})
+				revoked <- err
+			}()
+			select {
+			case err := <-revoked:
+				t.Fatal("revoke passed uncommitted signing boundary", err)
+			case <-time.After(50 * time.Millisecond):
+			}
+			close(release)
+			if err = <-done; err != nil {
+				t.Fatal(err)
+			}
+			if err = <-revoked; err != nil {
+				t.Fatal(err)
+			}
+			if err = issuer.WithSession(t.Context(), session.TokenDigest, func(s identitydomain.Snapshot, _ time.Time) error {
+				if len(s.Permissions) != 1 || s.Permissions[0] == permission || s.PermissionRevision != 2 {
+					t.Fatal(s)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
+
 func TestReviewerMongoUnknownCommitReturnsNoSuccess(t *testing.T) {
 	_, db, id := reviewerFixture(t)
 	authentication, appName := sessionRevocationFaultRepository(t, db)
@@ -208,8 +217,61 @@ func TestReviewerMongoUnknownCommitReturnsNoSuccess(t *testing.T) {
 	})
 	ctx, cancel := context.WithTimeout(t.Context(), 150*time.Millisecond)
 	defer cancel()
-	result, err := r.Manage(ctx, domain.Command{ActorAuthID: "admin", SubjectAuthID: id, Action: "GRANT", Reason: "test", ExpectedRevision: 1})
+	result, err := r.Manage(ctx, domain.Command{Permission: domain.Reviewer, ActorAuthID: "admin", SubjectAuthID: id, Action: "GRANT", Reason: "test", ExpectedRevision: 1})
 	if err == nil || result.AuthID != "" {
 		t.Fatal(result, err)
+	}
+}
+
+func TestReviewPermissionsMongoSharedRevisionAndAudit(t *testing.T) {
+	r, db, id := reviewerFixture(t)
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for _, permission := range []string{domain.ProfileReviewer, domain.Reviewer} {
+		go func() {
+			<-start
+			_, err := r.Manage(t.Context(), domain.Command{ActorAuthID: "admin", SubjectAuthID: id, Permission: permission, Action: "GRANT", Reason: "onboarding", ExpectedRevision: 1})
+			results <- err
+		}()
+	}
+	close(start)
+	success := 0
+	for range 2 {
+		err := <-results
+		if err == nil {
+			success++
+		} else if !errors.Is(err, domain.ErrConflict) {
+			t.Fatal(err)
+		}
+	}
+	if success != 1 {
+		t.Fatal(success)
+	}
+	s, err := r.Get(t.Context(), "admin", id)
+	if err != nil || s.Revision != 2 || len(s.Permissions) != 1 {
+		t.Fatal(s, err)
+	}
+	remaining := domain.ProfileReviewer
+	if s.Has(remaining) {
+		remaining = domain.Reviewer
+	}
+	s, err = r.Manage(t.Context(), domain.Command{ActorAuthID: "admin", SubjectAuthID: id, Permission: remaining, Action: "GRANT", Reason: "retry", ExpectedRevision: s.Revision})
+	if err != nil || s.Revision != 3 || !s.Has(domain.ProfileReviewer) || !s.Has(domain.Reviewer) {
+		t.Fatal(s, err)
+	}
+	s, err = r.Manage(t.Context(), domain.Command{ActorAuthID: "admin", SubjectAuthID: id, Permission: domain.Reviewer, Action: "REVOKE", Reason: "version only", ExpectedRevision: s.Revision})
+	if err != nil || s.Revision != 4 || !s.Has(domain.ProfileReviewer) || s.Has(domain.Reviewer) {
+		t.Fatal(s, err)
+	}
+	for _, permission := range []string{domain.ProfileReviewer, domain.Reviewer} {
+		var audit bson.M
+		err := db.Collection(PermissionAuditCollection).FindOne(t.Context(), bson.M{"subjectAuthId": id, "permission": permission, "action": "GRANT"}).Decode(&audit)
+		if err != nil || audit["actorAuthId"] != "admin" {
+			t.Fatal(audit, err)
+		}
+	}
+	count, err := db.Collection(PermissionAuditCollection).CountDocuments(t.Context(), bson.M{"subjectAuthId": id})
+	if err != nil || count != 3 {
+		t.Fatal(count, err)
 	}
 }

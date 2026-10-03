@@ -32,7 +32,7 @@ func TestReviewerChangesPreserveIndependentCapabilities(t *testing.T) {
 	}
 }
 func TestReviewerCommandRejectsAmbiguousInputs(t *testing.T) {
-	c := Command{"a", "s", "GRANT", "a reason", 1}
+	c := Command{"a", "s", Reviewer, "GRANT", "a reason", 1}
 	if !c.Valid() {
 		t.Fatal(c)
 	}
@@ -42,5 +42,32 @@ func TestReviewerCommandRejectsAmbiguousInputs(t *testing.T) {
 		if bad.Valid() {
 			t.Fatal(bad)
 		}
+	}
+}
+
+func TestApplicationReviewPermissionsAreIndependent(t *testing.T) {
+	for _, first := range []string{ProfileReviewer, Reviewer} {
+		t.Run(first, func(t *testing.T) {
+			second := Reviewer
+			if first == Reviewer {
+				second = ProfileReviewer
+			}
+			original := State{"user", []string{Manager, "unrelated"}, 1}
+			a, err := Change(original, first, "GRANT", 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, err := Change(a, second, "GRANT", 2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c, err := Change(b, first, "REVOKE", 3)
+			if err != nil || c.Has(first) || !c.Has(second) || !c.Has(Manager) || !c.Has("unrelated") || c.Revision != 4 {
+				t.Fatal(c, err)
+			}
+			if original.Has(first) || a.Has(second) {
+				t.Fatal("changed prior snapshot")
+			}
+		})
 	}
 }

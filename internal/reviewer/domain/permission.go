@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 )
 
+const ProfileReviewer = "app.profile.review"
 const Reviewer = "app.version.review"
 const Manager = "auth.reviewer.manage"
 
@@ -46,12 +47,12 @@ func ValidID(s string) bool {
 func (s State) Has(p string) bool { return slices.Contains(s.Permissions, p) }
 
 type Command struct {
-	ActorAuthID, SubjectAuthID, Action, Reason string
-	ExpectedRevision                           int64
+	ActorAuthID, SubjectAuthID, Permission, Action, Reason string
+	ExpectedRevision                                       int64
 }
 
 func (c Command) Valid() bool {
-	return ValidID(c.ActorAuthID) && ValidID(c.SubjectAuthID) && (c.Action == "GRANT" || c.Action == "REVOKE") && c.ExpectedRevision > 0 && strings.TrimSpace(c.Reason) != "" && len(c.Reason) <= 1024 && utf8.ValidString(c.Reason)
+	return (c.Permission == ProfileReviewer || c.Permission == Reviewer) && ValidID(c.ActorAuthID) && ValidID(c.SubjectAuthID) && (c.Action == "GRANT" || c.Action == "REVOKE") && c.ExpectedRevision > 0 && strings.TrimSpace(c.Reason) != "" && len(c.Reason) <= 1024 && utf8.ValidString(c.Reason)
 }
 func Change(s State, permission, action string, revision int64) (State, error) {
 	if !s.Valid() {
