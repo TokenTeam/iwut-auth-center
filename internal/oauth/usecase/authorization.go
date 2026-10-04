@@ -15,7 +15,7 @@ func (s *Service) Begin(ctx context.Context, q d.AuthorizationRequest, session s
 	if err != nil {
 		return out, err
 	}
-	if q.Channel != "TEST" || client.Channel != q.Channel || q.Major < 1 {
+	if !d.ValidChannel(q.Channel) || client.Channel != q.Channel || q.Major < 1 {
 		return out, d.ErrRequest
 	}
 	rt, err := s.app.Runtime(ctx, client, q.Major)
@@ -117,7 +117,7 @@ func (s *Service) View(ctx context.Context, id, csrf, session string) (d.Authori
 		if err != nil {
 			return err
 		}
-		if i.Runtime.TesterID != "" && !i.Runtime.SameTuple(rt) {
+		if i.AuthID != "" && !i.Runtime.SameTuple(rt) {
 			return d.ErrConflict
 		}
 		if _, err := s.user(tx, ss.AuthID, rt); err != nil {

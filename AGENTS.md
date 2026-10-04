@@ -41,6 +41,10 @@ under `internal/oauth/`; concrete storage, cryptography, clock and App provider
 adapters remain under `internal/adapter/`. Preserve independent key purposes,
 the shared authentication transaction fence, exact internal method allowlists,
 current App/Catalog checks and default-closed public deployment gates.
+OAuth supports TEST/STABLE/GREY through the same App provider. TEST alone requires
+and binds a Tester episode; STABLE/GREY must have none. GREY cohort eligibility
+belongs to App and is rechecked on every decision. Never fall back to another
+channel/major, merge grants across channels or split Application sector/sub.
 Scope Catalog is persistent when the explicit OAuth manifest is configured;
 the old hardcoded adapter remains a development-only fallback.
 

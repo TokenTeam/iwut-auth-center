@@ -56,7 +56,7 @@ func (c *Client) Client(ctx context.Context, id string) (d.Client, error) {
 		return d.Client{}, providerError(err, d.ErrClient)
 	}
 	v := r.GetConfiguration()
-	if v == nil || v.ClientId != id || v.ApplicationId == "" || v.Status != pb.OAuthClientStatus_OAUTH_CLIENT_STATUS_ACTIVE || v.RegistrationRevision < 1 || v.AuthorizationEpoch < 1 || v.Channel != pb.OAuthChannel_OAUTH_CHANNEL_TEST {
+	if v == nil || v.ClientId != id || v.ApplicationId == "" || v.Status != pb.OAuthClientStatus_OAUTH_CLIENT_STATUS_ACTIVE || v.RegistrationRevision < 1 || v.AuthorizationEpoch < 1 || !d.ValidChannel(channelName(v.Channel)) {
 		return d.Client{}, d.ErrClient
 	}
 	typ := ""
@@ -74,7 +74,7 @@ func (c *Client) Client(ctx context.Context, id string) (d.Client, error) {
 	default:
 		return d.Client{}, d.ErrUnavailable
 	}
-	return d.Client{ID: id, ApplicationID: v.ApplicationId, Type: typ, Channel: "TEST", RegistrationRevision: v.RegistrationRevision, AuthorizationEpoch: v.AuthorizationEpoch, CredentialRevision: v.GetCredentialRevision()}, nil
+	return d.Client{ID: id, ApplicationID: v.ApplicationId, Type: typ, Channel: channelName(v.Channel), RegistrationRevision: v.RegistrationRevision, AuthorizationEpoch: v.AuthorizationEpoch, CredentialRevision: v.GetCredentialRevision()}, nil
 }
 func (c *Client) VerifySecret(ctx context.Context, cl d.Client, secret string) (bool, error) {
 	ctx, cancel, err := c.context(ctx)
@@ -89,7 +89,7 @@ func (c *Client) VerifySecret(ctx context.Context, cl d.Client, secret string) (
 	return r.GetVerified() && r.GetCredentialRevision() == cl.CredentialRevision, nil
 }
 func runtime(v *pb.RuntimeConfiguration, cl d.Client, major int32) (d.Runtime, error) {
-	if v == nil || v.ClientId != cl.ID || v.ApplicationId != cl.ApplicationID || v.Channel != pb.OAuthChannel_OAUTH_CHANNEL_TEST || v.RpcApiMajor != major || v.RegistrationRevision != cl.RegistrationRevision || v.AuthorizationEpoch != cl.AuthorizationEpoch || v.AdminAuthId == "" || v.VersionId == "" || v.PublicationRevision < 1 || v.Display == nil || v.Display.ProfileRevisionId == "" || v.Display.DisplayName == "" || v.ObservedAt == nil || v.ValidUntil == nil || v.ObservedAt.CheckValid() != nil || v.ValidUntil.CheckValid() != nil || !d.ValidScopes(v.RequiredScopes) || !d.ValidScopes(v.OptionalScopes) || len(d.Intersect(v.RequiredScopes, v.OptionalScopes)) > 0 || len(v.RedirectUris) == 0 {
+	if v == nil || v.ClientId != cl.ID || v.ApplicationId != cl.ApplicationID || !d.ValidChannel(cl.Channel) || channelName(v.Channel) != cl.Channel || v.RpcApiMajor != major || v.RegistrationRevision != cl.RegistrationRevision || v.AuthorizationEpoch != cl.AuthorizationEpoch || v.AdminAuthId == "" || v.VersionId == "" || v.PublicationRevision < 1 || v.Display == nil || v.Display.ProfileRevisionId == "" || v.Display.DisplayName == "" || v.ObservedAt == nil || v.ValidUntil == nil || v.ObservedAt.CheckValid() != nil || v.ValidUntil.CheckValid() != nil || !d.ValidScopes(v.RequiredScopes) || !d.ValidScopes(v.OptionalScopes) || len(d.Intersect(v.RequiredScopes, v.OptionalScopes)) > 0 || len(v.RedirectUris) == 0 {
 		return d.Runtime{}, d.ErrUnavailable
 	}
 	if cl.Type == "PUBLIC_PKCE" && v.Type != pb.OAuthClientType_OAUTH_CLIENT_TYPE_PUBLIC_PKCE || cl.Type == "CONFIDENTIAL_SECRET" && v.Type != pb.OAuthClientType_OAUTH_CLIENT_TYPE_CONFIDENTIAL_SECRET {
@@ -113,7 +113,7 @@ func (c *Client) Runtime(ctx context.Context, cl d.Client, major int32) (d.Runti
 		return d.Runtime{}, err
 	}
 	defer cancel()
-	r, err := c.rpc.ResolveClientRuntimeConfiguration(ctx, &pb.ResolveClientRuntimeConfigurationRequest{ClientId: cl.ID, Channel: pb.OAuthChannel_OAUTH_CHANNEL_TEST, RpcApiMajor: major, ExpectedRegistrationRevision: cl.RegistrationRevision})
+	r, err := c.rpc.ResolveClientRuntimeConfiguration(ctx, &pb.ResolveClientRuntimeConfigurationRequest{ClientId: cl.ID, Channel: channelProto(cl.Channel), RpcApiMajor: major, ExpectedRegistrationRevision: cl.RegistrationRevision})
 	if err != nil {
 		return d.Runtime{}, providerError(err, d.ErrGrant)
 	}
@@ -125,12 +125,12 @@ func (c *Client) Authorize(ctx context.Context, rt d.Runtime, auth string) (d.Ru
 		return d.Runtime{}, err
 	}
 	defer cancel()
-	r, err := c.rpc.ResolveAuthorizationContext(ctx, &pb.ResolveAuthorizationContextRequest{ClientId: rt.Client.ID, AuthId: auth, Channel: pb.OAuthChannel_OAUTH_CHANNEL_TEST, RpcApiMajor: rt.Major, ExpectedRegistrationRevision: rt.Client.RegistrationRevision, ExpectedRuntimeVersion: &pb.RuntimeVersion{VersionId: rt.VersionID, PublicationRevision: rt.PublicationRevision, ProfileRevisionId: rt.ProfileID, AdminAuthId: rt.AdminID}})
+	r, err := c.rpc.ResolveAuthorizationContext(ctx, &pb.ResolveAuthorizationContextRequest{ClientId: rt.Client.ID, AuthId: auth, Channel: channelProto(rt.Client.Channel), RpcApiMajor: rt.Major, ExpectedRegistrationRevision: rt.Client.RegistrationRevision, ExpectedRuntimeVersion: &pb.RuntimeVersion{VersionId: rt.VersionID, PublicationRevision: rt.PublicationRevision, ProfileRevisionId: rt.ProfileID, AdminAuthId: rt.AdminID}})
 	if err != nil {
 		return d.Runtime{}, providerError(err, d.ErrGrant)
 	}
 	v := r.GetContext()
-	if v == nil || v.AuthId != auth || v.TesterMembershipId == "" {
+	if v == nil || v.AuthId != auth || !d.ValidMembership(rt.Client.Channel, v.TesterMembershipId) {
 		return d.Runtime{}, d.ErrUnavailable
 	}
 	out, err := runtime(v.Runtime, rt.Client, rt.Major)
@@ -156,10 +156,37 @@ func (c *Client) Redirects(ctx context.Context, app string) (d.RedirectSnapshot,
 	}
 	out := d.RedirectSnapshot{ApplicationID: app, URIs: v.RedirectUris, ObservedAt: v.ObservedAt.AsTime(), ValidUntil: v.ValidUntil.AsTime()}
 	for _, e := range v.Entries {
-		if e.Channel != pb.OAuthChannel_OAUTH_CHANNEL_TEST || e.RpcApiMajor < 1 || e.VersionId == "" || e.PublicationRevision < 1 {
+		if e == nil || !d.ValidChannel(channelName(e.Channel)) || e.RpcApiMajor < 1 || e.VersionId == "" || e.PublicationRevision < 1 {
 			return out, d.ErrUnavailable
 		}
-		out.Entries = append(out.Entries, d.RedirectEntry{Channel: "TEST", Major: e.RpcApiMajor, VersionID: e.VersionId, PublicationRevision: e.PublicationRevision})
+		out.Entries = append(out.Entries, d.RedirectEntry{Channel: channelName(e.Channel), Major: e.RpcApiMajor, VersionID: e.VersionId, PublicationRevision: e.PublicationRevision})
 	}
 	return out, nil
+}
+
+// Explicit mappings reject unspecified/future values instead of granting them
+// the semantics of another channel.
+func channelName(channel pb.OAuthChannel) string {
+	switch channel {
+	case pb.OAuthChannel_OAUTH_CHANNEL_TEST:
+		return "TEST"
+	case pb.OAuthChannel_OAUTH_CHANNEL_STABLE:
+		return "STABLE"
+	case pb.OAuthChannel_OAUTH_CHANNEL_GREY:
+		return "GREY"
+	default:
+		return ""
+	}
+}
+func channelProto(channel string) pb.OAuthChannel {
+	switch channel {
+	case "TEST":
+		return pb.OAuthChannel_OAUTH_CHANNEL_TEST
+	case "STABLE":
+		return pb.OAuthChannel_OAUTH_CHANNEL_STABLE
+	case "GREY":
+		return pb.OAuthChannel_OAUTH_CHANNEL_GREY
+	default:
+		return pb.OAuthChannel_OAUTH_CHANNEL_UNSPECIFIED
+	}
 }

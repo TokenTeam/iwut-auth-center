@@ -47,6 +47,9 @@ func (s *Service) transaction(ctx context.Context, fn func(port.Tx) error) error
 	return s.store.Transaction(ctx, fn)
 }
 func (s *Service) user(tx port.Tx, authID string, rt d.Runtime) (d.User, error) {
+	if !d.ValidMembership(rt.Client.Channel, rt.TesterID) {
+		return d.User{}, d.ErrUnavailable
+	}
 	u, err := tx.User(authID)
 	if err != nil {
 		return u, err

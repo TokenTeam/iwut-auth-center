@@ -44,6 +44,15 @@ func (c Catalog) Enabled(refresh bool) []string {
 	return Union(out)
 }
 
+// Channels are explicit security boundaries, never fallback priorities.
+func ValidChannel(channel string) bool {
+	return channel == "TEST" || channel == "STABLE" || channel == "GREY"
+}
+
+func ValidMembership(channel, testerID string) bool {
+	return ValidChannel(channel) && (channel == "TEST" && testerID != "" || channel != "TEST" && testerID == "")
+}
+
 type Client struct {
 	ID, ApplicationID, Type, Channel                             string
 	RegistrationRevision, AuthorizationEpoch, CredentialRevision int64

@@ -9,7 +9,7 @@ import (
 
 func TestOAuthRouteDigestAndAmbiguity(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "policy.json")
-	policy := routePolicy{Version: 1, Routes: []oauthRouteJSON{{ID: "read", Audience: "data", Protocol: "HTTP", Method: "GET", Path: "/data/{id}", Scopes: []string{"z.read", "a.read"}, Channels: []string{"TEST"}}}}
+	policy := routePolicy{Version: 1, Routes: []oauthRouteJSON{{ID: "read", Audience: "data", Protocol: "HTTP", Method: "GET", Path: "/data/{id}", Scopes: []string{"z.read", "a.read"}, Channels: []string{"TEST", "STABLE", "GREY"}}}}
 	write := func() {
 		b, _ := json.MarshalIndent(policy, "", "  ")
 		if e := os.WriteFile(p, b, 0600); e != nil {
@@ -22,6 +22,7 @@ func TestOAuthRouteDigestAndAmbiguity(t *testing.T) {
 		t.Fatal(e)
 	}
 	policy.Routes[0].Scopes = []string{"a.read", "z.read"}
+	policy.Routes[0].Channels = []string{"GREY", "STABLE", "TEST"}
 	write()
 	b, e := loadOAuthRoutes(p, nil)
 	if e != nil || a.Digest != b.Digest {
@@ -31,5 +32,18 @@ func TestOAuthRouteDigestAndAmbiguity(t *testing.T) {
 	write()
 	if _, e := loadOAuthRoutes(p, nil); e == nil {
 		t.Fatal("ambiguous route accepted")
+	}
+}
+
+func TestOAuthRouteChannelBoundaries(t *testing.T) {
+	for _, channels := range [][]string{nil, {}, {""}, {"UNKNOWN"}, {"TEST", "TEST"}, {"STABLE", "GREY", "FUTURE"}} {
+		if validOAuthChannels(channels) {
+			t.Fatalf("accepted invalid channels %v", channels)
+		}
+	}
+	for _, channels := range [][]string{{"TEST"}, {"STABLE"}, {"GREY"}, {"TEST", "STABLE"}, {"TEST", "STABLE", "GREY"}} {
+		if !validOAuthChannels(channels) {
+			t.Fatalf("rejected known channels %v", channels)
+		}
 	}
 }

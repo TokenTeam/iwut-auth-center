@@ -533,11 +533,20 @@ Public OAuth defaults off. Enabling it requires explicit portal and Gateway
 readiness; resource scopes additionally require resource-service readiness and
 route/audience policy. Those flags do not verify deployment health. Official login
 frontend, Traefik/Gateway OAuth forwarding and resource delegation verification
-remain separate deliveries. Current App runtime supports TEST only.
+remain separate deliveries. Auth consumes App TEST, STABLE and GREY runtimes:
+TEST requires its original active Tester episode; STABLE has no Tester requirement;
+GREY requires current App cohort eligibility. There is no channel/major fallback.
+Grant and credentials stay channel-bound; sector/sub stay Application-bound.
+Existing TEST records need no migration. Explicit route `allowedChannels` may
+contain any nonempty unique subset of the three channels; adding a channel changes
+its policy digest and requires a matching Gateway deployment.
 
 `make test-mongo` covers concurrent redemption/rotation, replay revocation,
 catalog changes, grant epochs, transaction failures and production Wire endpoints.
 The OAuth E2E starts the actual App Center, creates/reviews/publishes its fixtures
 through APIs, and uses a standard OIDC client to verify discovery, JWKS and ID
-tokens. Its isolated App build uses a deterministic public DNS resolver through a
+tokens. Multi-channel coverage includes both client types, stable subjects,
+independent grants, non-Tester STABLE/GREY access, cohort shrink/restoration,
+publication clearing, stale codes and route-channel restrictions.
+Its isolated App build uses a deterministic public DNS resolver through a
 Go build overlay; it does not alter App source or system DNS.

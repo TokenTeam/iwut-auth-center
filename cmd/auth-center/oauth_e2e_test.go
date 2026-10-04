@@ -86,8 +86,8 @@ func TestOAuthE2E_ProductionWireActualAppProvider(t *testing.T) {
 	dbName := "oauth_e2e_" + uuid.NewString()
 	authHTTP, authGRPC, appGRPC := reserveAddress(t), reserveAddress(t), reserveAddress(t)
 	env := map[string]string{config.UserEndpointsEnabledEnv: "true", config.IdentityIssuanceEnabledEnv: "true", config.MongoURIEnv: uri, config.MongoDatabaseEnv: dbName, config.ServiceCallersEnv: callers, config.HTTPAddrEnv: authHTTP, config.GRPCAddrEnv: authGRPC, "AUTH_AUTHENTICATION_SERVICE_ID": "iwut-auth-center:test", "AUTH_SESSION_TTL": "24h", "AUTH_ASSOC_KEY_VERSION": "v1", "AUTH_ASSOC_ENCRYPT_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32)), "AUTH_ASSOC_LOOKUP_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, 32)), "AUTH_PROFILE_CATALOG_FILE": write("profile.json", []byte(`{"definitions":[]}`)), "AUTH_USER_IDENTITY_ISSUER": "identity-test", "AUTH_USER_IDENTITY_PUBLIC_KEYS_JSON": string(keysJSON), "AUTH_USER_IDENTITY_SIGNING_KID": "identity-k1", "AUTH_USER_IDENTITY_PRIVATE_KEY_PEM_B64": base64.StdEncoding.EncodeToString(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(identityKey)}))}
-	route := d.Route{ID: "resource-read", Audience: "resource-service", Protocol: "HTTP", Method: "GET", Path: "/items/{id}", Scopes: []string{"items.read"}, Channels: []string{"TEST"}}
-	policy := writeJSON("routes.json", map[string]any{"version": 1, "routes": []oauthRouteJSON{{ID: route.ID, Audience: route.Audience, Protocol: route.Protocol, Method: route.Method, Path: route.Path, Scopes: route.Scopes, Channels: route.Channels}}, "callers": map[string]any{"gateway": map[string]any{"routes": []string{route.ID}, "audiences": []string{route.Audience}}}})
+	route := d.Route{ID: "resource-read", Audience: "resource-service", Protocol: "HTTP", Method: "GET", Path: "/items/{id}", Scopes: []string{"items.read"}, Channels: []string{"TEST", "STABLE", "GREY"}}
+	policy := writeJSON("routes.json", map[string]any{"version": 1, "routes": []oauthRouteJSON{{ID: route.ID, Audience: route.Audience, Protocol: route.Protocol, Method: route.Method, Path: route.Path, Scopes: route.Scopes, Channels: route.Channels}, {ID: "stable-only", Audience: route.Audience, Protocol: "HTTP", Method: "GET", Path: "/stable/{id}", Scopes: route.Scopes, Channels: []string{"STABLE"}}}, "callers": map[string]any{"gateway": map[string]any{"routes": []string{route.ID, "stable-only"}, "audiences": []string{route.Audience}}}})
 	clockFile := writeJSON("clock.json", map[string]any{"observedAt": time.Now().UTC(), "offsetMillis": 0})
 	cfg := config.OAuth{ClockObservationFile: clockFile, ResourceScopesReady: true, Issuer: "https://auth.example.test/oidc", PortalOrigin: "https://auth.example.test", PortalLoginURL: "https://auth.example.test/login", SectorSuffix: "sectors.example.test", CatalogFile: writeJSON("scopes.json", []d.Scope{{Name: "openid", Label: "Login", Description: "Identify account", Kind: "PROTOCOL", Enabled: true}, {Name: "email", Label: "Email", Description: "Verified email", Kind: "PROTOCOL", Enabled: true}, {Name: "offline_access", Label: "Background", Description: "Refresh access", Kind: "PROTOCOL", Enabled: true}, {Name: "items.read", Label: "Items", Description: "Read items", Kind: "RESOURCE", Audience: "resource-service", Enabled: true}}), AppTarget: appGRPC, AppPlaintextLoopback: true, ServiceKeyID: "auth-service", ServiceKeyFile: keyFile("service.pem", serviceKey), OIDCKeyID: "oidc", OIDCKeyFile: keyFile("oidc.pem", oidcKey), DelegationKeyID: "delegation", DelegationKeyFile: keyFile("delegation.pem", delegationKey), RoutePolicyFile: policy, PublicEnabled: true, PortalReady: true, GatewayReady: true, RefreshEnabled: true}
 	env["AUTH_CENTER_OAUTH_CONFIG_FILE"] = writeJSON("oauth.json", cfg)
@@ -142,7 +142,10 @@ func TestOAuthE2E_ProductionWireActualAppProvider(t *testing.T) {
 	_, appURL, _ := startActualApp(t, uri, publicFile, authGRPC, serviceKey, map[string]string{"AUTH_E2E_DNS_ADDR": oauthTestDNS(t), "APP_CENTER_GRPC_ADDR": appGRPC, "APP_CENTER_SERVICE_CALLERS_B64": base64.StdEncoding.EncodeToString(appRegistry)})
 	appCall := func(method, path, token string, body any) map[string]any {
 		t.Helper()
-		b, _ := json.Marshal(body)
+		var b []byte
+		if body != nil {
+			b, _ = json.Marshal(body)
+		}
 		req, e := http.NewRequestWithContext(ctx, method, appURL+path, bytes.NewReader(b))
 		if e != nil {
 			t.Fatal(e)
@@ -184,7 +187,41 @@ func TestOAuthE2E_ProductionWireActualAppProvider(t *testing.T) {
 	secretRegistration := appCall("POST", prefix+"/oauth-registrations/OAUTH_CHANNEL_TEST/clients", ownerToken, map[string]any{"type": "OAUTH_CLIENT_TYPE_CONFIDENTIAL_SECRET", "expectedRegistrationRevision": "1"})
 	secretID := secretRegistration["registration"].(map[string]any)["confidentialClient"].(map[string]any)["clientId"].(string)
 	secret := secretRegistration["clientSecret"].(string)
-	appCall("PUT", prefix+"/publications/1/test-slot", ownerToken, map[string]any{"versionId": versionID})
+	clientChannels := map[string]string{clientID: "TEST", secretID: "TEST"}
+	clientSecrets := map[string]string{secretID: secret}
+	publicClients := map[string]string{"TEST": clientID}
+	privateClients := map[string]string{"TEST": secretID}
+	for _, channel := range []string{"STABLE", "GREY"} {
+		path := prefix + "/oauth-registrations/OAUTH_CHANNEL_" + channel + "/clients"
+		registered := appCall("POST", path, ownerToken, map[string]any{"type": "OAUTH_CLIENT_TYPE_PUBLIC_PKCE"})
+		id := registered["registration"].(map[string]any)["publicClient"].(map[string]any)["clientId"].(string)
+		publicClients[channel], clientChannels[id] = id, channel
+		registered = appCall("POST", path, ownerToken, map[string]any{"type": "OAUTH_CLIENT_TYPE_CONFIDENTIAL_SECRET", "expectedRegistrationRevision": "1"})
+		id = registered["registration"].(map[string]any)["confidentialClient"].(map[string]any)["clientId"].(string)
+		privateClients[channel], clientChannels[id] = id, channel
+		clientSecrets[id] = registered["clientSecret"].(string)
+	}
+	publication := appCall("PUT", prefix+"/publications/1/test-slot", ownerToken, map[string]any{"versionId": versionID})
+	publicationRevision := publication["publication"].(map[string]any)["revision"].(string)
+	updatePublication := func(method, slot string, body any) {
+		t.Helper()
+		result := appCall(method, prefix+"/publications/1/"+slot, issue(user), body)
+		publicationRevision = result["publication"].(map[string]any)["revision"].(string)
+	}
+	setStable := func() {
+		updatePublication("PUT", "stable-slot", map[string]any{"versionId": versionID, "expectedPublicationRevision": publicationRevision})
+	}
+	setGrey := func(exposure int) {
+		updatePublication("PUT", "grey-rollout", map[string]any{"versionId": versionID, "exposureBasisPoints": exposure, "expectedPublicationRevision": publicationRevision})
+	}
+	clearGrey := func() {
+		updatePublication("DELETE", "grey-rollout?expected_publication_revision="+publicationRevision, nil)
+	}
+	clearStable := func() {
+		updatePublication("DELETE", "stable-slot?expected_publication_revision="+publicationRevision, nil)
+	}
+	setStable()
+	setGrey(10000)
 	link := appCall("POST", prefix+"/tester-join-links", ownerToken, map[string]any{})
 	linkURL, _ := url.Parse(link["joinUrl"].(string))
 	fragment, _ := url.ParseQuery(linkURL.Fragment)
@@ -223,13 +260,24 @@ func TestOAuthE2E_ProductionWireActualAppProvider(t *testing.T) {
 	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
 	state := strings.Repeat("a", 43)
 	nonce := strings.Repeat("b", 43)
-	authorize := func(client string) string {
-		t.Helper()
+	authorizeQuery := func(client string) url.Values {
 		redirect := callback
-		if client == secretID {
+		if _, confidential := clientSecrets[client]; confidential {
 			redirect += "-confidential"
 		}
-		q := url.Values{"response_type": {"code"}, "client_id": {client}, "redirect_uri": {redirect}, "scope": {"openid email offline_access items.read"}, "state": {state}, "nonce": {nonce}, "code_challenge": {challenge}, "code_challenge_method": {"S256"}, "iwut_channel": {"TEST"}, "iwut_rpc_api_major": {"1"}, "prompt": {"consent"}}
+		return url.Values{"response_type": {"code"}, "client_id": {client}, "redirect_uri": {redirect}, "scope": {"openid email offline_access items.read"}, "state": {state}, "nonce": {nonce}, "code_challenge": {challenge}, "code_challenge_method": {"S256"}, "iwut_channel": {clientChannels[client]}, "iwut_rpc_api_major": {"1"}, "prompt": {"consent"}}
+	}
+	for _, wrongChannel := range []string{"STABLE", "GREY", "UNKNOWN"} {
+		q := authorizeQuery(clientID)
+		q.Set("iwut_channel", wrongChannel)
+		status, headers, _ := request("GET", "/authorize?"+q.Encode(), "", "", http.Header{"Cookie": []string{cookie}})
+		if status != 400 || headers.Get("Location") != "" {
+			t.Fatal("client channel substitution accepted", wrongChannel, status)
+		}
+	}
+	authorize := func(client string) string {
+		t.Helper()
+		q := authorizeQuery(client)
 		status, _, b := request("GET", "/authorize?"+q.Encode(), "", "", http.Header{"Cookie": []string{cookie}})
 		if status != 200 {
 			t.Fatal("authorize", status, string(b))
@@ -265,7 +313,7 @@ func TestOAuthE2E_ProductionWireActualAppProvider(t *testing.T) {
 			h.Set("Origin", "https://www.whut.edu.cn")
 		}
 		if basic {
-			h.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(url.QueryEscape(client)+":"+url.QueryEscape(secret))))
+			h.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(url.QueryEscape(client)+":"+url.QueryEscape(clientSecrets[client]))))
 		} else {
 			v.Set("client_id", client)
 		}
@@ -342,6 +390,164 @@ func TestOAuthE2E_ProductionWireActualAppProvider(t *testing.T) {
 	if code != 200 {
 		t.Fatal("refresh", code, string(body))
 	}
+	// Publishing other channels must not break the existing TEST sector lookup.
+	// One application has one subject, but independent channel grants.
+	channelTokens := map[string][]map[string]any{}
+	for _, channel := range []string{"STABLE", "GREY"} {
+		for _, confidential := range []bool{false, true} {
+			id := publicClients[channel]
+			if confidential {
+				id = privateClients[channel]
+			}
+			issued := exchange(id, confidential)
+			verifiedOther, err := provider.Verifier(&oidc.Config{ClientID: id}).Verify(clientContext, issued["id_token"].(string))
+			if err != nil || verifiedOther.Subject != verified.Subject {
+				t.Fatal("cross-channel subject", channel, err)
+			}
+			issued["client_id"] = id
+			channelTokens[channel] = append(channelTokens[channel], issued)
+		}
+	}
+	allGrants, err := gp.NewOAuthGrantServiceClient(conn).ListOwnApplicationGrants(sessionCallContext(ctx, user.Session.SessionToken), &gp.ListOwnApplicationGrantsRequest{})
+	if err != nil || len(allGrants.Grants) != 3 {
+		t.Fatal("channel grants not isolated", err)
+	}
+	delegate := func(token, routeID string) error {
+		_ = writeJSON("clock.json", map[string]any{"observedAt": time.Now().UTC(), "offsetMillis": 0})
+		path := "/items/123"
+		if routeID == "stable-only" {
+			path = "/stable/123"
+		}
+		_, err := dp.NewOAuthDelegationServiceClient(conn).IssueDelegationContext(metadata.NewOutgoingContext(ctx, metadata.Pairs("authorization", "Bearer "+gatewayToken, "x-iwut-access-token", token)), &dp.IssueDelegationContextRequest{RouteId: routeID, PolicyDigest: policyRuntime.Digest, Protocol: "HTTP", Method: "GET", TargetPath: path})
+		return err
+	}
+	for _, channel := range []string{"STABLE", "GREY"} {
+		for _, issued := range channelTokens[channel] {
+			if err := delegate(issued["access_token"].(string), route.ID); err != nil {
+				t.Fatal(channel, "delegation", err)
+			}
+			err := delegate(issued["access_token"].(string), "stable-only")
+			if channel == "STABLE" && err != nil || channel == "GREY" && status.Code(err) != codes.PermissionDenied {
+				t.Fatal("route channel boundary", channel, err)
+			}
+		}
+	}
+	if err := delegate(access, "stable-only"); status.Code(err) != codes.PermissionDenied {
+		t.Fatal("TEST entered STABLE route", err)
+	}
+	infoStatus := func(token string) int {
+		code, _, _ := request("GET", "/userinfo", "", "", http.Header{"Authorization": []string{"Bearer " + token}})
+		return code
+	}
+	rotate := func(issued map[string]any, want int) {
+		t.Helper()
+		id := issued["client_id"].(string)
+		values := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {issued["refresh_token"].(string)}}
+		h := http.Header{}
+		if secret, confidential := clientSecrets[id]; confidential {
+			h.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(url.QueryEscape(id)+":"+url.QueryEscape(secret))))
+		} else {
+			values.Set("client_id", id)
+		}
+		code, _, body := request("POST", "/token", values.Encode(), "application/x-www-form-urlencoded", h)
+		if code != want {
+			t.Fatal("channel refresh", clientChannels[id], code, string(body))
+		}
+		if want == 200 {
+			var next map[string]any
+			if json.Unmarshal(body, &next) != nil {
+				t.Fatal("invalid refresh response")
+			}
+			issued["access_token"], issued["refresh_token"] = next["access_token"], next["refresh_token"]
+		} else if !bytes.Contains(body, []byte("invalid_grant")) {
+			t.Fatal("wrong failed refresh response", string(body))
+		}
+	}
+	for _, issued := range append(channelTokens["STABLE"], channelTokens["GREY"]...) {
+		rotate(issued, 200)
+	}
+	// A real non-Tester can use STABLE and a fully exposed GREY rollout.
+	cookie = "__Host-iwut-portal=" + reviewer.Session.SessionToken
+	nonTesterQuery := authorizeQuery(clientID)
+	denied, _, _ := request("GET", "/authorize?"+nonTesterQuery.Encode(), "", "", http.Header{"Cookie": []string{cookie}})
+	if denied != 400 {
+		t.Fatal("non-Tester TEST authorization", denied)
+	}
+	nonTesterStable := exchange(publicClients["STABLE"], false)
+	nonTesterGrey := exchange(publicClients["GREY"], false)
+	nonTesterGrey["client_id"] = publicClients["GREY"]
+	cookie = "__Host-iwut-portal=" + user.Session.SessionToken
+	if infoStatus(nonTesterStable["access_token"].(string)) != 200 || infoStatus(nonTesterGrey["access_token"].(string)) != 200 {
+		t.Fatal("non-Tester rejected")
+	}
+	// Shrink the actual cohort. In the rare case this non-Tester occupies bucket
+	// zero, choose another real registered user, without modifying App facts.
+	setGrey(1)
+	for attempt := 0; infoStatus(nonTesterGrey["access_token"].(string)) == 200; attempt++ {
+		if attempt >= 8 {
+			t.Fatal("could not select a user outside one-basis-point cohort")
+		}
+		device, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		association := make([]byte, 32)
+		if _, err := rand.Read(association); err != nil {
+			t.Fatal(err)
+		}
+		other, _ := registerUser(t, auth, device, association)
+		setGrey(10000)
+		cookie = "__Host-iwut-portal=" + other.Session.SessionToken
+		nonTesterGrey = exchange(publicClients["GREY"], false)
+		nonTesterGrey["client_id"] = publicClients["GREY"]
+		cookie = "__Host-iwut-portal=" + user.Session.SessionToken
+		setGrey(1)
+	}
+	if infoStatus(nonTesterGrey["access_token"].(string)) != 401 {
+		t.Fatal("grey cohort loss not rejected")
+	}
+	rotate(nonTesterGrey, 400)
+	if err := delegate(nonTesterGrey["access_token"].(string), route.ID); status.Code(err) != codes.Unauthenticated {
+		t.Fatal("grey cohort delegation", err)
+	}
+	setGrey(10000)
+	rotate(nonTesterGrey, 200)
+	// Code binds the old publication tuple even when its channel returns later.
+	staleCode := authorize(publicClients["GREY"])
+	clearGrey()
+	for _, issued := range channelTokens["GREY"] {
+		if infoStatus(issued["access_token"].(string)) != 401 {
+			t.Fatal("cleared GREY still accepted")
+		}
+		rotate(issued, 400)
+	}
+	for _, issued := range channelTokens["STABLE"] {
+		if infoStatus(issued["access_token"].(string)) != 200 {
+			t.Fatal("GREY clear affected STABLE")
+		}
+	}
+	setGrey(10000)
+	staleValues := url.Values{"grant_type": {"authorization_code"}, "client_id": {publicClients["GREY"]}, "code": {staleCode}, "redirect_uri": {callback}, "code_verifier": {verifier}}
+	code, _, body = request("POST", "/token", staleValues.Encode(), "application/x-www-form-urlencoded", nil)
+	if code != 400 || !bytes.Contains(body, []byte("invalid_grant")) {
+		t.Fatal("stale publication code accepted", code, string(body))
+	}
+	for _, issued := range channelTokens["GREY"] {
+		rotate(issued, 200)
+	}
+	clearGrey()
+	clearStable()
+	for _, issued := range channelTokens["STABLE"] {
+		if infoStatus(issued["access_token"].(string)) != 401 {
+			t.Fatal("cleared STABLE still accepted")
+		}
+		rotate(issued, 400)
+		if err := delegate(issued["access_token"].(string), route.ID); status.Code(err) != codes.Unauthenticated {
+			t.Fatal("cleared STABLE delegation", err)
+		}
+	}
+	setStable()
+	setGrey(10000)
+	for _, issued := range channelTokens["STABLE"] {
+		rotate(issued, 200)
+	}
 	g := grants.Grants[0]
 	if _, e = gp.NewOAuthGrantServiceClient(conn).RevokeOwnApplicationGrant(sessionCallContext(ctx, user.Session.SessionToken), &gp.RevokeOwnApplicationGrantRequest{GrantId: g.GrantId, ExpectedRevision: &g.Revision, Mode: gp.RevocationMode_REVOCATION_MODE_ALL}); e != nil {
 		t.Fatal(e)
@@ -350,6 +556,11 @@ func TestOAuthE2E_ProductionWireActualAppProvider(t *testing.T) {
 		code, _, body = request("GET", "/userinfo", "", "", http.Header{"Authorization": []string{"Bearer " + v}})
 		if code != 401 {
 			t.Fatal("revoked shared grant", code, string(body))
+		}
+	}
+	for _, issued := range append(channelTokens["STABLE"], channelTokens["GREY"]...) {
+		if infoStatus(issued["access_token"].(string)) != 200 {
+			t.Fatal("TEST grant revocation affected another channel")
 		}
 	}
 	t.Log("Actual Auth Wire + App019: reviewed runtime, both client types, consent, OIDC, refresh, UserInfo, delegation and shared revocation")

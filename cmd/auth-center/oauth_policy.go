@@ -50,7 +50,7 @@ func loadOAuthRoutes(path string, uc *usecase.Service) (*transport.OAuthDelegati
 	}
 	sort.Slice(policy.Routes, func(i, j int) bool { return policy.Routes[i].ID < policy.Routes[j].ID })
 	for i, r := range policy.Routes {
-		if r.ID == "" || r.Audience == "" || len(r.Scopes) == 0 || !d.ValidScopes(r.Scopes) || len(r.Channels) != 1 || r.Channels[0] != "TEST" || r.Protocol != "HTTP" && r.Protocol != "GRPC" || r.Method == "" || r.Protocol == "HTTP" && !validOAuthPathPattern(r.Path) || r.Protocol == "GRPC" && (r.Path != "" || !validOAuthGRPCMethod(r.Method)) {
+		if r.ID == "" || r.Audience == "" || len(r.Scopes) == 0 || !d.ValidScopes(r.Scopes) || !validOAuthChannels(r.Channels) || r.Protocol != "HTTP" && r.Protocol != "GRPC" || r.Method == "" || r.Protocol == "HTTP" && !validOAuthPathPattern(r.Path) || r.Protocol == "GRPC" && (r.Path != "" || !validOAuthGRPCMethod(r.Method)) {
 			return nil, fmt.Errorf("invalid OAuth route")
 		}
 		if r.Protocol == "HTTP" && !d.Contains([]string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}, r.Method) {
@@ -115,6 +115,18 @@ func oauthPathsOverlap(a, b string) bool {
 	}
 	for i, v := range x {
 		if v != y[i] && !strings.HasPrefix(v, "{") && !strings.HasPrefix(y[i], "{") {
+			return false
+		}
+	}
+	return true
+}
+
+func validOAuthChannels(channels []string) bool {
+	if len(channels) == 0 || len(d.Union(channels)) != len(channels) {
+		return false
+	}
+	for _, channel := range channels {
+		if !d.ValidChannel(channel) {
 			return false
 		}
 	}
