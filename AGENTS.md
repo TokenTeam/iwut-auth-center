@@ -8,7 +8,7 @@ so. Authoritative design lives outside this repository at `../../docs/`.
 
 ## Current work package
 
-**UC-AUTH-004–013: reviewer administration, user profile, device authentication, Session-to-JWS issuance, email registration/binding, email login and Developer self-enrollment.** Before changing behavior, read:
+**Implemented authentication and OAuth capabilities plus accepted UC-AUTH-021–025 governance. UC020 remains a separate proposed work package.** Before changing behavior, read:
 
 1. `../../docs/auth-center/briefs/UC-AUTH-013.md` and `../../docs/platform/contracts/auth-developer-application-v1.md`, then `../../docs/auth-center/briefs/UC-AUTH-012.md` and `../../docs/platform/contracts/auth-email-login-v1.md`, then `../../docs/auth-center/briefs/UC-AUTH-011.md`, `../../docs/platform/contracts/auth-email-binding-v1.md` and its public vectors; preserve UC004–010 behavior.
 2. `../../docs/auth-center/briefs/UC-AUTH-004.md` and the corresponding `../../docs/auth-center/briefs/UC-AUTH-005.md` through `UC-AUTH-010.md`.
@@ -28,6 +28,33 @@ Scope:
 - real MongoDB replica-set transactions and real-listener E2E through generated clients.
 
 UC010 additionally follows `../../docs/platform/contracts/auth-session-identity-issuance-v1.md`.
+
+Governance work follows `../../docs/auth-center/briefs/UC-AUTH-021.md` through
+`UC-AUTH-025.md`, the matching authoritative use cases, and
+`../../docs/platform/contracts/account-owner-exit-v1.md`. Preserve the explicit
+UC021 bootstrap consumption marker; there is no legacy bootstrap migration or
+startup grant. Full administrator membership is the fixed four-permission bundle,
+independent of reviewer permissions and Developer qualification.
+
+Every USER is created with accountRevision=1 and developerRevision=0. Treat
+missing or malformed revisions as invalid data; do not synthesize legacy defaults.
+Account disable/restore increases accountRevision and all authentication consumers
+check the generation. Auth-audience JWS carries account_revision and authorization
+rechecks it in the final transaction, including profile CAS and governance writes.
+Developer lifecycle changes use their own revision without revoking normal-user
+Sessions. WITHDRAWN cannot be restored or reapplied in the first version.
+
+UC024/025 share one pending lifecycle exit per authId and a durable Auth decision;
+App owns the corresponding ownership barrier. Cross-service RPCs run outside
+Mongo transaction callbacks. Cancellation may omit an unknown receipt after a lost
+Prepare response; a supplied receipt and every COMMITTED receipt must match.
+Closed-account cleanup never releases a developerHandle or device fingerprint,
+never affects another association member, and never deletes an Application sector.
+Use the independent termination ledger before reporting final termination; replay
+and validate it before serving traffic after restoration. Cleanup acknowledgments,
+not elapsed time or an empty dependency stub, determine completion. Production
+readiness flags remain explicit operator declarations, not automatic guarantees.
+
 
 Gateway routes and mobile secure-storage/UI delivery remain
 separate work packages. Backend verification must not claim their completion.
@@ -54,6 +81,10 @@ internal/scope/domain/       protocol-independent business values
 internal/scope/usecase/      UC orchestration
 internal/scope/port/         consumer-owned interfaces
 internal/adapter/catalog/    temporary hardcoded provider
+internal/administrator/      fixed platform management membership
+internal/account/            account lifecycle and authentication generation
+internal/ownerexit/          durable cross-service exit coordination
+internal/accountclosure/     dedicated closure proof, termination and cleanup
 internal/developer/domain/   principal/status business values
 internal/developer/usecase/  batch query and self-enrollment orchestration
 internal/developer/port/     principal and enrollment repository ports
