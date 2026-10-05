@@ -51,12 +51,15 @@ func provideMongoDatabase(client *drivermongo.Client, configuration config.Confi
 	return database, nil
 }
 
-func provideServerConfig(configuration config.Config, endpoints *transport.UserEndpoints, oauth *oauthRuntime, owner *ownerExitRuntime) transport.ServerConfig {
-	return transport.ServerConfig{OwnerExitDecision: owner.Decision, DeveloperWithdrawal: owner.Withdrawal, HTTPAddr: configuration.HTTPAddr, GRPCAddr: configuration.GRPCAddr, UserEndpoints: endpoints, OAuth: oauth.HTTP, OAuthGrant: oauth.Grant, OAuthDelegation: oauth.Delegation}
+func provideServerConfig(configuration config.Config, endpoints *transport.UserEndpoints, oauth *oauthRuntime, owner *ownerExitRuntime, closure *accountClosureRuntime) transport.ServerConfig {
+	return transport.ServerConfig{AccountClosure: closure.Service, OwnerExitDecision: owner.Decision, DeveloperWithdrawal: owner.Withdrawal, HTTPAddr: configuration.HTTPAddr, GRPCAddr: configuration.GRPCAddr, UserEndpoints: endpoints, OAuth: oauth.HTTP, OAuthGrant: oauth.Grant, OAuthDelegation: oauth.Delegation}
 }
 
-func provideApp(servers *transport.Servers, owner *ownerExitRuntime) *kratos.App {
+func provideApp(servers *transport.Servers, owner *ownerExitRuntime, closure *accountClosureRuntime) *kratos.App {
 	all := []kt.Server{servers.HTTP, servers.GRPC}
+	if closure.Worker != nil {
+		all = append(all, closure.Worker)
+	}
 	if owner.Worker != nil {
 		all = append(all, owner.Worker)
 	}

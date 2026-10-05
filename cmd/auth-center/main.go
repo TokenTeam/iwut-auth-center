@@ -19,6 +19,9 @@ func run() error {
 		if os.Args[1] == "bootstrap-platform-admin" {
 			return bootstrapPlatformAdmin(os.Args[2:], os.Stdout)
 		}
+		if os.Args[1] == "reconcile-account-closures" {
+			return reconcileAccountClosures(os.Args[2:], os.Stdout)
+		}
 		return fmt.Errorf("unknown command")
 	}
 	configuration, err := config.LoadFromEnvironment()

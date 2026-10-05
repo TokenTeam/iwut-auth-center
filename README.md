@@ -728,3 +728,46 @@ App cleanup. Its retries are durable, bounded to 100 operations per batch, use a
 5-second RPC deadline, and back off from 1 to 60 seconds with jitter. Never TTL
 or manually discard `auth_account_owner_exit_operations`: their terminal
 summaries are the authority used by App recovery after a restart.
+
+### Account closure (UC025)
+
+`AUTH_ACCOUNT_CLOSURE_ENABLED=true` enables the five dedicated HTTP/native gRPC
+account-closure methods. It requires user endpoints, the independent owner-exit
+manifest above, `AUTH_CLOSURE_DATA_POLICY_READY=true`, and
+`AUTH_TERMINATION_LEDGER_DIR` pointing to an existing private (`0700`), absolute,
+non-symlink directory. The application does not create a missing mount. The
+readiness assertion means the operator has actually implemented the documented
+30-day backup/log expiry, data inventory and disabled-user/no-key intake process;
+local tests do not establish that operational readiness. Public closure is off by
+default. No normal Session, JWS or OAuth carrier is accepted on these methods.
+
+A fresh device signature authorizes the preview. Confirm/Cancel use only
+`x-iwut-closure-confirmation`; status uses only `x-iwut-closure-receipt`. Never log
+these values or put them in a URL. Confirm irreversibly commits CLOSED and a
+persistent cleanup task; the response remains TERMINATION_PENDING until the
+independent ledger has durably acknowledged both the terminal fact and its
+minimal permanent key/handle reservations. Cleanup completion additionally waits
+for the real App receipt. The worker retries in bounded batches and reports
+errors/24-hour overdue cleanup without reopening the account.
+
+The ledger is outside the business database backup lifecycle and must itself be
+backed up without rolling back on a Mongo restore. Before reopening traffic after
+restoring Mongo, run `auth-center reconcile-account-closures` with only the Mongo
+URI/database and ledger-directory variables. This offline command verifies and
+replays terminal facts and permanent namespace reservations; it starts no
+listeners and requires no App connection or signing keys. It reports that
+cross-service cleanup remains pending. Start the normal runtime afterwards to
+finish it. Missing/corrupt/conflicting ledger facts fail closed. A ledger snapshot
+alone, without its corresponding termination fact, cannot terminate an account.
+Production restore drills must verify the independent ledger is the latest copy.
+
+Setting the public flag back to false preserves recovery, background cleanup,
+Cancel and receipt-only Get when the ledger configuration remains. Removing the
+runtime configuration while persisted closure state exists prevents startup.
+Limits default to 30 reads/minute and 10 writes/minute with 4096 in-process
+buckets (`AUTH_ACCOUNT_CLOSURE_READ_PER_MINUTE`,
+`AUTH_ACCOUNT_CLOSURE_WRITE_PER_MINUTE`, `AUTH_ACCOUNT_CLOSURE_MAX_BUCKETS`). The
+worker interval defaults to `1s` (`AUTH_ACCOUNT_CLOSURE_WORKER_INTERVAL`, range
+`10ms`–`1m`). These settings do not change proof/token expiry or grant another
+login state. Gateway route wiring, client preview/confirmation UI and deployment
+readiness remain separate delivery work.
