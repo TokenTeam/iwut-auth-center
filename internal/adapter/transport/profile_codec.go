@@ -22,6 +22,9 @@ func NewProfileStrictCodec(limits ...int) encoding.Codec {
 	return profileStrictCodec{encoding.GetCodec("proto"), n}
 }
 func (c profileStrictCodec) Unmarshal(data []byte, v any) error {
+	if err := accountClosureWire(data, v); err != nil {
+		return err
+	}
 	if e := withdrawalWire(data, v); e != nil {
 		return e
 	}

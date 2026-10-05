@@ -17,6 +17,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
+	closurepb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/account_closure"
 	accountpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/account_management"
 	ownerpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/account_owner_exit"
 	authv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
@@ -38,6 +39,7 @@ import (
 )
 
 type ServerConfig struct {
+	AccountClosure      *AccountClosureService
 	OwnerExitDecision   *OwnerExitDecisionService
 	DeveloperWithdrawal *DeveloperWithdrawalService
 	OAuthGrant          *OAuthGrantService
@@ -128,6 +130,9 @@ func newGRPCServer(
 		options = append(options, kgrpc.Middleware(userEndpointAuthenticationMiddleware(verifier, nil, nil, false)))
 	}
 	server := kgrpc.NewServer(options...)
+	if configuration.AccountClosure != nil {
+		closurepb.RegisterAccountClosureServiceServer(server, configuration.AccountClosure)
+	}
 	if configuration.OwnerExitDecision != nil {
 		ownerpb.RegisterAccountOwnerExitDecisionServiceServer(server, configuration.OwnerExitDecision)
 	}
@@ -204,6 +209,9 @@ func newHTTPServer(configuration ServerConfig, verifier *ServiceIdentityVerifier
 		)
 	}
 	server := khttp.NewServer(options...)
+	if configuration.AccountClosure != nil {
+		closurepb.RegisterAccountClosureServiceHTTPServer(server, configuration.AccountClosure)
+	}
 	if configuration.DeveloperWithdrawal != nil {
 		withdrawalpb.RegisterDeveloperWithdrawalServiceHTTPServer(server, configuration.DeveloperWithdrawal)
 	}
@@ -269,6 +277,8 @@ func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 	return func(r *http.Request, value any) error {
 		limit := authenticationLimit
 		switch value.(type) {
+		case *closurepb.BeginAccountClosureRequest, *closurepb.PrepareAccountClosureRequest, *closurepb.ConfirmAccountClosureRequest, *closurepb.CancelAccountClosureRequest, *closurepb.GetAccountClosureRequest:
+			limit = closureMessageLimit
 		case *withdrawalpb.PrepareDeveloperWithdrawalRequest, *withdrawalpb.ConfirmDeveloperWithdrawalRequest, *withdrawalpb.CancelDeveloperWithdrawalRequest, *withdrawalpb.GetDeveloperWithdrawalRequest:
 			limit = 16 * 1024
 		case *developermanagementpb.ManageDeveloperStatusRequest, *developermanagementpb.GetManagedDeveloperStatusRequest:
@@ -316,6 +326,8 @@ func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 func invalidHTTPInput(r *http.Request) error {
 	reason := "INVALID_LOGIN_INPUT"
 	switch {
+	case strings.HasPrefix(r.URL.Path, "/v1/account-closures:"):
+		reason = "ACCOUNT_CLOSURE_INVALID_REQUEST"
 	case r.URL.Path == "/v1/developers:manage-status" || r.URL.Path == "/v1/developers:get-managed-status":
 		reason = "INVALID_DEVELOPER_MANAGEMENT_REQUEST"
 	case strings.HasPrefix(r.URL.Path, "/v1/users/me/developer-withdrawal:"):

@@ -32,6 +32,7 @@ var ErrInvalidConfiguration = errors.New("invalid auth center configuration")
 type LookupEnv func(key string) (value string, found bool)
 
 type Config struct {
+	AccountClosure           *AccountClosure
 	DeveloperManagement      *DeveloperManagement
 	OwnerExit                *OwnerExit
 	AccountManagement        *AccountManagement
@@ -165,6 +166,10 @@ func Load(lookup LookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	accountClosure, err := loadAccountClosure(lookup, userEndpoints)
+	if err != nil {
+		return Config{}, err
+	}
 	oauth, err := loadOAuth(lookup)
 	if err != nil {
 		return Config{}, err
@@ -177,6 +182,7 @@ func Load(lookup LookupEnv) (Config, error) {
 		return Config{}, err
 	}
 	return Config{
+		AccountClosure:        accountClosure,
 		DeveloperManagement:   developerManagement,
 		OwnerExit:             ownerExit,
 		AccountManagement:     accountManagement,
