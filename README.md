@@ -702,3 +702,29 @@ marker reader still validates any extant original event, and accepts absence onl
 with a non-future retention receipt and a valid closed subject. This preserves other
 administrators' access after founder account cleanup without allowing arbitrary
 missing/corrupt audit evidence to initialize or restore privileges.
+
+### Developer withdrawal and owner-exit delivery
+
+`AUTH_OWNER_EXIT_CONFIG_FILE` loads the shared owner-exit runtime independently of
+OAuth. The JSON manifest accepts `appTarget`, `appServerName`, `appCaFile`,
+`appPlaintextLoopback`, `serviceKeyId`, `serviceKeyFile` and `appServiceId` (default
+`app-center`). The private key is a service-caller RSA signing key; it must not be
+an identity/OIDC/delegation signing key. Plaintext is restricted to a literal
+loopback address. Register the matching Auth public key with App permissions
+`app.account-owner-exit.prepare`, `app.account-owner-exit.finish`, and
+`app.account-owner-exit.read`. Auth's ACTIVE App caller must have
+`auth.account-owner-exit.read`. App must enable its account-owner-exit provider.
+
+`AUTH_DEVELOPER_WITHDRAWAL_ENABLED=true` exposes the four direct Session commands;
+it requires the user endpoints and owner-exit manifest. Read/write quotas default
+to 60/10 per account per minute, configurable through
+`AUTH_DEVELOPER_WITHDRAWAL_READ_PER_MINUTE`,
+`AUTH_DEVELOPER_WITHDRAWAL_WRITE_PER_MINUTE`, and
+`AUTH_DEVELOPER_WITHDRAWAL_MAX_BUCKETS` (default 4096).
+
+Keep the owner-exit manifest configured when disabling public withdrawal so the
+Kratos-managed worker continues delivering permanent decisions and reconciling
+App cleanup. Its retries are durable, bounded to 100 operations per batch, use a
+5-second RPC deadline, and back off from 1 to 60 seconds with jitter. Never TTL
+or manually discard `auth_account_owner_exit_operations`: their terminal
+summaries are the authority used by App recovery after a restart.

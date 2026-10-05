@@ -312,7 +312,7 @@ func (r *OwnerExitRepository) Retry(ctx context.Context, expected d.Operation, n
 		if delay > 60*time.Second {
 			delay = 60 * time.Second
 		}
-		delay = delay/2 + time.Duration(rand.Int64N(int64(delay/2)+1))
+		delay = min(60*time.Second, delay+time.Duration(rand.Int64N(int64(delay/5)+1)))
 		_, e = r.auth.database.Collection(OwnerExitCollection).UpdateOne(tx, bson.M{"operationId": op.OperationID, "decision": op.Decision}, bson.M{"$set": bson.M{"attempts": attempts, "nextAttemptAt": now.Add(delay)}})
 		return e
 	})

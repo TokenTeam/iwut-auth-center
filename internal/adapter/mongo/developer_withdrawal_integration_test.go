@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	m "go.mongodb.org/mongo-driver/v2/mongo"
+	account "iwut-auth-center/internal/account/domain"
 	d "iwut-auth-center/internal/developerwithdrawal/domain"
 	o "iwut-auth-center/internal/ownerexit/domain"
 	"sync"
@@ -162,5 +163,55 @@ func TestOwnerExitMongoSharedPendingAndBlockedRelease(t *testing.T) {
 	}
 	if _, e := r.Prepare(t.Context(), s.TokenDigest, op.RequestID, uuid.NewString(), 2, now); !errors.Is(e, d.ErrConflict) {
 		t.Fatal(e)
+	}
+}
+
+func TestOwnerExitMongoDisableCancelsAtomically(t *testing.T) {
+	admins, db, actor := administratorFixture(t)
+	adminCandidate(t, db, "subject")
+	if e := EnsureOwnerExitSchema(t.Context(), db); e != nil {
+		t.Fatal(e)
+	}
+	if e := EnsureAccountManagementSchema(t.Context(), db); e != nil {
+		t.Fatal(e)
+	}
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	op := o.Operation{AuthID: "subject", OperationID: uuid.NewString(), Purpose: o.Closure, Decision: o.Pending, AccountRevision: 1, DeveloperRevision: 0, PermissionRevision: 1, CreatedAt: now, ExpiresAt: now.Add(time.Minute), NextAttemptAt: now}
+	if e := admins.authentication.WithAuthTransaction(t.Context(), func(tx context.Context) error { _, e := admins.authentication.CreateOwnerExitTx(tx, op); return e }); e != nil {
+		t.Fatal(e)
+	}
+	management, _ := NewAccountManagementRepository(admins.authentication)
+	ctx := account.WithIdentity(t.Context(), actor, 1)
+	if _, e := management.Manage(ctx, account.Command{ActorAuthID: actor, SubjectAuthID: "subject", Action: "DISABLE", ExpectedRevision: 1, Reason: "investigation"}); e != nil {
+		t.Fatal(e)
+	}
+	after, e := NewOwnerExitRepository(admins.authentication).Get(t.Context(), "subject", op.OperationID)
+	if e != nil || after.Decision != o.Cancelled || !after.NotificationPending || after.CancellationReason != "ACCOUNT_DISABLED" {
+		t.Fatal(after, e)
+	}
+}
+func TestOwnerExitMongoRequestExpiryPreservesPermanentDecision(t *testing.T) {
+	r, _, s := withdrawalFixture(t)
+	op, now := prepareWithdrawal(t, r, s)
+	if _, e := r.Cancel(t.Context(), s.TokenDigest, op.OperationID, now); e != nil {
+		t.Fatal(e)
+	}
+	next := op
+	next.OperationID = uuid.NewString()
+	next.CreatedAt = now.Add(24 * time.Hour)
+	next.ExpiresAt = next.CreatedAt.Add(10 * time.Minute)
+	next.NextAttemptAt = next.CreatedAt
+	if e := r.auth.WithAuthTransaction(t.Context(), func(tx context.Context) error {
+		out, e := r.auth.CreateOwnerExitTx(tx, next)
+		if e == nil && out.OperationID != next.OperationID {
+			t.Fatal("24h request key remained occupied")
+		}
+		return e
+	}); e != nil {
+		t.Fatal(e)
+	}
+	stored, e := NewOwnerExitRepository(r.auth).Get(t.Context(), s.AuthID, op.OperationID)
+	if e != nil || stored.Decision != o.Cancelled || stored.RequestID != op.RequestID {
+		t.Fatal("historical decision erased", stored, e)
 	}
 }

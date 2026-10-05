@@ -27,7 +27,12 @@ import (
 	"google.golang.org/grpc/status"
 	"io"
 	mongo "iwut-auth-center/internal/adapter/mongo"
+	"iwut-auth-center/internal/adapter/oauthcrypto"
+	"iwut-auth-center/internal/adapter/ownerexitclient"
 	"iwut-auth-center/internal/config"
+	owner "iwut-auth-center/internal/ownerexit/domain"
+	ownerport "iwut-auth-center/internal/ownerexit/port"
+	ownerusecase "iwut-auth-center/internal/ownerexit/usecase"
 	"iwut-auth-center/internal/testutil/smtpcapture"
 	"net/http"
 	"os"
@@ -37,6 +42,16 @@ import (
 	"testing"
 	"time"
 )
+
+// dropPreparedResponse performs the real App RPC then simulates transport loss.
+type dropPreparedResponse struct{ ownerport.App }
+
+func (c dropPreparedResponse) Prepare(ctx context.Context, op owner.Operation) (owner.Preparation, error) {
+	if _, e := c.App.Prepare(ctx, op); e != nil {
+		return owner.Preparation{}, e
+	}
+	return owner.Preparation{}, owner.ErrUnavailable
+}
 
 type ownerExitWireFixture struct {
 	Env           map[string]string
@@ -236,9 +251,9 @@ func TestDeveloperWithdrawalE2EActualApp(t *testing.T) {
 	if e != nil || result.Decision != ownerpb.Decision_DECISION_COMMITTED {
 		t.Fatal(result, e)
 	}
-	owner := f.RegisterDeveloper(t, "withapps")
-	ownerCtx := sessionCallContext(t.Context(), owner.Session.SessionToken)
-	ownerAppCtx := metadata.NewOutgoingContext(t.Context(), metadata.Pairs("x-iwut-identity", f.Issue(t, owner, "iwut-app-center")))
+	owningUser := f.RegisterDeveloper(t, "withapps")
+	ownerCtx := sessionCallContext(t.Context(), owningUser.Session.SessionToken)
+	ownerAppCtx := metadata.NewOutgoingContext(t.Context(), metadata.Pairs("x-iwut-identity", f.Issue(t, owningUser, "iwut-app-center")))
 	if _, e := application.CreateApplication(ownerAppCtx, &app.CreateApplicationRequest{Name: "Existing_Owned_Application"}); e != nil {
 		t.Fatal(e)
 	}
@@ -251,6 +266,56 @@ func TestDeveloperWithdrawalE2EActualApp(t *testing.T) {
 	}
 	if _, e = client.GetDeveloperWithdrawal(t.Context(), &pb.GetDeveloperWithdrawalRequest{OperationId: second.OperationId}); status.Code(e) != codes.Unauthenticated {
 		t.Fatal(e)
+	}
+
+	// A subsequent closure on a permanently sealed developer may be cancelled
+	// after a lost Prepare response without unsealing the original withdrawal.
+	deadline = time.Now().Add(10 * time.Second)
+	for {
+		var op bson.M
+		e = f.DB.Collection(mongo.OwnerExitCollection).FindOne(t.Context(), bson.M{"operationId": second.OperationId}).Decode(&op)
+		if e == nil && op["appAcknowledged"] == true {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("commit not acknowledged", op, e)
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	authRepo, e := mongo.NewAuthenticationRepository(f.DB, 4, 5)
+	if e != nil {
+		t.Fatal(e)
+	}
+	repo := mongo.NewOwnerExitRepository(authRepo)
+	actualApp := ownerexitclient.New(f.AppConn, oauthcrypto.Key{ID: "auth-service", Private: f.ServiceKey})
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	lost := owner.Operation{AuthID: user.AuthId, OperationID: uuid.NewString(), Purpose: owner.Closure, Decision: owner.Pending, AccountRevision: 1, DeveloperRevision: 2, PermissionRevision: 1, CreatedAt: now, ExpiresAt: now.Add(10 * time.Minute), NextAttemptAt: now.Add(5 * time.Minute)}
+	if e = authRepo.WithAuthTransaction(t.Context(), func(tx context.Context) error { _, e := authRepo.CreateOwnerExitTx(tx, lost); return e }); e != nil {
+		t.Fatal(e)
+	}
+	coordinator := ownerusecase.New(repo, dropPreparedResponse{actualApp})
+	if _, e = coordinator.Prepare(t.Context(), lost); e == nil {
+		t.Fatal("lost response not surfaced")
+	}
+	persisted, e := repo.Get(t.Context(), user.AuthId, lost.OperationID)
+	if e != nil || persisted.Decision != owner.Pending || persisted.ReceiptID != "" {
+		t.Fatal("unknown remote outcome guessed", persisted, e)
+	}
+	if e = authRepo.WithAuthTransaction(t.Context(), func(tx context.Context) error {
+		_, e := authRepo.DecideOwnerExitTx(tx, user.AuthId, lost.OperationID, owner.Cancelled, "USER_CANCELLED", time.Now())
+		return e
+	}); e != nil {
+		t.Fatal(e)
+	}
+	if e = ownerusecase.New(repo, actualApp).Tick(t.Context()); e != nil {
+		t.Fatal(e)
+	}
+	persisted, e = repo.Get(t.Context(), user.AuthId, lost.OperationID)
+	if e != nil || !persisted.AppAcknowledged || persisted.Decision != owner.Cancelled || persisted.ReceiptID != "" {
+		t.Fatal("empty receipt cancellation not recovered", persisted, e)
+	}
+	if _, e = application.CreateApplication(appCtx, &app.CreateApplicationRequest{Name: "Still_Withdrawn"}); status.Code(e) != codes.FailedPrecondition {
+		t.Fatal("closure cancellation removed permanent withdrawal seal", e)
 	}
 
 }
