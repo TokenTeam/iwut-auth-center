@@ -42,6 +42,13 @@ func (a *AuthenticationRepository) ReadOwnerExitTx(ctx context.Context, authID, 
 	if e != nil {
 		return d.Operation{}, e
 	}
+	// A durable closure is known but its App receipt is outside this restored
+	// snapshot. Neither callbacks nor the ordinary expiry worker may guess CANCELLED.
+	if marker := raw.Lookup("recoveryReceiptRequired"); marker.Type != 0 {
+		if marker.Type != bson.TypeBoolean || marker.Boolean() {
+			return d.Operation{}, d.ErrUnavailable
+		}
+	}
 	if !identityFields(raw, map[string]bson.Type{"accountRevision": bson.TypeInt64, "developerRevision": bson.TypeInt64, "permissionRevision": bson.TypeInt64, "attempts": bson.TypeInt64, "notificationPending": bson.TypeBoolean, "appAcknowledged": bson.TypeBoolean}) {
 		return d.Operation{}, d.ErrUnavailable
 	}
@@ -243,7 +250,7 @@ func (r *OwnerExitRepository) Due(ctx context.Context, now time.Time, limit int)
 	var out []d.Operation
 	err := r.transaction(ctx, func(tx context.Context) error {
 		out = nil
-		cur, e := r.auth.database.Collection(OwnerExitCollection).Find(tx, bson.M{"nextAttemptAt": bson.M{"$lte": now}, "$or": bson.A{bson.M{"decision": d.Pending}, bson.M{"notificationPending": true}, bson.M{"decision": d.Committed, "appAcknowledged": false}}}, options.Find().SetLimit(int64(limit)).SetSort(bson.D{{Key: "nextAttemptAt", Value: 1}, {Key: "operationId", Value: 1}}))
+		cur, e := r.auth.database.Collection(OwnerExitCollection).Find(tx, bson.M{"recoveryReceiptRequired": bson.M{"$exists": false}, "nextAttemptAt": bson.M{"$lte": now}, "$or": bson.A{bson.M{"decision": d.Pending}, bson.M{"notificationPending": true}, bson.M{"decision": d.Committed, "appAcknowledged": false}}}, options.Find().SetLimit(int64(limit)).SetSort(bson.D{{Key: "nextAttemptAt", Value: 1}, {Key: "operationId", Value: 1}}))
 		if e != nil {
 			return e
 		}
