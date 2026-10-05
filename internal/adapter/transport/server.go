@@ -33,6 +33,7 @@ import (
 	adminpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/platform_administrator"
 	reviewerpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/reviewer_permission"
 	scopecatalogv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/scope_catalog"
+	sessionmanagementpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/session_management"
 	systemprincipalv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/system_principal"
 	profilev1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/user_profile"
 	profiledomain "iwut-auth-center/internal/profile/domain"
@@ -52,6 +53,7 @@ type ServerConfig struct {
 
 // UserEndpoints is an optional, fully validated runtime assembled before listening.
 type UserEndpoints struct {
+	SessionManagement             *SessionManagementService
 	DeveloperManagement           *DeveloperManagementService
 	PlatformAdministrator         *PlatformAdministratorService
 	AccountManagement             *AccountManagementService
@@ -156,6 +158,9 @@ func newGRPCServer(
 	}
 	emailloginv1.RegisterEmailLoginServiceServer(server, loginService)
 	if endpoints := configuration.UserEndpoints; endpoints != nil {
+		if endpoints.SessionManagement != nil {
+			sessionmanagementpb.RegisterSessionManagementServiceServer(server, endpoints.SessionManagement)
+		}
 		if endpoints.DeveloperApplication != nil {
 			developerapplicationpb.RegisterDeveloperApplicationServiceServer(server, endpoints.DeveloperApplication)
 		}
@@ -225,6 +230,9 @@ func newHTTPServer(configuration ServerConfig, verifier *ServiceIdentityVerifier
 		if endpoints.EmailBinding != nil {
 			emailv1.RegisterEmailBindingServiceHTTPServer(server, endpoints.EmailBinding)
 		}
+		if endpoints.SessionManagement != nil {
+			sessionmanagementpb.RegisterSessionManagementServiceHTTPServer(server, endpoints.SessionManagement)
+		}
 		if endpoints.DeveloperApplication != nil {
 			developerapplicationpb.RegisterDeveloperApplicationServiceHTTPServer(server, endpoints.DeveloperApplication)
 		}
@@ -277,6 +285,8 @@ func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 	return func(r *http.Request, value any) error {
 		limit := authenticationLimit
 		switch value.(type) {
+		case *sessionmanagementpb.ListOwnSessionsRequest, *sessionmanagementpb.RevokeOwnSessionsRequest:
+			limit = sessionManagementLimit
 		case *closurepb.BeginAccountClosureRequest, *closurepb.PrepareAccountClosureRequest, *closurepb.ConfirmAccountClosureRequest, *closurepb.CancelAccountClosureRequest, *closurepb.GetAccountClosureRequest:
 			limit = closureMessageLimit
 		case *withdrawalpb.PrepareDeveloperWithdrawalRequest, *withdrawalpb.ConfirmDeveloperWithdrawalRequest, *withdrawalpb.CancelDeveloperWithdrawalRequest, *withdrawalpb.GetDeveloperWithdrawalRequest:
@@ -310,6 +320,9 @@ func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 				return err
 			}
 		}
+		if err := validateSessionManagementJSON(data, value); err != nil {
+			return err
+		}
 		message, ok := value.(proto.Message)
 		if !ok {
 			return invalidHTTPInput(r)
@@ -326,6 +339,8 @@ func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 func invalidHTTPInput(r *http.Request) error {
 	reason := "INVALID_LOGIN_INPUT"
 	switch {
+	case strings.HasPrefix(r.URL.Path, "/v1/users/me/sessions:"):
+		reason = "INVALID_SESSION_MANAGEMENT_REQUEST"
 	case strings.HasPrefix(r.URL.Path, "/v1/account-closures:"):
 		reason = "ACCOUNT_CLOSURE_INVALID_REQUEST"
 	case r.URL.Path == "/v1/developers:manage-status" || r.URL.Path == "/v1/developers:get-managed-status":
@@ -360,6 +375,9 @@ func invalidHTTPInput(r *http.Request) error {
 }
 
 func oversizedHTTPInput(r *http.Request) error {
+	if strings.HasPrefix(r.URL.Path, "/v1/users/me/sessions:") {
+		return invalidHTTPInput(r)
+	}
 	reason := "AUTHENTICATION_INPUT_TOO_LARGE"
 	if strings.HasPrefix(r.URL.Path, "/v1/users/me/developer-withdrawal:") {
 		reason = "DEVELOPER_WITHDRAWAL_REQUEST_TOO_LARGE"

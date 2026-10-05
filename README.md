@@ -771,3 +771,25 @@ worker interval defaults to `1s` (`AUTH_ACCOUNT_CLOSURE_WORKER_INTERVAL`, range
 `10ms`–`1m`). These settings do not change proof/token expiry or grant another
 login state. Gateway route wiring, client preview/confirmation UI and deployment
 readiness remain separate delivery work.
+
+### Same-account Session management (UC020)
+
+`AUTH_SESSION_MANAGEMENT_ENABLED=true` enables `ListOwnSessions` and
+`RevokeOwnSessions` through native gRPC and POST `/v1/users/me/sessions:list`
+and `/v1/users/me/sessions:revoke`. The flag defaults to false and requires user
+endpoints. Both accept only one canonical `x-iwut-session` header. Gateway DIRECT
+route wiring and client session-list UI remain separate delivery work.
+
+Listing does not refresh Session expiry or last-used timestamps. Results belong
+to the caller's `authId`, independently of student association. Each page processes
+at most 200 candidates; follow `nextCursor` even when the returned page is empty.
+The cursor can name a filtered candidate. Batch revocation accepts 1–50 explicit
+Session IDs, excludes the current Session, and never revokes device credentials
+or OAuth tokens. Revoked devices can authenticate again with a valid credential.
+
+The shared per-minute defaults are 600 globally, 120 per socket source, and 30 per
+authenticated account, configured by `AUTH_SESSION_MANAGEMENT_GLOBAL_PER_MINUTE`,
+`AUTH_SESSION_MANAGEMENT_SOURCE_PER_MINUTE`, and
+`AUTH_SESSION_MANAGEMENT_ACCOUNT_PER_MINUTE`. Source and account entries share
+`AUTH_SESSION_MANAGEMENT_MAX_BUCKETS` (default 4096). All limits are positive
+integers at most 1,000,000. Forwarded headers do not establish source identity.

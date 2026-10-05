@@ -8,7 +8,7 @@ so. Authoritative design lives outside this repository at `../../docs/`.
 
 ## Current work package
 
-**Implemented authentication and OAuth capabilities plus accepted UC-AUTH-021–025 governance. UC020 remains a separate proposed work package.** Before changing behavior, read:
+**Implemented authentication and OAuth capabilities plus accepted UC-AUTH-021–025 governance. UC020 is now accepted for same-account Session listing and explicit batch revocation.** Before changing behavior, read:
 
 1. `../../docs/auth-center/briefs/UC-AUTH-013.md` and `../../docs/platform/contracts/auth-developer-application-v1.md`, then `../../docs/auth-center/briefs/UC-AUTH-012.md` and `../../docs/platform/contracts/auth-email-login-v1.md`, then `../../docs/auth-center/briefs/UC-AUTH-011.md`, `../../docs/platform/contracts/auth-email-binding-v1.md` and its public vectors; preserve UC004–010 behavior.
 2. `../../docs/auth-center/briefs/UC-AUTH-004.md` and the corresponding `../../docs/auth-center/briefs/UC-AUTH-005.md` through `UC-AUTH-010.md`.
@@ -58,6 +58,13 @@ readiness flags remain explicit operator declarations, not automatic guarantees.
 
 Gateway routes and mobile secure-storage/UI delivery remain
 separate work packages. Backend verification must not claim their completion.
+
+UC020 follows `../../docs/auth-center/briefs/UC-AUTH-020.md`. Both exact DIRECT
+methods authenticate with the current Session without refreshing LRU. Recheck at
+the final authentication transaction, keep targets restricted to that authId,
+and preserve explicit-target retry semantics. Candidate scans are bounded and
+nextCursor may represent a filtered item; empty pages can still have continuation.
+Never revoke a credential or OAuth family as a side effect.
 
 ## Code boundaries
 

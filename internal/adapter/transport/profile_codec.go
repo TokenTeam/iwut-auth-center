@@ -4,6 +4,7 @@ import (
 	pb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/user_profile"
 	"google.golang.org/grpc/encoding"
 	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
 	"iwut-auth-center/internal/profile/domain"
 )
 
@@ -22,6 +23,15 @@ func NewProfileStrictCodec(limits ...int) encoding.Codec {
 	return profileStrictCodec{encoding.GetCodec("proto"), n}
 }
 func (c profileStrictCodec) Unmarshal(data []byte, v any) error {
+	if err := sessionManagementWire(data, v); err != nil {
+		// grpc-go maps codec errors to INTERNAL. Preserve rejection as an
+		// unknown-field marker so the handler applies admission, no-store and
+		// the contracted INVALID_ARGUMENT response. Never decode rejected data.
+		message := v.(proto.Message)
+		proto.Reset(message)
+		message.ProtoReflect().SetUnknown(protowire.AppendVarint(protowire.AppendTag(nil, 127, protowire.VarintType), 1))
+		return nil
+	}
 	if err := accountClosureWire(data, v); err != nil {
 		return err
 	}
