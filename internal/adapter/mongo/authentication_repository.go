@@ -439,6 +439,12 @@ func validSession(doc SessionDocument) bool {
 var _ port.LoginRepository = (*AuthenticationRepository)(nil)
 
 func (r *AuthenticationRepository) CheckSessionTx(tx context.Context, digest []byte, now time.Time) (domain.Session, error) {
+	return r.checkSessionTx(tx, digest, now, true)
+}
+func (r *AuthenticationRepository) CheckSessionReadTx(tx context.Context, digest []byte, now time.Time) (domain.Session, error) {
+	return r.checkSessionTx(tx, digest, now, false)
+}
+func (r *AuthenticationRepository) checkSessionTx(tx context.Context, digest []byte, now time.Time, touch bool) (domain.Session, error) {
 	now = r.currentTime(now)
 	var doc SessionDocument
 	err := r.database.Collection(SessionCollection).FindOne(tx, bson.M{"tokenDigest": digest, "revokedAt": nil, "expiresAt": bson.M{"$gt": now}}).Decode(&doc)
@@ -471,6 +477,9 @@ func (r *AuthenticationRepository) CheckSessionTx(tx context.Context, digest []b
 		return domain.Session{}, port.ErrSessionInvalid
 	} else if err != nil {
 		return domain.Session{}, err
+	}
+	if !touch {
+		return doc.Domain(), nil
 	}
 	updated, err := r.database.Collection(SessionCollection).UpdateOne(tx, bson.M{"sessionId": doc.SessionID, "revokedAt": nil, "expiresAt": bson.M{"$gt": now}}, bson.M{"$max": bson.M{"lastUsedAt": now}})
 	if err != nil {
