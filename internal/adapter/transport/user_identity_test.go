@@ -45,7 +45,7 @@ func signUser(t *testing.T, k *rsa.PrivateKey, claims map[string]any) string {
 }
 func userClaims(id string) map[string]any {
 	now := time.Now().Unix()
-	return map[string]any{"iss": "test-auth", "sub": id, "aud": "iwut-auth-center", "iat": now, "nbf": now, "exp": now + 60, "jti": "t1"}
+	return map[string]any{"account_revision": "1", "iss": "test-auth", "sub": id, "aud": "iwut-auth-center", "iat": now, "nbf": now, "exp": now + 60, "jti": "t1"}
 }
 func TestUserIdentityClaimsAndSignature(t *testing.T) {
 	k, v := userKey(t)
@@ -57,7 +57,7 @@ func TestUserIdentityClaimsAndSignature(t *testing.T) {
 	for _, change := range []struct {
 		key   string
 		value any
-	}{{"aud", "iwut-app-center"}, {"iss", "other"}, {"sub", ""}, {"jti", ""}, {"exp", time.Now().Unix() - 1}, {"exp", time.Now().Unix() + 10000}, {"developer_status", "UNKNOWN"}, {"permissions", []string{"x", "x"}}, {"permissions", nil}, {"permissions", []string{" x"}}, {"iat", nil}} {
+	}{{"account_revision", nil}, {"account_revision", float64(1)}, {"account_revision", "0"}, {"account_revision", "01"}, {"account_revision", "+1"}, {"account_revision", "9223372036854775808"}, {"aud", "iwut-app-center"}, {"iss", "other"}, {"sub", ""}, {"jti", ""}, {"exp", time.Now().Unix() - 1}, {"exp", time.Now().Unix() + 10000}, {"developer_status", "UNKNOWN"}, {"permissions", []string{"x", "x"}}, {"permissions", nil}, {"permissions", []string{" x"}}, {"iat", nil}} {
 		c := userClaims("user1")
 		c[change.key] = change.value
 		if _, e := v.Verify(signUser(t, k, c)); e == nil {

@@ -49,6 +49,7 @@ func (u *Login) Begin(ctx context.Context, locator domain.Locator, source string
 		return domain.Challenge{}, err
 	}
 	if acceptable {
+		op.AccountRevision = credential.AccountRevision
 		op.Acceptable = true
 		op.AuthID = credential.AuthID
 		op.CredentialID = credential.CredentialID
@@ -101,7 +102,7 @@ func (u *Login) Complete(ctx context.Context, operationID string, signature []by
 	if err != nil {
 		return domain.Established{}, port.ErrUnavailable
 	}
-	session := domain.Session{SessionID: sessionID, AuthID: op.AuthID, CredentialID: op.CredentialID, TokenDigest: digest, AuthenticationMethod: "DEVICE_CREDENTIAL", AuthenticatedAt: now, CreatedAt: now, LastUsedAt: now, ExpiresAt: now.Add(u.ttl)}
+	session := domain.Session{AccountRevision: op.AccountRevision, SessionID: sessionID, AuthID: op.AuthID, CredentialID: op.CredentialID, TokenDigest: digest, AuthenticationMethod: "DEVICE_CREDENTIAL", AuthenticatedAt: now, CreatedAt: now, LastUsedAt: now, ExpiresAt: now.Add(u.ttl)}
 	if err := u.repository.CompleteLogin(ctx, op, session, now); err != nil {
 		return domain.Established{}, err
 	}

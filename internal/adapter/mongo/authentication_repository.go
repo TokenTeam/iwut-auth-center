@@ -28,6 +28,7 @@ const (
 )
 
 type OperationDocument struct {
+	AccountRevision       int64     `bson:"accountRevision,omitempty"`
 	OperationID           string    `bson:"operationId"`
 	Purpose               string    `bson:"purpose"`
 	ProtocolVersion       string    `bson:"protocolVersion"`
@@ -65,6 +66,7 @@ type CredentialDocument struct {
 }
 
 type SessionDocument struct {
+	AccountRevision      int64      `bson:"accountRevision"`
 	SessionID            string     `bson:"sessionId"`
 	AuthID               string     `bson:"authId"`
 	AuthenticationMethod string     `bson:"authenticationMethod"`
@@ -108,7 +110,7 @@ func EnsureAuthenticationSchema(ctx context.Context, db *drivermongo.Database) e
 		SessionCollection: {
 			{Keys: bson.D{{Key: "sessionId", Value: 1}}, Options: options.Index().SetUnique(true).SetName("session_id_unique")},
 			{Keys: bson.D{{Key: "tokenDigest", Value: 1}}, Options: options.Index().SetUnique(true).SetName("session_digest_unique")},
-			{Keys: bson.D{{Key: "authId", Value: 1}, {Key: "revokedAt", Value: 1}, {Key: "lastUsedAt", Value: 1}, {Key: "createdAt", Value: 1}, {Key: "sessionId", Value: 1}}, Options: options.Index().SetName("session_owner_lru")},
+			{Keys: bson.D{{Key: "authId", Value: 1}, {Key: "accountRevision", Value: 1}, {Key: "revokedAt", Value: 1}, {Key: "lastUsedAt", Value: 1}, {Key: "createdAt", Value: 1}, {Key: "sessionId", Value: 1}}, Options: options.Index().SetName("session_owner_generation_lru")},
 			{Keys: bson.D{{Key: "credentialId", Value: 1}}, Options: options.Index().SetName("session_credential")},
 		},
 	}
@@ -237,14 +239,16 @@ func (r *AuthenticationRepository) ResolveCredential(ctx context.Context, locato
 		if !validCredential(doc) {
 			return nil
 		}
-		count, err := r.database.Collection(PrincipalCollection).CountDocuments(tx, bson.M{"authId": doc.AuthID, "principalType": "USER", "accountStatus": "ACTIVE"})
+		revision, err := r.AccountRevisionTx(tx, doc.AuthID)
+		if errors.Is(err, port.ErrAuthenticationFailed) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
-		if count == 1 {
-			credential = doc.Domain()
-			acceptable = true
-		}
+		credential = doc.Domain()
+		credential.AccountRevision = revision
+		acceptable = true
 		return nil
 	})
 	return credential, acceptable, err
@@ -311,7 +315,7 @@ func (r *AuthenticationRepository) CompleteLogin(ctx context.Context, expected d
 		if op.Status == domain.Completed {
 			return port.ErrAlreadyCompleted
 		}
-		if !op.Acceptable || op.AuthID != session.AuthID || op.CredentialID != session.CredentialID || !bytes.Equal(op.PublicKey, expected.PublicKey) {
+		if !op.Acceptable || op.AccountRevision <= 0 || op.AccountRevision != expected.AccountRevision || op.AccountRevision != session.AccountRevision || op.AuthID != session.AuthID || op.CredentialID != session.CredentialID || !bytes.Equal(op.PublicKey, expected.PublicKey) {
 			return port.ErrAuthenticationFailed
 		}
 		var credential CredentialDocument
@@ -322,6 +326,9 @@ func (r *AuthenticationRepository) CompleteLogin(ctx context.Context, expected d
 		}
 		if !validCredential(credential) || !bytes.Equal(credential.PublicKey, op.PublicKey) {
 			return port.ErrAuthenticationFailed
+		}
+		if err := r.ConfirmAccountTx(tx, op.AuthID, op.AccountRevision); err != nil {
+			return err
 		}
 		if err := r.ConfirmPrincipalCredentialTx(tx, op.AuthID, op.CredentialID, now); err != nil {
 			return err
@@ -346,6 +353,9 @@ func (r *AuthenticationRepository) CreateSessionTx(ctx context.Context, session 
 	if !validSession(sessionDocument(session)) || !now.Before(session.ExpiresAt) {
 		return port.ErrUnavailable
 	}
+	if err := r.ConfirmAccountTx(ctx, session.AuthID, session.AccountRevision); err != nil {
+		return err
+	}
 	if err := r.ConfirmPrincipalCredentialTx(ctx, session.AuthID, session.CredentialID, now); err != nil {
 		return err
 	}
@@ -367,7 +377,7 @@ func (r *AuthenticationRepository) CreateSessionTx(ctx context.Context, session 
 	if err := credentials.Err(); err != nil {
 		return err
 	}
-	cursor, err := r.database.Collection(SessionCollection).Find(ctx, bson.M{"authId": session.AuthID, "revokedAt": nil, "expiresAt": bson.M{"$gt": now}, "credentialId": bson.M{"$in": ids}, "authenticationMethod": bson.M{"$in": bson.A{"DEVICE_CREDENTIAL", emaillogin.AuthenticationMethod}}}, options.Find().SetSort(bson.D{{Key: "lastUsedAt", Value: 1}, {Key: "createdAt", Value: 1}, {Key: "sessionId", Value: 1}}))
+	cursor, err := r.database.Collection(SessionCollection).Find(ctx, bson.M{"authId": session.AuthID, "accountRevision": session.AccountRevision, "revokedAt": nil, "expiresAt": bson.M{"$gt": now}, "credentialId": bson.M{"$in": ids}, "authenticationMethod": bson.M{"$in": bson.A{"DEVICE_CREDENTIAL", emaillogin.AuthenticationMethod}}}, options.Find().SetSort(bson.D{{Key: "lastUsedAt", Value: 1}, {Key: "createdAt", Value: 1}, {Key: "sessionId", Value: 1}}))
 	if err != nil {
 		return err
 	}
@@ -423,7 +433,7 @@ func validCredential(doc CredentialDocument) bool {
 	return err == nil && bytes.Equal(fingerprint, doc.Fingerprint) && deviceprotocol.ValidID(doc.CredentialID) && doc.AuthID != "" && doc.ProtocolVersion == domain.ProtocolVersion && !doc.CreatedAt.IsZero() && doc.RevokedAt == nil
 }
 func validSession(doc SessionDocument) bool {
-	return deviceprotocol.ValidID(doc.SessionID) && doc.AuthID != "" && validSessionMethod(doc) && len(doc.TokenDigest) == 32 && !doc.CreatedAt.IsZero() && doc.AuthenticatedAt.Equal(doc.CreatedAt) && !doc.LastUsedAt.Before(doc.CreatedAt) && doc.LastUsedAt.Before(doc.ExpiresAt) && doc.ExpiresAt.After(doc.CreatedAt) && doc.RevokedAt == nil
+	return doc.AccountRevision > 0 && deviceprotocol.ValidID(doc.SessionID) && doc.AuthID != "" && validSessionMethod(doc) && len(doc.TokenDigest) == 32 && !doc.CreatedAt.IsZero() && doc.AuthenticatedAt.Equal(doc.CreatedAt) && !doc.LastUsedAt.Before(doc.CreatedAt) && doc.LastUsedAt.Before(doc.ExpiresAt) && doc.ExpiresAt.After(doc.CreatedAt) && doc.RevokedAt == nil
 }
 
 var _ port.LoginRepository = (*AuthenticationRepository)(nil)
@@ -451,6 +461,11 @@ func (r *AuthenticationRepository) CheckSessionTx(tx context.Context, digest []b
 	}
 	if !validCredential(credential) {
 		return domain.Session{}, port.ErrSessionInvalid
+	}
+	if err := r.ConfirmAccountTx(tx, doc.AuthID, doc.AccountRevision); errors.Is(err, port.ErrAuthenticationFailed) {
+		return domain.Session{}, port.ErrSessionInvalid
+	} else if err != nil {
+		return domain.Session{}, err
 	}
 	if err := r.ConfirmPrincipalCredentialTx(tx, doc.AuthID, doc.CredentialID, now); errors.Is(err, port.ErrAuthenticationFailed) {
 		return domain.Session{}, port.ErrSessionInvalid

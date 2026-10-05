@@ -30,7 +30,7 @@ func (revokeTestChecker) Check(_ context.Context, token string) (domain.Session,
 	if token != revokeTestToken {
 		return domain.Session{}, port.ErrSessionInvalid
 	}
-	return domain.Session{SessionID: "trusted-session", AuthID: "trusted-owner", CredentialID: revokeTestCredential, TokenDigest: make([]byte, 32)}, nil
+	return domain.Session{AccountRevision: 1, SessionID: "trusted-session", AuthID: "trusted-owner", CredentialID: revokeTestCredential, TokenDigest: make([]byte, 32)}, nil
 }
 
 type revokeTestRepository struct{}

@@ -85,10 +85,12 @@ type RedirectSnapshot struct {
 	ObservedAt, ValidUntil time.Time
 }
 type Session struct {
+	AccountRevision            int64
 	ID, AuthID                 string
 	AuthenticatedAt, ExpiresAt time.Time
 }
 type User struct {
+	AccountRevision                  int64
 	AuthID, Email, DeveloperHandle   string
 	EmailVerified, DeveloperApproved bool
 }
@@ -99,6 +101,7 @@ type AuthorizationRequest struct {
 	MaxAge                                                                           *int64
 }
 type Interaction struct {
+	AccountRevision                                           int64
 	ID, CSRFHash, Status, AuthID, SessionID, InitialSessionID string
 	Request                                                   AuthorizationRequest
 	Runtime                                                   Runtime
@@ -112,6 +115,7 @@ type Grant struct {
 	CreatedAt, UpdatedAt                                    time.Time
 }
 type Code struct {
+	AccountRevision                                                            int64
 	Digest, AuthID, ClientID, GrantID, RedirectURI, Nonce, Challenge, FamilyID string
 	Scopes                                                                     []string
 	Runtime                                                                    Runtime
@@ -120,6 +124,7 @@ type Code struct {
 	Consumed                                                                   bool
 }
 type Family struct {
+	AccountRevision                                                 int64
 	ID, AuthID, ClientID, ApplicationID, GrantID, Channel, TesterID string
 	Major                                                           int32
 	GrantEpoch, ClientEpoch                                         int64
@@ -129,6 +134,7 @@ type Family struct {
 	Revoked                                                         bool
 }
 type Access struct {
+	AccountRevision                        int64
 	ID, AuthID, GrantID                    string
 	GrantRevision, GrantEpoch, ClientEpoch int64
 	Runtime                                Runtime

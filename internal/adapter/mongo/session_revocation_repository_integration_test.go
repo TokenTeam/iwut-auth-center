@@ -36,14 +36,14 @@ func sessionRevocationFixture(t *testing.T) (*AuthenticationRepository, *driverm
 	if _, err := db.Collection(CredentialCollection).InsertOne(t.Context(), credential); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Collection(PrincipalCollection).InsertOne(t.Context(), bson.M{"authId": credential.AuthID, "principalType": "USER", "accountStatus": "ACTIVE", "profile": bson.M{"name": "keep"}}); err != nil {
+	if _, err := db.Collection(PrincipalCollection).InsertOne(t.Context(), bson.M{"authId": credential.AuthID, "principalType": "USER", "accountStatus": "ACTIVE", "accountRevision": int64(1), "profile": bson.M{"name": "keep"}}); err != nil {
 		t.Fatal(err)
 	}
 	sessions := make([]SessionDocument, 2)
 	for i := range sessions {
 		id, _ := protocol.NewID()
 		_, digest, _ := protocol.NewSessionToken()
-		sessions[i] = SessionDocument{SessionID: id, AuthID: credential.AuthID, AuthenticationMethod: "DEVICE_CREDENTIAL", CredentialID: credentialID, TokenDigest: digest, AuthenticatedAt: now, CreatedAt: now, LastUsedAt: now, ExpiresAt: now.Add(time.Hour)}
+		sessions[i] = SessionDocument{AccountRevision: 1, SessionID: id, AuthID: credential.AuthID, AuthenticationMethod: "DEVICE_CREDENTIAL", CredentialID: credentialID, TokenDigest: digest, AuthenticatedAt: now, CreatedAt: now, LastUsedAt: now, ExpiresAt: now.Add(time.Hour)}
 		if _, err := db.Collection(SessionCollection).InsertOne(t.Context(), sessions[i]); err != nil {
 			t.Fatal(err)
 		}
@@ -99,7 +99,7 @@ func TestSessionRevocationMongoConcurrentIdempotencyAndIsolation(t *testing.T) {
 	if err := db.Collection(CredentialCollection).FindOne(t.Context(), bson.M{"credentialId": current.CredentialID}).Decode(&credential); err != nil || credential.RevokedAt != nil {
 		t.Fatalf("credential changed: %v", err)
 	}
-	count, err := db.Collection(PrincipalCollection).CountDocuments(t.Context(), bson.M{"authId": current.AuthID, "profile.name": "keep", "accountStatus": "ACTIVE"})
+	count, err := db.Collection(PrincipalCollection).CountDocuments(t.Context(), bson.M{"authId": current.AuthID, "profile.name": "keep", "accountStatus": "ACTIVE", "accountRevision": int64(1)})
 	if err != nil || count != 1 {
 		t.Fatalf("principal/profile changed: count=%d err=%v", count, err)
 	}

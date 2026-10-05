@@ -17,6 +17,7 @@ const (
 // Operation contains only immutable proof context and controlled association ciphertext.
 // SigningPayload, association plaintext/digest and session tokens MUST NOT be persisted.
 type Operation struct {
+	AccountRevision                                                 int64
 	OperationID, Purpose, ProtocolVersion, ServiceID, ApplicationID string
 	Challenge                                                       []byte
 	ExpiresAt, CreatedAt                                            time.Time
@@ -33,6 +34,8 @@ type Operation struct {
 }
 
 type Credential struct {
+	// AccountRevision is a transient login resolution snapshot, never credential storage.
+	AccountRevision                       int64
 	CredentialID, AuthID, ProtocolVersion string
 	PublicKey, Fingerprint                []byte
 	CreatedAt                             time.Time
@@ -40,6 +43,7 @@ type Credential struct {
 }
 
 type Session struct {
+	AccountRevision                                       int64
 	SessionID, AuthID, AuthenticationMethod, CredentialID string
 	TokenDigest                                           []byte
 	EmailBindingRevision                                  int64

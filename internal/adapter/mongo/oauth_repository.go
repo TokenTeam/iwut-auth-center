@@ -69,6 +69,12 @@ func oauthGet[T any](tx *oauthTx, kind string, query bson.M) (T, error) {
 		case "access", "families":
 			required["revoked"] = bson.TypeBoolean
 		}
+		if kind == "codes" || kind == "access" || kind == "families" {
+			required["accountrevision"] = bson.TypeInt64
+		}
+		if kind == "interactions" && data.Lookup("authid").Type == bson.TypeString && data.Lookup("authid").StringValue() != "" {
+			required["accountrevision"] = bson.TypeInt64
+		}
 		if !identityFields(data, required) || bson.Unmarshal(raw, &doc) != nil {
 			return doc.Data, d.ErrUnavailable
 		}
@@ -104,7 +110,7 @@ func (tx *oauthTx) Session(raw string, now time.Time) (d.Session, error) {
 		}
 		return d.Session{}, d.ErrUnavailable
 	}
-	return d.Session{ID: ss.SessionID, AuthID: ss.AuthID, AuthenticatedAt: ss.AuthenticatedAt, ExpiresAt: ss.ExpiresAt}, nil
+	return d.Session{AccountRevision: ss.AccountRevision, ID: ss.SessionID, AuthID: ss.AuthID, AuthenticatedAt: ss.AuthenticatedAt, ExpiresAt: ss.ExpiresAt}, nil
 }
 func (tx *oauthTx) User(id string) (d.User, error) {
 	var raw struct {
@@ -126,7 +132,14 @@ func (tx *oauthTx) User(id string) (d.User, error) {
 	if _, err := tx.r.db.Collection(PrincipalCollection).UpdateOne(tx.ctx, bson.M{"authId": id, "accountStatus": "ACTIVE"}, bson.M{"$inc": bson.M{"authenticationFence": int64(1)}}); err != nil {
 		return d.User{}, d.ErrUnavailable
 	}
-	user := d.User{AuthID: id, DeveloperApproved: raw.Developer == "APPROVED"}
+	revision, e := tx.r.auth.AccountRevisionTx(tx.ctx, id)
+	if e != nil {
+		if errors.Is(e, ap.ErrAuthenticationFailed) {
+			return d.User{}, d.ErrGrant
+		}
+		return d.User{}, d.ErrUnavailable
+	}
+	user := d.User{AccountRevision: revision, AuthID: id, DeveloperApproved: raw.Developer == "APPROVED"}
 	var binding bindingDocument
 	err = tx.r.db.Collection(EmailBindingCollection).FindOne(tx.ctx, bson.M{"authId": id}).Decode(&binding)
 	if err != nil && !errors.Is(err, m.ErrNoDocuments) {

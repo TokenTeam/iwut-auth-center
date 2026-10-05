@@ -14,7 +14,9 @@ import (
 	kt "github.com/go-kratos/kratos/v2/transport"
 	"google.golang.org/grpc/codes"
 	"io"
+	account "iwut-auth-center/internal/account/domain"
 	"iwut-auth-center/internal/config"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -79,8 +81,9 @@ func strictJSONObject(data []byte, target any) error {
 }
 
 type verifiedUser struct {
-	AuthID      string
-	Permissions []string
+	AccountRevision int64
+	AuthID          string
+	Permissions     []string
 }
 
 func (v *UserIdentityVerifier) Verify(token string) (string, error) {
@@ -117,6 +120,7 @@ func (v *UserIdentityVerifier) verifyIdentity(token string) (verifiedUser, error
 		return verifiedUser{}, invalid
 	}
 	var claims struct {
+		AccountRevision *string         `json:"account_revision"`
 		Iss             *string         `json:"iss"`
 		Sub             *string         `json:"sub"`
 		Aud             json.RawMessage `json:"aud"`
@@ -128,6 +132,13 @@ func (v *UserIdentityVerifier) verifyIdentity(token string) (verifiedUser, error
 		Permissions     json.RawMessage `json:"permissions"`
 	}
 	if strictJSONObject(decoded[1], &claims) != nil || claims.Iss == nil || *claims.Iss != v.issuer || claims.Sub == nil || *claims.Sub == "" || claims.Jti == nil || *claims.Jti == "" || claims.Iat == nil || claims.Nbf == nil || claims.Exp == nil || !userAudienceContains(claims.Aud, "iwut-auth-center") {
+		return verifiedUser{}, invalid
+	}
+	if claims.AccountRevision == nil {
+		return verifiedUser{}, invalid
+	}
+	revision, err := strconv.ParseInt(*claims.AccountRevision, 10, 64)
+	if err != nil || revision <= 0 || strconv.FormatInt(revision, 10) != *claims.AccountRevision {
 		return verifiedUser{}, invalid
 	}
 	if claims.DeveloperStatus != nil {
@@ -159,7 +170,7 @@ func (v *UserIdentityVerifier) verifyIdentity(token string) (verifiedUser, error
 	if *claims.Exp <= *claims.Iat || *claims.Exp <= *claims.Nbf || *claims.Exp-*claims.Iat > v.maxTTL.Seconds() || now > *claims.Exp+skew || *claims.Nbf-skew > now || *claims.Iat > now+skew {
 		return verifiedUser{}, invalid
 	}
-	return verifiedUser{AuthID: *claims.Sub, Permissions: permissions}, nil
+	return verifiedUser{AccountRevision: revision, AuthID: *claims.Sub, Permissions: permissions}, nil
 }
 
 func userAudienceContains(raw json.RawMessage, want string) bool {
@@ -206,11 +217,11 @@ func UserProfileIdentityMiddleware(v *UserIdentityVerifier) middleware.Middlewar
 			if len(values) != 1 {
 				return nil, transportStatus(codes.Unauthenticated, "INVALID_USER_IDENTITY", "invalid user identity")
 			}
-			id, e := v.Verify(values[0])
+			identity, e := v.verifyIdentity(values[0])
 			if e != nil {
 				return nil, transportStatus(codes.Unauthenticated, "INVALID_USER_IDENTITY", "invalid user identity")
 			}
-			return next(context.WithValue(ctx, userIdentityContextKey{}, id), req)
+			return next(context.WithValue(account.WithIdentity(ctx, identity.AuthID, identity.AccountRevision), userIdentityContextKey{}, identity.AuthID), req)
 		}
 	}
 }

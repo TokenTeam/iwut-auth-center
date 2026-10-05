@@ -7,6 +7,7 @@ import (
 	drivermongo "go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
+	account "iwut-auth-center/internal/account/domain"
 	"iwut-auth-center/internal/profile/domain"
 	"iwut-auth-center/internal/profile/port"
 )
@@ -23,6 +24,11 @@ func (r *ProfileRepository) Read(ctx context.Context, id string) (domain.Princip
 	return r.read(ctx, bson.M{"authId": id})
 }
 func (r *ProfileRepository) read(ctx context.Context, filter bson.M) (domain.Principal, error) {
+	identity, ok := account.Identity(ctx)
+	if !ok || identity.AuthID != filter["authId"] || identity.Revision <= 0 {
+		return domain.Principal{}, domain.ErrIdentity
+	}
+
 	var raw bson.Raw
 	e := r.collection.FindOne(ctx, filter).Decode(&raw)
 	if errors.Is(e, drivermongo.ErrNoDocuments) {
@@ -30,6 +36,12 @@ func (r *ProfileRepository) read(ctx context.Context, filter bson.M) (domain.Pri
 	}
 	if e != nil {
 		return domain.Principal{}, domain.ErrUnavailable
+	}
+	if !identityFields(raw, map[string]bson.Type{"accountRevision": bson.TypeInt64}) || raw.Lookup("accountRevision").Int64() <= 0 {
+		return domain.Principal{}, domain.ErrUnavailable
+	}
+	if raw.Lookup("accountRevision").Int64() != identity.Revision {
+		return domain.Principal{}, domain.ErrIdentity
 	}
 	return decodeProfilePrincipal(raw)
 }
@@ -73,7 +85,13 @@ func (r *ProfileRepository) Commit(ctx context.Context, id string, revision int6
 		}
 		entries = append(entries, bson.M{"key": a.Key, "valueType": string(a.Value.Type), "value": v})
 	}
-	result, e := r.collection.UpdateOne(ctx, profileFilter(id, revision), bson.M{"$set": bson.M{"profile.entries": entries, "profile.revision": s.Revision, "profile.updatedAt": s.UpdatedAt}})
+	identity, ok := account.Identity(ctx)
+	if !ok || identity.AuthID != id || identity.Revision <= 0 {
+		return domain.ErrIdentity
+	}
+	filter := profileFilter(id, revision)
+	filter["accountRevision"] = identity.Revision
+	result, e := r.collection.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"profile.entries": entries, "profile.revision": s.Revision, "profile.updatedAt": s.UpdatedAt}})
 	if e != nil {
 		return domain.ErrUnavailable
 	}
@@ -97,7 +115,7 @@ func decodeProfilePrincipal(raw bson.Raw) (domain.Principal, error) {
 	if p.AccountStatus, ok = raw.Lookup("accountStatus").StringValueOK(); !ok {
 		return p, domain.ErrUnavailable
 	}
-	if p.AccountStatus == "DISABLED" {
+	if p.AccountStatus == "DISABLED" || p.AccountStatus == "CLOSED" {
 		return p, nil
 	}
 	profile, ok := raw.Lookup("profile").DocumentOK()

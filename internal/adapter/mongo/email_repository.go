@@ -145,6 +145,7 @@ func (r *EmailRepository) Begin(ctx context.Context, o emailport.Operation, dige
 			if e != nil {
 				return e
 			}
+			o.Proof.AccountRevision = caller.AccountRevision
 			if caller.AuthID != o.Owner {
 				return d.ErrSession
 			}
@@ -161,6 +162,9 @@ func (r *EmailRepository) Begin(ctx context.Context, o emailport.Operation, dige
 			}
 			if saved.Mode == d.Register && saved.Proof.Status == auth.Completed {
 				return d.ErrCompleted
+			}
+			if saved.Mode == d.Bind && (saved.Proof.AccountRevision <= 0 || saved.Proof.AccountRevision != o.Proof.AccountRevision) {
+				return d.ErrVerification
 			}
 			if saved.KeyID != r.keyID {
 				return d.ErrVerification
@@ -326,7 +330,7 @@ func (r *EmailRepository) Complete(ctx context.Context, expected emailport.Opera
 			if e != nil {
 				return e
 			}
-			if caller.AuthID != op.Owner {
+			if caller.AccountRevision != op.Proof.AccountRevision || caller.AuthID != op.Owner {
 				return d.ErrVerification
 			}
 		} else if len(digest) > 0 {

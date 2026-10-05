@@ -67,7 +67,7 @@ func newAuthenticationFixture(t *testing.T) authenticationFixture {
 		t.Fatal(err)
 	}
 	credential := domain.Credential{CredentialID: id, AuthID: "user-login", ProtocolVersion: domain.ProtocolVersion, PublicKey: publicKey, Fingerprint: fingerprint, CreatedAt: time.Now().UTC().Truncate(time.Millisecond)}
-	if _, err := db.Collection(PrincipalCollection).InsertOne(t.Context(), bson.M{"authId": credential.AuthID, "principalType": "USER", "accountStatus": "ACTIVE"}); err != nil {
+	if _, err := db.Collection(PrincipalCollection).InsertOne(t.Context(), bson.M{"authId": credential.AuthID, "principalType": "USER", "accountStatus": "ACTIVE", "accountRevision": int64(1)}); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.WithAuthTransaction(t.Context(), func(ctx context.Context) error { return r.InsertCredentialTx(ctx, credential) }); err != nil {
@@ -278,7 +278,7 @@ func TestAuthenticationExactLRUAndFailedCommitRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bad := domain.Session{SessionID: id, AuthID: f.c.AuthID, CredentialID: f.c.CredentialID, TokenDigest: digest, AuthenticationMethod: "DEVICE_CREDENTIAL", AuthenticatedAt: future, CreatedAt: future, LastUsedAt: future, ExpiresAt: future.Add(time.Hour)}
+	bad := domain.Session{AccountRevision: 1, SessionID: id, AuthID: f.c.AuthID, CredentialID: f.c.CredentialID, TokenDigest: digest, AuthenticationMethod: "DEVICE_CREDENTIAL", AuthenticatedAt: future, CreatedAt: future, LastUsedAt: future, ExpiresAt: future.Add(time.Hour)}
 	if err := f.r.CompleteLogin(t.Context(), op, bad, future); !errors.Is(err, port.ErrUnavailable) {
 		t.Fatal("injected duplicate digest should abort", err)
 	}
@@ -397,7 +397,7 @@ func TestAuthenticationHistoricalCapacityAndStableTieOrder(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		session := domain.Session{SessionID: fmt.Sprintf("11111111-1111-4111-8111-%012d", i), AuthID: f.c.AuthID, CredentialID: f.c.CredentialID, TokenDigest: digest, AuthenticationMethod: "DEVICE_CREDENTIAL", CreatedAt: now, AuthenticatedAt: now, LastUsedAt: now, ExpiresAt: now.Add(time.Hour)}
+		session := domain.Session{AccountRevision: 1, SessionID: fmt.Sprintf("11111111-1111-4111-8111-%012d", i), AuthID: f.c.AuthID, CredentialID: f.c.CredentialID, TokenDigest: digest, AuthenticationMethod: "DEVICE_CREDENTIAL", CreatedAt: now, AuthenticatedAt: now, LastUsedAt: now, ExpiresAt: now.Add(time.Hour)}
 		if _, err := f.r.database.Collection(SessionCollection).InsertOne(t.Context(), sessionDocument(session)); err != nil {
 			t.Fatal(err)
 		}

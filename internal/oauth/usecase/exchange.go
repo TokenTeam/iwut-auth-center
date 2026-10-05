@@ -53,6 +53,13 @@ func (s *Service) Exchange(ctx context.Context, proof d.ClientProof, raw, redire
 		if code.ClientID != client.ID || code.Runtime.Client.ApplicationID != client.ApplicationID || code.RedirectURI != redirect || code.Challenge != "" && !s.crypto.VerifyPKCE(code.Challenge, verifier) || code.Challenge == "" && verifier != "" || client.Type == "PUBLIC_PKCE" && code.Challenge == "" {
 			return d.ErrGrant
 		}
+		user, e := tx.User(code.AuthID)
+		if e != nil {
+			return e
+		}
+		if code.AccountRevision <= 0 || user.AccountRevision != code.AccountRevision {
+			return d.ErrGrant
+		}
 		if code.Consumed {
 			// Proof must succeed before a replay is allowed to revoke a family.
 			f, e := tx.Family(code.FamilyID)
@@ -107,7 +114,7 @@ func (s *Service) Exchange(ctx context.Context, proof d.ClientProof, raw, redire
 		if offline && !s.cfg.RefreshEnabled {
 			return d.ErrGrant
 		}
-		f := d.Family{ID: s.crypto.ID(), AuthID: code.AuthID, ClientID: client.ID, ApplicationID: client.ApplicationID, GrantID: g.ID, Channel: client.Channel, TesterID: rt.TesterID, Major: rt.Major, GrantEpoch: g.RevocationEpoch, ClientEpoch: client.AuthorizationEpoch, ScopeCeiling: code.Scopes, CreatedAt: now, IdleExpiresAt: now.Add(s.cfg.AccessTTL), AbsoluteExpiresAt: now.Add(s.cfg.AccessTTL)}
+		f := d.Family{AccountRevision: code.AccountRevision, ID: s.crypto.ID(), AuthID: code.AuthID, ClientID: client.ID, ApplicationID: client.ApplicationID, GrantID: g.ID, Channel: client.Channel, TesterID: rt.TesterID, Major: rt.Major, GrantEpoch: g.RevocationEpoch, ClientEpoch: client.AuthorizationEpoch, ScopeCeiling: code.Scopes, CreatedAt: now, IdleExpiresAt: now.Add(s.cfg.AccessTTL), AbsoluteExpiresAt: now.Add(s.cfg.AccessTTL)}
 		if offline {
 			f.IdleExpiresAt = now.Add(s.cfg.IdleTTL)
 			f.AbsoluteExpiresAt = now.Add(s.cfg.AbsoluteTTL)
@@ -170,7 +177,7 @@ func (s *Service) issue(tx port.Tx, f d.Family, g d.Grant, rt d.Runtime, scopes 
 	if !expiry.After(now) {
 		return out, d.ErrGrant
 	}
-	if err = tx.SaveAccess(d.Access{ID: s.crypto.ID(), AuthID: f.AuthID, GrantID: g.ID, GrantRevision: g.Revision, GrantEpoch: f.GrantEpoch, ClientEpoch: f.ClientEpoch, Runtime: rt, IssuedAt: now, Digest: s.crypto.Digest("access", raw), FamilyID: f.ID, Scopes: d.Union(scopes), Audiences: d.Union(aud), ExpiresAt: expiry}); err != nil {
+	if err = tx.SaveAccess(d.Access{AccountRevision: f.AccountRevision, ID: s.crypto.ID(), AuthID: f.AuthID, GrantID: g.ID, GrantRevision: g.Revision, GrantEpoch: f.GrantEpoch, ClientEpoch: f.ClientEpoch, Runtime: rt, IssuedAt: now, Digest: s.crypto.Digest("access", raw), FamilyID: f.ID, Scopes: d.Union(scopes), Audiences: d.Union(aud), ExpiresAt: expiry}); err != nil {
 		return out, err
 	}
 	out = d.TokenResponse{AccessToken: raw, ExpiresIn: int64(expiry.Sub(now) / time.Second), Scopes: d.Union(scopes)}

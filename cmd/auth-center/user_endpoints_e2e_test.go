@@ -301,7 +301,7 @@ func userCallContext(t *testing.T, key *rsa.PrivateKey, authID string) context.C
 	t.Helper()
 	now := time.Now()
 	header, _ := json.Marshal(map[string]string{"alg": "RS256", "typ": "JWT", "kid": "test"})
-	claims, _ := json.Marshal(map[string]any{"iss": "test-auth-issuer", "sub": authID, "aud": "iwut-auth-center", "iat": now.Unix(), "nbf": now.Unix(), "exp": now.Add(time.Minute).Unix(), "jti": fmt.Sprint(now.UnixNano())})
+	claims, _ := json.Marshal(map[string]any{"account_revision": "1", "iss": "test-auth-issuer", "sub": authID, "aud": "iwut-auth-center", "iat": now.Unix(), "nbf": now.Unix(), "exp": now.Add(time.Minute).Unix(), "jti": fmt.Sprint(now.UnixNano())})
 	body := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(claims)
 	hash := sha256.Sum256([]byte(body))
 	signature, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, hash[:])

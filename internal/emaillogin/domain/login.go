@@ -31,6 +31,7 @@ type Begin struct {
 // Operation is the immutable login proof and eligibility snapshot. Secrets,
 // signing payloads and association data must never be persisted here.
 type Operation struct {
+	AccountRevision                                                            int64
 	OperationID, RequestID, Purpose, ProtocolVersion, ServiceID, ApplicationID string
 	Email, KeyID, AuthID, CredentialID, Status                                 string
 	PublicKey, Fingerprint, Challenge, RequestMAC, CodeMAC                     []byte

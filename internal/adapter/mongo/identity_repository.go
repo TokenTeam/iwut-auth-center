@@ -84,7 +84,7 @@ func (r *IdentityRepository) WithSession(ctx context.Context, digest []byte, pre
 		}
 		principalType := raw.Lookup("principalType").StringValue()
 		accountStatus := raw.Lookup("accountStatus").StringValue()
-		if principalType == "SYSTEM" || accountStatus == "DISABLED" {
+		if principalType == "SYSTEM" || accountStatus == "DISABLED" || accountStatus == "CLOSED" {
 			return fail(domain.ErrSessionInvalid)
 		}
 		if principalType != "USER" || accountStatus != "ACTIVE" {
@@ -93,7 +93,12 @@ func (r *IdentityRepository) WithSession(ctx context.Context, digest []byte, pre
 		if !identityFields(raw, map[string]bson.Type{"permissions": bson.TypeArray, "permissionRevision": bson.TypeInt64}) {
 			return fail(domain.ErrUnavailable)
 		}
-		snapshot := domain.Snapshot{AuthID: session.AuthID, PermissionRevision: raw.Lookup("permissionRevision").Int64(), SessionExpiresAt: session.ExpiresAt, Permissions: []string{}}
+		if err := a.ConfirmAccountTx(tx, session.AuthID, session.AccountRevision); errors.Is(err, authport.ErrAuthenticationFailed) {
+			return fail(domain.ErrSessionInvalid)
+		} else if err != nil {
+			return err
+		}
+		snapshot := domain.Snapshot{AccountRevision: session.AccountRevision, AuthID: session.AuthID, PermissionRevision: raw.Lookup("permissionRevision").Int64(), SessionExpiresAt: session.ExpiresAt, Permissions: []string{}}
 		values, err := raw.Lookup("permissions").Array().Values()
 		if err != nil {
 			return fail(domain.ErrUnavailable)

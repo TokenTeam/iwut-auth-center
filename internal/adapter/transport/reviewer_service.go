@@ -8,6 +8,7 @@ import (
 	kt "github.com/go-kratos/kratos/v2/transport"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/proto"
+	account "iwut-auth-center/internal/account/domain"
 	admin "iwut-auth-center/internal/administrator/domain"
 	"iwut-auth-center/internal/reviewer/domain"
 	"iwut-auth-center/internal/reviewer/usecase"
@@ -28,6 +29,9 @@ func UserCapabilityIdentityMiddleware(v *UserIdentityVerifier) middleware.Middle
 			if !ok {
 				return nil, reviewerError(domain.ErrForbidden)
 			}
+			if accountManagementMethod(tr.Operation()) {
+				return accountManagementIdentity(v)(next)(ctx, req)
+			}
 			if !isReviewerOperation(tr.Operation()) && !isPlatformAdministratorOperation(tr.Operation()) {
 				return UserProfileIdentityMiddleware(v)(next)(ctx, req)
 			}
@@ -40,6 +44,7 @@ func UserCapabilityIdentityMiddleware(v *UserIdentityVerifier) middleware.Middle
 			}
 			identity, err := v.verifyIdentity(values[0])
 			if err != nil {
+
 				return nil, transportStatus(codes.Unauthenticated, "INVALID_USER_IDENTITY", "invalid user identity")
 			}
 			required := domain.Manager
@@ -55,7 +60,7 @@ func UserCapabilityIdentityMiddleware(v *UserIdentityVerifier) middleware.Middle
 			if msg, ok := req.(proto.Message); !ok || proto.Size(msg) > 16*1024 {
 				return nil, transportStatus(codes.ResourceExhausted, "AUTHENTICATION_INPUT_TOO_LARGE", "request is too large")
 			}
-			return next(context.WithValue(ctx, userIdentityContextKey{}, identity.AuthID), req)
+			return next(context.WithValue(account.WithIdentity(ctx, identity.AuthID, identity.AccountRevision), userIdentityContextKey{}, identity.AuthID), req)
 		}
 	}
 }

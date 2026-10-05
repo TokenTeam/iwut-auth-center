@@ -55,7 +55,8 @@ func (s *Signer) Sign(ctx context.Context, c domain.Claims) (string, error) {
 		Jti             string   `json:"jti"`
 		Permissions     []string `json:"permissions"`
 		DeveloperStatus string   `json:"developer_status,omitempty"`
-	}{s.issuer, c.AuthID, c.Audience, c.IssuedAt, c.IssuedAt, c.ExpiresAt, c.JTI, permissions, c.DeveloperStatus})
+		AccountRevision string   `json:"account_revision,omitempty"`
+	}{s.issuer, c.AuthID, c.Audience, c.IssuedAt, c.IssuedAt, c.ExpiresAt, c.JTI, permissions, c.DeveloperStatus, c.AccountRevision})
 	if err != nil {
 		return "", domain.ErrUnavailable
 	}

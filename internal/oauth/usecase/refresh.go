@@ -13,6 +13,13 @@ func (s *Service) current(ctx context.Context, tx port.Tx, f d.Family) (d.Runtim
 	if f.Revoked || !f.IdleExpiresAt.After(s.now()) || !f.AbsoluteExpiresAt.After(s.now()) || f.GrantEpoch < 1 || f.ClientEpoch < 1 {
 		return rt, g, c, d.ErrGrant
 	}
+	user, e := tx.User(f.AuthID)
+	if e != nil {
+		return rt, g, c, e
+	}
+	if f.AccountRevision <= 0 || f.AccountRevision != user.AccountRevision {
+		return rt, g, c, d.ErrGrant
+	}
 	client, err := s.app.Client(ctx, f.ClientID)
 	if err != nil {
 		return rt, g, c, err
@@ -72,6 +79,13 @@ func (s *Service) Refresh(ctx context.Context, proof d.ClientProof, raw string, 
 			return err
 		}
 		if f.ClientID != client.ID || f.ApplicationID != client.ApplicationID || f.Channel != client.Channel {
+			return d.ErrGrant
+		}
+		user, e := tx.User(f.AuthID)
+		if e != nil {
+			return e
+		}
+		if f.AccountRevision <= 0 || f.AccountRevision != user.AccountRevision {
 			return d.ErrGrant
 		}
 		if r.Consumed {

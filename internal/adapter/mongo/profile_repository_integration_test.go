@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	dm "go.mongodb.org/mongo-driver/v2/mongo"
+	account "iwut-auth-center/internal/account/domain"
 	"iwut-auth-center/internal/profile/domain"
 	"os"
 	"sync"
@@ -32,7 +33,7 @@ func profileDB(t *testing.T) *dm.Database {
 }
 func insertProfile(t *testing.T, db *dm.Database) {
 	t.Helper()
-	_, e := db.Collection(PrincipalCollection).InsertOne(context.Background(), bson.M{"authId": "user1", "principalType": "USER", "accountStatus": "ACTIVE", "permissions": bson.A{"existing"}, "updatedAt": time.Unix(50, 0), "profile": bson.M{"entries": bson.A{}, "revision": int64(1), "updatedAt": time.Unix(100, 0)}})
+	_, e := db.Collection(PrincipalCollection).InsertOne(context.Background(), bson.M{"authId": "user1", "principalType": "USER", "accountStatus": "ACTIVE", "accountRevision": int64(1), "permissions": bson.A{"existing"}, "updatedAt": time.Unix(50, 0), "profile": bson.M{"entries": bson.A{}, "revision": int64(1), "updatedAt": time.Unix(100, 0)}})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -41,7 +42,7 @@ func TestMongoProfileAtomicRevisionAndOtherFields(t *testing.T) {
 	db := profileDB(t)
 	insertProfile(t, db)
 	r, _ := NewProfileRepository(db)
-	ctx := context.Background()
+	ctx := account.WithIdentity(context.Background(), "user1", 1)
 	s := domain.Snapshot{Entries: []domain.Entry{{Key: "education.flag", Value: domain.Value{Type: domain.Boolean}}, {Key: "education.year", Value: domain.Value{Type: domain.Integer, Integer: 2026}}}, Revision: 2, UpdatedAt: time.Unix(200, 0)}
 	errs := make(chan error, 2)
 	var wg sync.WaitGroup
@@ -91,7 +92,7 @@ func TestMongoProfileRejectsCorruptStorage(t *testing.T) {
 	db := profileDB(t)
 	insertProfile(t, db)
 	r, _ := NewProfileRepository(db)
-	ctx := context.Background()
+	ctx := account.WithIdentity(context.Background(), "user1", 1)
 	for _, patch := range []bson.M{{"profile.revision": int32(1)}, {"profile.entries": bson.A{bson.M{"key": "year", "valueType": "INTEGER", "value": int64(1)}}}, {"profile.entries": bson.A{bson.M{"key": "x", "valueType": "BOOLEAN", "value": false}, bson.M{"key": "x", "valueType": "BOOLEAN", "value": true}}}} {
 		_, _ = db.Collection(PrincipalCollection).UpdateOne(ctx, bson.M{"authId": "user1"}, bson.M{"$set": bson.M{"profile": bson.M{"revision": int64(1), "updatedAt": time.Now(), "entries": bson.A{}}}})
 		_, _ = db.Collection(PrincipalCollection).UpdateOne(ctx, bson.M{"authId": "user1"}, bson.M{"$set": patch})

@@ -29,6 +29,7 @@ type EmailLoginRepository struct {
 // Login operations share the authentication collection, so pending capacity and
 // expiry transitions remain global. Binding owns the single email directory.
 type emailLoginDocument struct {
+	AccountRevision       int64     `bson:"accountRevision"`
 	OperationID           string    `bson:"operationId"`
 	RequestID             string    `bson:"requestId"`
 	Purpose               string    `bson:"purpose"`
@@ -145,12 +146,13 @@ func (r *EmailLoginRepository) Begin(ctx context.Context, candidate d.Operation,
 			if binding.AuthID == "" || binding.Revision <= 0 || binding.VerifiedAt.IsZero() {
 				return d.ErrUnavailable
 			}
-			count, e := r.db.Collection(PrincipalCollection).CountDocuments(tx, bson.M{"authId": binding.AuthID, "principalType": "USER", "accountStatus": "ACTIVE"})
-			if e != nil {
+			revision, e := r.AccountRevisionTx(tx, binding.AuthID)
+			if e != nil && !errors.Is(e, ap.ErrAuthenticationFailed) {
 				return e
 			}
-			if count == 1 {
+			if e == nil {
 				op.AuthID = binding.AuthID
+				op.AccountRevision = revision
 				op.EmailBindingRevision = binding.Revision
 				op.Eligible = true
 			}
@@ -237,6 +239,12 @@ func (r *EmailLoginRepository) Complete(ctx context.Context, c p.Commit, now tim
 		if op.Status != auth.Pending || op.KeyID != r.loginKeyID || op.FailedAttempts < 0 || op.FailedAttempts >= 5 || !now.Before(op.ExpiresAt) || !now.Before(op.RetainUntil) || !op.Eligible || op.EmailBindingRevision <= 0 || !sameLoginSnapshot(op, c.Operation) {
 			return d.ErrFailed
 		}
+		if err := r.ConfirmAccountTx(tx, op.AuthID, op.AccountRevision); err != nil {
+			if errors.Is(err, ap.ErrAuthenticationFailed) {
+				return d.ErrFailed
+			}
+			return err
+		}
 		if !op.CredentialAcceptable {
 			return d.ErrCredential
 		}
@@ -267,7 +275,7 @@ func (r *EmailLoginRepository) Complete(ctx context.Context, c p.Commit, now tim
 		}
 		session := c.Session
 		session.CredentialID = credential.CredentialID
-		if session.AuthID != op.AuthID || session.AuthenticationMethod != d.AuthenticationMethod || session.EmailBindingRevision != op.EmailBindingRevision {
+		if session.AccountRevision != op.AccountRevision || session.AuthID != op.AuthID || session.AuthenticationMethod != d.AuthenticationMethod || session.EmailBindingRevision != op.EmailBindingRevision {
 			return d.ErrFailed
 		}
 		if e = r.CreateSessionTx(tx, session, now); e != nil {
@@ -291,3 +299,17 @@ func (r *EmailLoginRepository) Complete(ctx context.Context, c p.Commit, now tim
 }
 
 var _ p.Repository = (*EmailLoginRepository)(nil)
+
+func (v *emailLoginDocument) UnmarshalBSON(data []byte) error {
+	type plain emailLoginDocument
+	var value plain
+	if err := bson.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	revision := bson.Raw(data).Lookup("accountRevision")
+	if revision.Type != bson.TypeInt64 || revision.Int64() < 0 || value.Eligible && revision.Int64() == 0 {
+		return d.ErrUnavailable
+	}
+	*v = emailLoginDocument(value)
+	return nil
+}

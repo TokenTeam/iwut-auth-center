@@ -110,7 +110,7 @@ func (s *Service) View(ctx context.Context, id, csrf, session string) (d.Authori
 			out.LoginRequired = true
 			return nil
 		}
-		if i.AuthID != "" && (i.AuthID != ss.AuthID || i.SessionID != ss.ID) {
+		if i.AuthID != "" && (i.AccountRevision != ss.AccountRevision || i.AuthID != ss.AuthID || i.SessionID != ss.ID) {
 			return d.ErrConflict
 		}
 		rt, err := s.app.Authorize(ctx, i.Runtime, ss.AuthID)
@@ -131,6 +131,7 @@ func (s *Service) View(ctx context.Context, id, csrf, session string) (d.Authori
 		if err != nil && !missing(err) {
 			return err
 		}
+		i.AccountRevision = ss.AccountRevision
 		i.AuthID = ss.AuthID
 		i.SessionID = ss.ID
 		i.AuthenticatedAt = ss.AuthenticatedAt
@@ -191,7 +192,7 @@ func (s *Service) Confirm(ctx context.Context, id, csrf, session string, selecte
 	return redirect, nil
 }
 func (s *Service) confirm(ctx context.Context, tx port.Tx, i d.Interaction, ss d.Session, selected []string, approve bool) (string, error) {
-	if i.Status != "PENDING" || !i.ExpiresAt.After(s.now()) || i.AuthID != ss.AuthID || i.SessionID != ss.ID {
+	if i.Status != "PENDING" || !i.ExpiresAt.After(s.now()) || i.AccountRevision != ss.AccountRevision || i.AuthID != ss.AuthID || i.SessionID != ss.ID {
 		return "", d.ErrConflict
 	}
 	if !approve {
@@ -239,7 +240,7 @@ func (s *Service) confirm(ctx context.Context, tx port.Tx, i d.Interaction, ss d
 	if err != nil {
 		return "", d.ErrUnavailable
 	}
-	code := d.Code{Digest: s.crypto.Digest("code", raw), AuthID: ss.AuthID, ClientID: rt.Client.ID, GrantID: g.ID, RedirectURI: i.Request.RedirectURI, Nonce: i.Request.Nonce, Challenge: i.Request.Challenge, Scopes: d.Union(selected), Runtime: rt, GrantRevision: g.Revision, GrantEpoch: g.RevocationEpoch, AuthenticatedAt: ss.AuthenticatedAt, ExpiresAt: now.Add(90 * time.Second)}
+	code := d.Code{AccountRevision: ss.AccountRevision, Digest: s.crypto.Digest("code", raw), AuthID: ss.AuthID, ClientID: rt.Client.ID, GrantID: g.ID, RedirectURI: i.Request.RedirectURI, Nonce: i.Request.Nonce, Challenge: i.Request.Challenge, Scopes: d.Union(selected), Runtime: rt, GrantRevision: g.Revision, GrantEpoch: g.RevocationEpoch, AuthenticatedAt: ss.AuthenticatedAt, ExpiresAt: now.Add(90 * time.Second)}
 	if err := tx.SaveGrant(g); err != nil {
 		return "", err
 	}

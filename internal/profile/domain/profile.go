@@ -17,6 +17,7 @@ const (
 )
 
 var (
+	ErrIdentity        = errors.New("INVALID_USER_IDENTITY")
 	ErrInvalidRevision = errors.New("INVALID_USER_PROFILE_EXPECTED_REVISION")
 	ErrInvalidEdit     = errors.New("INVALID_USER_PROFILE_EDIT")
 	ErrNotDefined      = errors.New("USER_PROFILE_FIELD_NOT_DEFINED")

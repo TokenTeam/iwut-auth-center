@@ -21,7 +21,7 @@ func TestProductionSignerRotationThroughActualAuthVerifier(t *testing.T) {
 		return pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: d})
 	}
 	now := time.Now().Unix()
-	claims := domain.Claims{AuthID: "user", Audience: domain.AuthAudience, JTI: "test-jti", IssuedAt: now, ExpiresAt: now + 60, Permissions: []string{}}
+	claims := domain.Claims{AccountRevision: "1", AuthID: "user", Audience: domain.AuthAudience, JTI: "test-jti", IssuedAt: now, ExpiresAt: now + 60, Permissions: []string{}}
 	first, _ := identitysigner.New("issuer", "old", key1)
 	second, _ := identitysigner.New("issuer", "new", key2)
 	one, e := first.Sign(t.Context(), claims)

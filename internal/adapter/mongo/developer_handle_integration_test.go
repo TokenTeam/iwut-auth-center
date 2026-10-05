@@ -30,9 +30,9 @@ func developerAdditionalUser(t *testing.T, db *m.Database) SessionDocument {
 	public := elliptic.Marshal(elliptic.P256(), key.X, key.Y)
 	fingerprint, _ := p.Fingerprint(public)
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	session := SessionDocument{SessionID: sessionID, AuthID: authID, AuthenticationMethod: "DEVICE_CREDENTIAL", CredentialID: credentialID, TokenDigest: digest, CreatedAt: now, AuthenticatedAt: now, LastUsedAt: now, ExpiresAt: now.Add(time.Hour)}
+	session := SessionDocument{AccountRevision: 1, SessionID: sessionID, AuthID: authID, AuthenticationMethod: "DEVICE_CREDENTIAL", CredentialID: credentialID, TokenDigest: digest, CreatedAt: now, AuthenticatedAt: now, LastUsedAt: now, ExpiresAt: now.Add(time.Hour)}
 	for collection, doc := range map[string]any{
-		PrincipalCollection:    bson.M{"authId": authID, "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": nil, "permissions": bson.A{}, "permissionRevision": int64(1)},
+		PrincipalCollection:    bson.M{"authId": authID, "principalType": "USER", "accountStatus": "ACTIVE", "accountRevision": int64(1), "developerStatus": nil, "permissions": bson.A{}, "permissionRevision": int64(1)},
 		CredentialCollection:   CredentialDocument{AuthID: authID, CredentialID: credentialID, ProtocolVersion: "iwut-device-v1", PublicKey: public, Fingerprint: fingerprint, CreatedAt: now},
 		SessionCollection:      session,
 		EmailBindingCollection: bindingDocument{AuthID: authID, Email: authID + "@example.test", Revision: 1, VerifiedAt: now},

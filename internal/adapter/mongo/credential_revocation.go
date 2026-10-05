@@ -38,6 +38,11 @@ func (r *AuthenticationRepository) RevokeOwnCredential(ctx context.Context, call
 		if !validCredential(credential) {
 			return port.ErrSessionInvalid
 		}
+		if err := r.ConfirmAccountTx(tx, session.AuthID, session.AccountRevision); errors.Is(err, port.ErrAuthenticationFailed) {
+			return port.ErrSessionInvalid
+		} else if err != nil {
+			return err
+		}
 		if err := r.ConfirmPrincipalCredentialTx(tx, session.AuthID, session.CredentialID, now); errors.Is(err, port.ErrAuthenticationFailed) {
 			return port.ErrSessionInvalid
 		} else if err != nil {

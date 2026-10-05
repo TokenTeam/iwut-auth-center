@@ -32,7 +32,7 @@ func (s *Service) access(ctx context.Context, tx port.Tx, raw string) (d.Access,
 		}
 		return a, f, rt, g, nil, d.ErrToken
 	}
-	if a.AuthID != f.AuthID || a.GrantID != f.GrantID || a.GrantEpoch != f.GrantEpoch || a.ClientEpoch != f.ClientEpoch || a.Runtime.Client.ID != f.ClientID || a.Runtime.Client.ApplicationID != f.ApplicationID || a.Runtime.Client.Channel != f.Channel || a.Runtime.Major != f.Major || a.Runtime.TesterID != f.TesterID {
+	if a.AccountRevision <= 0 || a.AccountRevision != f.AccountRevision || a.AuthID != f.AuthID || a.GrantID != f.GrantID || a.GrantEpoch != f.GrantEpoch || a.ClientEpoch != f.ClientEpoch || a.Runtime.Client.ID != f.ClientID || a.Runtime.Client.ApplicationID != f.ApplicationID || a.Runtime.Client.Channel != f.Channel || a.Runtime.Major != f.Major || a.Runtime.TesterID != f.TesterID {
 		return a, f, rt, g, nil, d.ErrToken
 	}
 	rt, g, c, err := s.current(ctx, tx, f)

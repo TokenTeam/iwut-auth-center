@@ -52,7 +52,7 @@ func (r *RegistrationRepository) CompleteRegistration(ctx context.Context, c por
 }
 
 func sameRegistrationSnapshot(a, b auth.Operation) bool {
-	return a.OperationID == b.OperationID && a.ProtocolVersion == b.ProtocolVersion && a.ServiceID == b.ServiceID && a.ApplicationID == b.ApplicationID && a.ExpiresAt.Equal(b.ExpiresAt) && a.LocatorKind == b.LocatorKind && a.SchemeVersion == b.SchemeVersion && a.KeyVersion == b.KeyVersion && bytes.Equal(a.Challenge, b.Challenge) && bytes.Equal(a.PublicKey, b.PublicKey) && bytes.Equal(a.LocatorValue, b.LocatorValue) && bytes.Equal(a.LookupKey, b.LookupKey) && bytes.Equal(a.Nonce, b.Nonce) && bytes.Equal(a.Ciphertext, b.Ciphertext)
+	return a.AccountRevision == b.AccountRevision && a.OperationID == b.OperationID && a.ProtocolVersion == b.ProtocolVersion && a.ServiceID == b.ServiceID && a.ApplicationID == b.ApplicationID && a.ExpiresAt.Equal(b.ExpiresAt) && a.LocatorKind == b.LocatorKind && a.SchemeVersion == b.SchemeVersion && a.KeyVersion == b.KeyVersion && bytes.Equal(a.Challenge, b.Challenge) && bytes.Equal(a.PublicKey, b.PublicKey) && bytes.Equal(a.LocatorValue, b.LocatorValue) && bytes.Equal(a.LookupKey, b.LookupKey) && bytes.Equal(a.Nonce, b.Nonce) && bytes.Equal(a.Ciphertext, b.Ciphertext)
 }
 
 // CreateRegisteredUserTx is shared by device and email registration; the caller owns the transaction and proof consumption.
@@ -69,7 +69,7 @@ func (r *RegistrationRepository) CreateRegisteredUserTx(tx context.Context, c po
 		return authport.ErrCredentialRegistered
 	}
 	_, err = r.db.Collection(PrincipalCollection).InsertOne(tx, bson.M{
-		"authId": c.Credential.AuthID, "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": nil, "permissions": bson.A{}, "permissionRevision": int64(1), "createdAt": now, "updatedAt": now,
+		"authId": c.Credential.AuthID, "principalType": "USER", "accountStatus": "ACTIVE", "accountRevision": int64(1), "developerRevision": int64(0), "developerStatus": nil, "permissions": bson.A{}, "permissionRevision": int64(1), "createdAt": now, "updatedAt": now,
 		"profile": bson.M{"entries": bson.A{}, "revision": int64(1), "updatedAt": now},
 	})
 	if err != nil {
@@ -98,5 +98,6 @@ func (r *RegistrationRepository) CreateRegisteredUserTx(tx context.Context, c po
 	if err != nil {
 		return err
 	}
+	c.Session.AccountRevision = 1
 	return r.CreateSessionTx(tx, c.Session, now)
 }

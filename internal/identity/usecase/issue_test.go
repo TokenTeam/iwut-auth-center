@@ -21,7 +21,7 @@ func TestIssueRechecksRetriesAndNeverReleasesUnconfirmedCandidate(t *testing.T) 
 	protocol := testTokens{}
 	token := "valid"
 	now := time.Now().Truncate(time.Second)
-	snapshot := domain.Snapshot{AuthID: "user", PermissionRevision: 1, Permissions: []string{"app.version.review", "auth.reviewer.manage"}, DeveloperStatus: "APPROVED", SessionExpiresAt: now.Add(45 * time.Second)}
+	snapshot := domain.Snapshot{AccountRevision: 1, AuthID: "user", PermissionRevision: 1, Permissions: []string{"app.version.review", "auth.reviewer.manage"}, DeveloperStatus: "APPROVED", SessionExpiresAt: now.Add(45 * time.Second)}
 	var claims []domain.Claims
 	signer := signerFunc(func(_ context.Context, c domain.Claims) (string, error) {
 		claims = append(claims, c)
@@ -67,7 +67,7 @@ func TestIssueBoundariesAndFailure(t *testing.T) {
 	protocol := testTokens{}
 	token := "valid"
 	now := time.Now().Truncate(time.Second)
-	snapshot := domain.Snapshot{AuthID: "user", PermissionRevision: 1, SessionExpiresAt: now.Add(time.Minute)}
+	snapshot := domain.Snapshot{AccountRevision: 1, AuthID: "user", PermissionRevision: 1, SessionExpiresAt: now.Add(time.Minute)}
 	called := false
 	repo := repositoryFunc(func(_ context.Context, _ []byte, p func(domain.Snapshot, time.Time) error) error {
 		called = true

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	drivermongo "go.mongodb.org/mongo-driver/v2/mongo"
+	account "iwut-auth-center/internal/account/domain"
 	identitydomain "iwut-auth-center/internal/identity/domain"
 	"iwut-auth-center/internal/reviewer/domain"
 	"math"
@@ -23,7 +24,7 @@ func reviewerFixture(t *testing.T, skipBootstrap ...bool) (*ReviewerRepository, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.Collection(PrincipalCollection).InsertOne(t.Context(), bson.M{"authId": "admin", "principalType": "USER", "accountStatus": "ACTIVE", "permissions": bson.A{}, "permissionRevision": int64(1), "developerStatus": nil})
+	_, err = db.Collection(PrincipalCollection).InsertOne(t.Context(), bson.M{"authId": "admin", "principalType": "USER", "accountStatus": "ACTIVE", "accountRevision": int64(1), "permissions": bson.A{}, "permissionRevision": int64(1), "developerStatus": nil})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +46,11 @@ func TestReviewerMongoAtomicAuditConcurrencyAndSubjectRules(t *testing.T) {
 	results := make(chan error, 6)
 	for range 6 {
 		wg.Add(1)
-		go func() { defer wg.Done(); _, err := r.Manage(t.Context(), c); results <- err }()
+		go func() {
+			defer wg.Done()
+			_, err := r.Manage(account.WithIdentity(t.Context(), "admin", 1), c)
+			results <- err
+		}()
 	}
 	wg.Wait()
 	close(results)
@@ -60,7 +65,7 @@ func TestReviewerMongoAtomicAuditConcurrencyAndSubjectRules(t *testing.T) {
 	if success != 1 {
 		t.Fatal(success)
 	}
-	state, err := r.Get(t.Context(), "admin", id)
+	state, err := r.Get(account.WithIdentity(t.Context(), "admin", 1), "admin", id)
 	if err != nil || state.Revision != 2 || !state.Has(domain.Reviewer) {
 		t.Fatal(state, err)
 	}
@@ -81,7 +86,7 @@ func TestReviewerMongoAtomicAuditConcurrencyAndSubjectRules(t *testing.T) {
 		}
 		bad := c
 		bad.SubjectAuthID = subject
-		if _, err = r.Manage(t.Context(), bad); !errors.Is(err, domain.ErrSubject) {
+		if _, err = r.Manage(account.WithIdentity(t.Context(), "admin", 1), bad); !errors.Is(err, domain.ErrSubject) {
 			t.Fatal(subject, err)
 		}
 	}
@@ -89,10 +94,10 @@ func TestReviewerMongoAtomicAuditConcurrencyAndSubjectRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = r.Get(t.Context(), "admin", id); !errors.Is(err, domain.ErrForbidden) {
+	if _, err = r.Get(account.WithIdentity(t.Context(), "admin", 1), "admin", id); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatal(err)
 	}
-	if _, err = r.Manage(t.Context(), c); !errors.Is(err, domain.ErrForbidden) {
+	if _, err = r.Manage(account.WithIdentity(t.Context(), "admin", 1), c); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatal(err)
 	}
 }
@@ -113,7 +118,7 @@ func TestReviewerMongoBootstrapDurableNoResurrection(t *testing.T) {
 	if audit["actorType"] != "BOOTSTRAP_COMMAND" || audit["actorAuthId"] != nil {
 		t.Fatal(audit)
 	}
-	state, err := r.Get(t.Context(), id, id)
+	state, err := r.Get(account.WithIdentity(t.Context(), id, 1), id, id)
 	if err != nil || state.Has(domain.Reviewer) || !state.Has(domain.Manager) || state.Revision != 2 {
 		t.Fatal(state, err)
 	}
@@ -145,10 +150,10 @@ func TestReviewerMongoAuditFailureRollsBackAndRevisionExhaustion(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := domain.Command{Permission: domain.Reviewer, ActorAuthID: "admin", SubjectAuthID: id, Action: "GRANT", Reason: "test", ExpectedRevision: 1}
-	if result, err := r.Manage(t.Context(), c); !errors.Is(err, domain.ErrUnavailable) || result.AuthID != "" {
+	if result, err := r.Manage(account.WithIdentity(t.Context(), "admin", 1), c); !errors.Is(err, domain.ErrUnavailable) || result.AuthID != "" {
 		t.Fatal(result, err)
 	}
-	s, err := r.Get(t.Context(), "admin", id)
+	s, err := r.Get(account.WithIdentity(t.Context(), "admin", 1), "admin", id)
 	if err != nil || s.Revision != 1 || s.Has(domain.Reviewer) {
 		t.Fatal(s, err)
 	}
@@ -157,7 +162,7 @@ func TestReviewerMongoAuditFailureRollsBackAndRevisionExhaustion(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.ExpectedRevision = math.MaxInt64
-	if _, err = r.Manage(t.Context(), c); !errors.Is(err, domain.ErrExhausted) {
+	if _, err = r.Manage(account.WithIdentity(t.Context(), "admin", 1), c); !errors.Is(err, domain.ErrExhausted) {
 		t.Fatal(err)
 	}
 }
@@ -168,7 +173,7 @@ func TestReviewerMongoRevokeSynchronizesIdentityIssuance(t *testing.T) {
 			if err := EnsureReviewerSchema(t.Context(), db); err != nil {
 				t.Fatal(err)
 			}
-			_, err := db.Collection(PrincipalCollection).InsertOne(t.Context(), bson.M{"authId": "admin", "principalType": "USER", "accountStatus": "ACTIVE", "permissions": bson.A{}, "permissionRevision": int64(1)})
+			_, err := db.Collection(PrincipalCollection).InsertOne(t.Context(), bson.M{"authId": "admin", "principalType": "USER", "accountStatus": "ACTIVE", "accountRevision": int64(1), "permissions": bson.A{}, "permissionRevision": int64(1)})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -186,7 +191,7 @@ func TestReviewerMongoRevokeSynchronizesIdentityIssuance(t *testing.T) {
 			<-entered
 			revoked := make(chan error, 1)
 			go func() {
-				_, err := repo.Manage(t.Context(), domain.Command{Permission: permission, ActorAuthID: "admin", SubjectAuthID: session.AuthID, Action: "REVOKE", Reason: "access ended", ExpectedRevision: 1})
+				_, err := repo.Manage(account.WithIdentity(t.Context(), "admin", 1), domain.Command{Permission: permission, ActorAuthID: "admin", SubjectAuthID: session.AuthID, Action: "REVOKE", Reason: "access ended", ExpectedRevision: 1})
 				revoked <- err
 			}()
 			select {
@@ -224,7 +229,7 @@ func TestReviewerMongoUnknownCommitReturnsNoSuccess(t *testing.T) {
 	t.Cleanup(func() {
 		_ = admin.RunCommand(context.Background(), bson.D{{Key: "configureFailPoint", Value: "failCommand"}, {Key: "mode", Value: "off"}}).Err()
 	})
-	ctx, cancel := context.WithTimeout(t.Context(), 150*time.Millisecond)
+	ctx, cancel := context.WithTimeout(account.WithIdentity(t.Context(), "admin", 1), 150*time.Millisecond)
 	defer cancel()
 	result, err := r.Manage(ctx, domain.Command{Permission: domain.Reviewer, ActorAuthID: "admin", SubjectAuthID: id, Action: "GRANT", Reason: "test", ExpectedRevision: 1})
 	if err == nil || result.AuthID != "" {
@@ -239,7 +244,7 @@ func TestReviewPermissionsMongoSharedRevisionAndAudit(t *testing.T) {
 	for _, permission := range []string{domain.ProfileReviewer, domain.Reviewer} {
 		go func() {
 			<-start
-			_, err := r.Manage(t.Context(), domain.Command{ActorAuthID: "admin", SubjectAuthID: id, Permission: permission, Action: "GRANT", Reason: "onboarding", ExpectedRevision: 1})
+			_, err := r.Manage(account.WithIdentity(t.Context(), "admin", 1), domain.Command{ActorAuthID: "admin", SubjectAuthID: id, Permission: permission, Action: "GRANT", Reason: "onboarding", ExpectedRevision: 1})
 			results <- err
 		}()
 	}
@@ -256,7 +261,7 @@ func TestReviewPermissionsMongoSharedRevisionAndAudit(t *testing.T) {
 	if success != 1 {
 		t.Fatal(success)
 	}
-	s, err := r.Get(t.Context(), "admin", id)
+	s, err := r.Get(account.WithIdentity(t.Context(), "admin", 1), "admin", id)
 	if err != nil || s.Revision != 2 || len(s.Permissions) != 1 {
 		t.Fatal(s, err)
 	}
@@ -264,11 +269,11 @@ func TestReviewPermissionsMongoSharedRevisionAndAudit(t *testing.T) {
 	if s.Has(remaining) {
 		remaining = domain.Reviewer
 	}
-	s, err = r.Manage(t.Context(), domain.Command{ActorAuthID: "admin", SubjectAuthID: id, Permission: remaining, Action: "GRANT", Reason: "retry", ExpectedRevision: s.Revision})
+	s, err = r.Manage(account.WithIdentity(t.Context(), "admin", 1), domain.Command{ActorAuthID: "admin", SubjectAuthID: id, Permission: remaining, Action: "GRANT", Reason: "retry", ExpectedRevision: s.Revision})
 	if err != nil || s.Revision != 3 || !s.Has(domain.ProfileReviewer) || !s.Has(domain.Reviewer) {
 		t.Fatal(s, err)
 	}
-	s, err = r.Manage(t.Context(), domain.Command{ActorAuthID: "admin", SubjectAuthID: id, Permission: domain.Reviewer, Action: "REVOKE", Reason: "version only", ExpectedRevision: s.Revision})
+	s, err = r.Manage(account.WithIdentity(t.Context(), "admin", 1), domain.Command{ActorAuthID: "admin", SubjectAuthID: id, Permission: domain.Reviewer, Action: "REVOKE", Reason: "version only", ExpectedRevision: s.Revision})
 	if err != nil || s.Revision != 4 || !s.Has(domain.ProfileReviewer) || s.Has(domain.Reviewer) {
 		t.Fatal(s, err)
 	}

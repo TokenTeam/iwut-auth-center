@@ -201,7 +201,7 @@ func TestE2E_IdentityIssuance_ProductionWire(t *testing.T) {
 		if _, e := client.IssueUserIdentityFromSession(callCtx("gateway", user.Session.SessionToken), request); status.Code(e) != codes.Unauthenticated {
 			t.Fatal(e)
 		}
-		mutate(bson.M{"principalType": "USER", "accountStatus": "ACTIVE"})
+		mutate(bson.M{"principalType": "USER", "accountStatus": "ACTIVE", "accountRevision": int64(1)})
 	}
 	expiry := time.Now().Add(5 * time.Second).Truncate(time.Second)
 	if _, e := database.Collection(mongoadapter.SessionCollection).UpdateOne(t.Context(), bson.M{"sessionId": user.Session.SessionId}, bson.M{"$set": bson.M{"expiresAt": expiry}}); e != nil {

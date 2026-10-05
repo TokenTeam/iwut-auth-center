@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	account "iwut-auth-center/internal/account/domain"
 
 	"github.com/go-kratos/kratos/v2/middleware"
 	kratostransport "github.com/go-kratos/kratos/v2/transport"
@@ -35,9 +36,9 @@ func userEndpointAuthenticationMiddleware(service *ServiceIdentityVerifier, prof
 			if developerApplicationMethod(tr.Operation()) || oauthGrantMethod(tr.Operation()) {
 				return handler(ctx, request)
 			}
-			if isPlatformAdministratorOperation(tr.Operation()) {
+			if isPlatformAdministratorOperation(tr.Operation()) || accountManagementMethod(tr.Operation()) {
 				if profile == nil {
-					return nil, transportStatus(codes.Unauthenticated, "USER_IDENTITY_REQUIRED", "user identity is required")
+					return nil, accountError(account.ErrIdentity)
 				}
 				return profile(handler)(ctx, request)
 			}

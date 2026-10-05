@@ -523,7 +523,7 @@ func TestEmailLoginDisabledEligibilityRemainsFrozen(t *testing.T) {
 	if e != nil {
 		t.Fatal("disabled mailbox begin leaked account status", e)
 	}
-	if _, e = f.db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": f.owner.AuthID}, bson.M{"$set": bson.M{"accountStatus": "ACTIVE"}}); e != nil {
+	if _, e = f.db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": f.owner.AuthID}, bson.M{"$set": bson.M{"accountStatus": "ACTIVE", "accountRevision": int64(1)}}); e != nil {
 		t.Fatal(e)
 	}
 	if _, e = f.login.Complete(t.Context(), challenge.OperationID, "00005678", loginSignature(t, key, challenge), "peer"); !errors.Is(e, d.ErrFailed) {

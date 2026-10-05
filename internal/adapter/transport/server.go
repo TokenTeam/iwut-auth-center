@@ -17,6 +17,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
+	accountpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/account_management"
 	authv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 	developerapplicationpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_application"
 	developerstatusv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_status"
@@ -45,6 +46,7 @@ type ServerConfig struct {
 // UserEndpoints is an optional, fully validated runtime assembled before listening.
 type UserEndpoints struct {
 	PlatformAdministrator         *PlatformAdministratorService
+	AccountManagement             *AccountManagementService
 	DeveloperApplication          *DeveloperApplicationService
 	EmailBinding                  *EmailBindingService
 	EmailLogin                    *EmailLoginService
@@ -143,6 +145,9 @@ func newGRPCServer(
 		if endpoints.PlatformAdministrator != nil {
 			adminpb.RegisterPlatformAdministratorServiceServer(server, endpoints.PlatformAdministrator)
 		}
+		if endpoints.AccountManagement != nil {
+			accountpb.RegisterAccountManagementServiceServer(server, endpoints.AccountManagement)
+		}
 		authv1.RegisterAuthenticationServiceServer(server, endpoints.Authentication)
 		profilev1.RegisterUserProfileServiceServer(server, endpoints.Profile)
 		if endpoints.Reviewer != nil {
@@ -200,6 +205,9 @@ func newHTTPServer(configuration ServerConfig, verifier *ServiceIdentityVerifier
 		if endpoints.PlatformAdministrator != nil {
 			adminpb.RegisterPlatformAdministratorServiceHTTPServer(server, endpoints.PlatformAdministrator)
 		}
+		if endpoints.AccountManagement != nil {
+			accountpb.RegisterAccountManagementServiceHTTPServer(server, endpoints.AccountManagement)
+		}
 		authv1.RegisterAuthenticationServiceHTTPServer(server, endpoints.Authentication)
 		profilev1.RegisterUserProfileServiceHTTPServer(server, endpoints.Profile)
 		if endpoints.Reviewer != nil {
@@ -242,6 +250,8 @@ func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 		switch value.(type) {
 		case *adminpb.ManagePlatformAdministratorRequest, *adminpb.GetPlatformAdministratorRequest, *adminpb.ListPlatformAdministratorsRequest:
 			limit = min(limit, 16*1024)
+		case *accountpb.ManageUserAccountStatusRequest, *accountpb.GetUserAccountStatusRequest:
+			limit = 16 * 1024
 		}
 		if _, ok := value.(*profilev1.EditOwnProfileRequest); ok {
 			limit = profiledomain.MaxMessageBytes

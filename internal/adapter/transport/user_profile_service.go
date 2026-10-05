@@ -108,6 +108,8 @@ func profileError(e error) error {
 	code := codes.Internal
 	reason := "INTERNAL_ERROR"
 	switch {
+	case errors.Is(e, domain.ErrIdentity):
+		return transportStatus(codes.Unauthenticated, domain.ErrIdentity.Error(), "invalid user identity")
 	case errors.Is(e, domain.ErrInvalidRevision), errors.Is(e, domain.ErrInvalidEdit), errors.Is(e, domain.ErrNotDefined), errors.Is(e, domain.ErrInvalidValue):
 		code = codes.InvalidArgument
 	case errors.Is(e, domain.ErrDenied), errors.Is(e, domain.ErrDisabled):

@@ -8,7 +8,7 @@ import (
 
 func TestEmailSessionProvenanceFailsClosed(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	valid := SessionDocument{SessionID: "11111111-1111-4111-8111-111111111111", AuthID: "user", AuthenticationMethod: "EMAIL_CODE_AND_DEVICE", CredentialID: "22222222-2222-4222-8222-222222222222", TokenDigest: make([]byte, 32), EmailBindingRevision: 1, CreatedAt: now, AuthenticatedAt: now, LastUsedAt: now, ExpiresAt: now.Add(time.Hour)}
+	valid := SessionDocument{AccountRevision: 1, SessionID: "11111111-1111-4111-8111-111111111111", AuthID: "user", AuthenticationMethod: "EMAIL_CODE_AND_DEVICE", CredentialID: "22222222-2222-4222-8222-222222222222", TokenDigest: make([]byte, 32), EmailBindingRevision: 1, CreatedAt: now, AuthenticatedAt: now, LastUsedAt: now, ExpiresAt: now.Add(time.Hour)}
 	raw, e := bson.Marshal(valid)
 	if e != nil {
 		t.Fatal(e)

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -21,6 +22,7 @@ const AppAudience = "iwut-app-center"
 func KnownAudience(a string) bool { return a == AuthAudience || a == AppAudience }
 
 type Snapshot struct {
+	AccountRevision    int64
 	AuthID             string
 	Permissions        []string
 	PermissionRevision int64
@@ -28,6 +30,7 @@ type Snapshot struct {
 	SessionExpiresAt   time.Time
 }
 type Claims struct {
+	AccountRevision       string
 	AuthID, Audience, JTI string
 	IssuedAt, ExpiresAt   int64
 	Permissions           []string
@@ -39,7 +42,7 @@ type Issued struct {
 }
 
 func (s Snapshot) Valid() bool {
-	if s.AuthID == "" || s.PermissionRevision < 1 || s.SessionExpiresAt.IsZero() {
+	if s.AccountRevision <= 0 || s.AuthID == "" || s.PermissionRevision < 1 || s.SessionExpiresAt.IsZero() {
 		return false
 	}
 	seen := map[string]bool{}
@@ -69,6 +72,9 @@ func Project(s Snapshot, audience, jti string, now time.Time, ttl time.Duration)
 		return Claims{}, ErrSessionInvalid
 	}
 	c := Claims{AuthID: s.AuthID, Audience: audience, JTI: jti, IssuedAt: iat, ExpiresAt: exp, Permissions: []string{}}
+	if audience == AuthAudience {
+		c.AccountRevision = strconv.FormatInt(s.AccountRevision, 10)
+	}
 	allowed := []string{"auth.account.manage", "auth.developer.manage", "auth.platform-admin.manage", "auth.reviewer.manage"}
 	if audience == AppAudience {
 		allowed = []string{"app.profile.review", "app.version.review"}

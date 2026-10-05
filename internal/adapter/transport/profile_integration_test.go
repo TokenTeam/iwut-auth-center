@@ -41,7 +41,7 @@ func TestProfileRealMongoAndListener(t *testing.T) {
 		t.Fatal(e)
 	}
 	for _, id := range []string{"user1", "user2"} {
-		_, e = db.Collection(ma.PrincipalCollection).InsertOne(ctx, bson.M{"authId": id, "principalType": "USER", "accountStatus": "ACTIVE", "profile": bson.M{"entries": bson.A{}, "revision": int64(1), "updatedAt": time.Now()}})
+		_, e = db.Collection(ma.PrincipalCollection).InsertOne(ctx, bson.M{"authId": id, "principalType": "USER", "accountStatus": "ACTIVE", "accountRevision": int64(1), "profile": bson.M{"entries": bson.A{}, "revision": int64(1), "updatedAt": time.Now()}})
 		if e != nil {
 			t.Fatal(e)
 		}

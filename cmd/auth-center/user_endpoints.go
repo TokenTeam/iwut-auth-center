@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	accountusecase "iwut-auth-center/internal/account/usecase"
 	"iwut-auth-center/internal/adapter/emailloginprotocol"
 	"iwut-auth-center/internal/adapter/emailprotocol"
 	"iwut-auth-center/internal/adapter/identitysigner"
@@ -210,8 +211,18 @@ func provideUserEndpoints(configuration config.Config, database *drivermongo.Dat
 		}
 		administrator = transport.NewPlatformAdministratorService(adminusecase.New(repo, gate))
 	}
-	return &transport.UserEndpoints{
-		PlatformAdministrator:         administrator,
+	var accountManagement *transport.AccountManagementService
+	if ac := configuration.AccountManagement; ac != nil {
+		if err := mongoadapter.EnsureAccountManagementSchema(ctx, database); err != nil {
+			return nil, err
+		}
+		repo, err := mongoadapter.NewAccountManagementRepository(repository)
+		if err != nil {
+			return nil, err
+		}
+		accountManagement = transport.NewAccountManagementService(accountusecase.NewConfigured(repo, ac.ReadPerMinute, ac.WritePerMinute, ac.MaxBuckets))
+	}
+	return &transport.UserEndpoints{AccountManagement: accountManagement, PlatformAdministrator: administrator,
 		DeveloperApplication:          developerApplication,
 		EmailBinding:                  emailService,
 		EmailLogin:                    emailLoginService,
