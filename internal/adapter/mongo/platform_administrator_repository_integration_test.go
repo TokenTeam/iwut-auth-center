@@ -175,7 +175,7 @@ func TestPlatformAdministratorMongoPartialAndDisabledCannotProtectLast(t *testin
 	if _, e = r.Get(account.WithIdentity(t.Context(), actor, 1), actor, "other"); !errors.Is(e, d.ErrUnavailable) {
 		t.Fatal(e)
 	}
-	if _, e = r.Get(account.WithIdentity(t.Context(), actor, 1), "other", actor); !errors.Is(e, d.ErrUnavailable) {
+	if _, e = r.Get(account.WithIdentity(t.Context(), "other", 1), "other", actor); !errors.Is(e, d.ErrForbidden) {
 		t.Fatal(e)
 	}
 }
