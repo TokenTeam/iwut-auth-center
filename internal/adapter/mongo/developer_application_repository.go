@@ -317,7 +317,7 @@ func (r *DeveloperApplicationRepository) claimHandle(ctx context.Context, authID
 	var owner bson.Raw
 	err := collection.FindOne(ctx, bson.M{"developerHandle": handle}, options.FindOne().SetCollation(&options.Collation{Locale: "simple"})).Decode(&owner)
 	if err == nil {
-		if !validHandleDocument(owner) || owner.Lookup("authId").StringValue() == authID {
+		if (!validHandleDocument(owner) && !validTerminalHandleDocument(owner)) || owner.Lookup("authId").StringValue() == authID {
 			return d.ErrApplicationUnavailable
 		}
 		return d.ErrHandleTaken
@@ -396,4 +396,23 @@ func (r *DeveloperApplicationRepository) emailRevision(ctx context.Context, id s
 		return 0, d.ErrApplicationUnavailable
 	}
 	return rev, nil
+}
+
+func validTerminalHandleDocument(raw bson.Raw) bool {
+	if !identityFields(raw, map[string]bson.Type{"authId": bson.TypeString, "developerHandle": bson.TypeString, "claimedAt": bson.TypeDateTime, "terminal": bson.TypeBoolean}) || !raw.Lookup("terminal").Boolean() || raw.Lookup("authId").StringValue() == "" || raw.Lookup("claimedAt").DateTime() <= 0 {
+		return false
+	}
+	els, e := raw.Elements()
+	if e != nil {
+		return false
+	}
+	for _, v := range els {
+		switch v.Key() {
+		case "_id", "authId", "developerHandle", "claimedAt", "terminal":
+		default:
+			return false
+		}
+	}
+	handle, e := d.NormalizeDeveloperHandle(raw.Lookup("developerHandle").StringValue())
+	return e == nil && handle == raw.Lookup("developerHandle").StringValue()
 }

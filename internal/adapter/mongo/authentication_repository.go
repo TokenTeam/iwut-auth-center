@@ -280,7 +280,14 @@ func (r *AuthenticationRepository) ConsumeOperationTx(ctx context.Context, id, p
 }
 
 func (r *AuthenticationRepository) InsertCredentialTx(ctx context.Context, credential domain.Credential) error {
-	_, err := r.database.Collection(CredentialCollection).InsertOne(ctx, credentialDocument(credential))
+	occupied, err := r.database.Collection(CredentialTombstoneCollection).CountDocuments(ctx, bson.M{"fingerprint": credential.Fingerprint})
+	if err != nil {
+		return err
+	}
+	if occupied != 0 {
+		return port.ErrCredentialRegistered
+	}
+	_, err = r.database.Collection(CredentialCollection).InsertOne(ctx, credentialDocument(credential))
 	return err
 }
 
