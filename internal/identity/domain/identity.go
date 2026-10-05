@@ -53,7 +53,7 @@ func (s Snapshot) Valid() bool {
 		seen[p] = true
 	}
 	switch s.DeveloperStatus {
-	case "", "PENDING", "APPROVED", "REJECTED", "SUSPENDED":
+	case "", "PENDING", "APPROVED", "REJECTED", "SUSPENDED", "WITHDRAWN":
 	default:
 		return false
 	}

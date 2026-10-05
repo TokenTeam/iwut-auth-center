@@ -18,10 +18,12 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	accountpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/account_management"
+	ownerpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/account_owner_exit"
 	authv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 	developerapplicationpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_application"
 	developermanagementpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_management"
 	developerstatusv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_status"
+	withdrawalpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_withdrawal"
 	emailv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_binding"
 	emailloginv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_login"
 	identityv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/identity"
@@ -36,12 +38,14 @@ import (
 )
 
 type ServerConfig struct {
-	OAuthGrant      *OAuthGrantService
-	OAuthDelegation *OAuthDelegationService
-	OAuth           *OAuthHTTP
-	HTTPAddr        string
-	GRPCAddr        string
-	UserEndpoints   *UserEndpoints
+	OwnerExitDecision   *OwnerExitDecisionService
+	DeveloperWithdrawal *DeveloperWithdrawalService
+	OAuthGrant          *OAuthGrantService
+	OAuthDelegation     *OAuthDelegationService
+	OAuth               *OAuthHTTP
+	HTTPAddr            string
+	GRPCAddr            string
+	UserEndpoints       *UserEndpoints
 }
 
 // UserEndpoints is an optional, fully validated runtime assembled before listening.
@@ -124,6 +128,12 @@ func newGRPCServer(
 		options = append(options, kgrpc.Middleware(userEndpointAuthenticationMiddleware(verifier, nil, nil, false)))
 	}
 	server := kgrpc.NewServer(options...)
+	if configuration.OwnerExitDecision != nil {
+		ownerpb.RegisterAccountOwnerExitDecisionServiceServer(server, configuration.OwnerExitDecision)
+	}
+	if configuration.DeveloperWithdrawal != nil {
+		withdrawalpb.RegisterDeveloperWithdrawalServiceServer(server, configuration.DeveloperWithdrawal)
+	}
 	if configuration.OAuthGrant != nil {
 		gp.RegisterOAuthGrantServiceServer(server, configuration.OAuthGrant)
 	}
@@ -194,6 +204,9 @@ func newHTTPServer(configuration ServerConfig, verifier *ServiceIdentityVerifier
 		)
 	}
 	server := khttp.NewServer(options...)
+	if configuration.DeveloperWithdrawal != nil {
+		withdrawalpb.RegisterDeveloperWithdrawalServiceHTTPServer(server, configuration.DeveloperWithdrawal)
+	}
 	if configuration.OAuthGrant != nil {
 		gp.RegisterOAuthGrantServiceHTTPServer(server, configuration.OAuthGrant)
 	}
@@ -303,6 +316,8 @@ func invalidHTTPInput(r *http.Request) error {
 	switch {
 	case r.URL.Path == "/v1/developers:manage-status" || r.URL.Path == "/v1/developers:get-managed-status":
 		reason = "INVALID_DEVELOPER_MANAGEMENT_REQUEST"
+	case strings.HasPrefix(r.URL.Path, "/v1/users/me/developer-withdrawal:"):
+		reason = "INVALID_DEVELOPER_WITHDRAWAL_REQUEST"
 	case strings.HasPrefix(r.URL.Path, "/v1/platform-administrators:"):
 		reason = "INVALID_PLATFORM_ADMIN_REQUEST"
 	case strings.HasPrefix(r.URL.Path, "/v1/users/me/application-grants"):
@@ -332,6 +347,9 @@ func invalidHTTPInput(r *http.Request) error {
 
 func oversizedHTTPInput(r *http.Request) error {
 	reason := "AUTHENTICATION_INPUT_TOO_LARGE"
+	if strings.HasPrefix(r.URL.Path, "/v1/users/me/developer-withdrawal:") {
+		reason = "DEVELOPER_WITHDRAWAL_REQUEST_TOO_LARGE"
+	}
 	if developerApplicationHTTPPath(r.URL.Path) {
 		reason = "DEVELOPER_APPLICATION_REQUEST_TOO_LARGE"
 	}
@@ -365,7 +383,7 @@ func authHTTPErrorEncoder(w http.ResponseWriter, r *http.Request, err error) {
 	// RESOURCE_EXHAUSTED covers both rate limiting (429) and payload limits
 	// (413); the UC's stable reason determines which HTTP status applies.
 	switch converted.Reason {
-	case "DEVELOPER_APPLICATION_REQUEST_TOO_LARGE", "EMAIL_LOGIN_REQUEST_TOO_LARGE", "EMAIL_REQUEST_TOO_LARGE", "REGISTRATION_INPUT_TOO_LARGE", "AUTHENTICATION_INPUT_TOO_LARGE", profiledomain.ErrLimit.Error():
+	case "DEVELOPER_WITHDRAWAL_REQUEST_TOO_LARGE", "DEVELOPER_APPLICATION_REQUEST_TOO_LARGE", "EMAIL_LOGIN_REQUEST_TOO_LARGE", "EMAIL_REQUEST_TOO_LARGE", "REGISTRATION_INPUT_TOO_LARGE", "AUTHENTICATION_INPUT_TOO_LARGE", profiledomain.ErrLimit.Error():
 		converted.Code = http.StatusRequestEntityTooLarge
 	case "DEVELOPER_RESTORE_BLOCKED", "DEVELOPER_REVISION_EXHAUSTED", "ACCOUNT_REVISION_EXHAUSTED", "PLATFORM_ADMIN_GRANT_BLOCKED", "LAST_PLATFORM_ADMIN_REQUIRED", "PERMISSION_REVISION_EXHAUSTED":
 		converted.Code = http.StatusConflict

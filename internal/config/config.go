@@ -33,6 +33,7 @@ type LookupEnv func(key string) (value string, found bool)
 
 type Config struct {
 	DeveloperManagement      *DeveloperManagement
+	OwnerExit                *OwnerExit
 	AccountManagement        *AccountManagement
 	OAuth                    *OAuth
 	PlatformAdministrator    *PlatformAdministrator
@@ -171,8 +172,13 @@ func Load(lookup LookupEnv) (Config, error) {
 	if oauth != nil && userEndpoints == nil {
 		return Config{}, ErrInvalidConfiguration
 	}
+	ownerExit, err := loadOwnerExit(lookup, userEndpoints, callers)
+	if err != nil {
+		return Config{}, err
+	}
 	return Config{
 		DeveloperManagement:   developerManagement,
+		OwnerExit:             ownerExit,
 		AccountManagement:     accountManagement,
 		PlatformAdministrator: platformAdministrator,
 		OAuth:                 oauth,

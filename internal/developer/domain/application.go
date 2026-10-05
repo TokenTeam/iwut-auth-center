@@ -62,7 +62,7 @@ func (s ApplicationState) Apply(ready bool, candidate string) (bool, error) {
 		}
 	case DeveloperStatusPending:
 		return false, ErrApplicationExists
-	case DeveloperStatusRejected, DeveloperStatusSuspended:
+	case DeveloperStatusRejected, DeveloperStatusSuspended, DeveloperStatusWithdrawn:
 		return false, ErrReapplication
 	}
 	if s.EmailRevision == 0 {
@@ -81,7 +81,7 @@ func (s ApplicationState) Blockers(ready bool) []ApplicationBlocker {
 		}
 	case DeveloperStatusPending:
 		return []ApplicationBlocker{ExistingApplication}
-	case DeveloperStatusRejected, DeveloperStatusSuspended:
+	case DeveloperStatusRejected, DeveloperStatusSuspended, DeveloperStatusWithdrawn:
 		return []ApplicationBlocker{ReapplicationNotAllowed}
 	}
 	out := []ApplicationBlocker{}

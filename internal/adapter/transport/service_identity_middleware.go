@@ -62,6 +62,8 @@ func serviceIdentityMiddleware(verifier *ServiceIdentityVerifier) middleware.Mid
 
 func permissionForOperation(operation string) (string, bool) {
 	switch operation {
+	case "/auth_center.v1.account_owner_exit.AccountOwnerExitDecisionService/GetAccountOwnerExitDecision":
+		return PermissionOwnerExitRead, true
 	case "/auth_center.v1.oauth_delegation.OAuthDelegationService/IssueDelegationContext":
 		return PermissionOAuthDelegationIssue, true
 	case identityv1.UserIdentityService_IssueUserIdentityFromSession_FullMethodName:

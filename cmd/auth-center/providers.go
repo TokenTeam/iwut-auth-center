@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/go-kratos/kratos/v2"
+	kt "github.com/go-kratos/kratos/v2/transport"
 	drivermongo "go.mongodb.org/mongo-driver/v2/mongo"
 
 	mongoadapter "iwut-auth-center/internal/adapter/mongo"
@@ -50,13 +51,17 @@ func provideMongoDatabase(client *drivermongo.Client, configuration config.Confi
 	return database, nil
 }
 
-func provideServerConfig(configuration config.Config, endpoints *transport.UserEndpoints, oauth *oauthRuntime) transport.ServerConfig {
-	return transport.ServerConfig{HTTPAddr: configuration.HTTPAddr, GRPCAddr: configuration.GRPCAddr, UserEndpoints: endpoints, OAuth: oauth.HTTP, OAuthGrant: oauth.Grant, OAuthDelegation: oauth.Delegation}
+func provideServerConfig(configuration config.Config, endpoints *transport.UserEndpoints, oauth *oauthRuntime, owner *ownerExitRuntime) transport.ServerConfig {
+	return transport.ServerConfig{OwnerExitDecision: owner.Decision, DeveloperWithdrawal: owner.Withdrawal, HTTPAddr: configuration.HTTPAddr, GRPCAddr: configuration.GRPCAddr, UserEndpoints: endpoints, OAuth: oauth.HTTP, OAuthGrant: oauth.Grant, OAuthDelegation: oauth.Delegation}
 }
 
-func provideApp(servers *transport.Servers) *kratos.App {
+func provideApp(servers *transport.Servers, owner *ownerExitRuntime) *kratos.App {
+	all := []kt.Server{servers.HTTP, servers.GRPC}
+	if owner.Worker != nil {
+		all = append(all, owner.Worker)
+	}
 	return kratos.New(
 		kratos.Name("iwut-auth-center"),
-		kratos.Server(servers.HTTP, servers.GRPC),
+		kratos.Server(all...),
 	)
 }

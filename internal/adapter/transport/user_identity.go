@@ -147,7 +147,7 @@ func (v *UserIdentityVerifier) verifyIdentity(token string) (verifiedUser, error
 			return verifiedUser{}, invalid
 		}
 		switch status {
-		case "PENDING", "APPROVED", "REJECTED", "SUSPENDED":
+		case "PENDING", "APPROVED", "REJECTED", "SUSPENDED", "WITHDRAWN":
 		default:
 			return verifiedUser{}, invalid
 		}
