@@ -32,24 +32,44 @@ const (
 	DeveloperStatusApproved  DeveloperStatus = "APPROVED"
 	DeveloperStatusRejected  DeveloperStatus = "REJECTED"
 	DeveloperStatusSuspended DeveloperStatus = "SUSPENDED"
+	DeveloperStatusWithdrawn DeveloperStatus = "WITHDRAWN"
 )
 
 func (status DeveloperStatus) IsValid() bool {
 	switch status {
-	case DeveloperStatusPending, DeveloperStatusApproved, DeveloperStatusRejected, DeveloperStatusSuspended:
+	case DeveloperStatusPending, DeveloperStatusApproved, DeveloperStatusRejected, DeveloperStatusSuspended, DeveloperStatusWithdrawn:
 		return true
 	default:
 		return false
 	}
 }
 
+type AccountStatus string
+
+const (
+	AccountActive   AccountStatus = "ACTIVE"
+	AccountDisabled AccountStatus = "DISABLED"
+	AccountClosed   AccountStatus = "CLOSED"
+)
+
 type Principal struct {
+	accountStatus   AccountStatus
 	authID          AuthID
 	principalType   PrincipalType
 	developerStatus DeveloperStatus
 }
 
 func NewPrincipal(authID AuthID, principalType PrincipalType, status DeveloperStatus) (Principal, error) {
+	return NewPrincipalWithAccountStatus(authID, principalType, status, AccountActive)
+}
+
+func NewPrincipalWithAccountStatus(authID AuthID, principalType PrincipalType, status DeveloperStatus, account AccountStatus) (Principal, error) {
+	if principalType == PrincipalTypeUser && account != AccountActive && account != AccountDisabled && account != AccountClosed {
+		return Principal{}, errors.New("invalid account status")
+	}
+	if account == AccountClosed && (principalType != PrincipalTypeUser || status != "") {
+		return Principal{}, errors.New("invalid closed principal")
+	}
 	if authID == "" {
 		return Principal{}, errors.New("auth id is required")
 	}
@@ -62,9 +82,11 @@ func NewPrincipal(authID AuthID, principalType PrincipalType, status DeveloperSt
 	if principalType == PrincipalTypeSystem && status != "" {
 		return Principal{}, errors.New("system principal cannot have developer status")
 	}
-	return Principal{authID: authID, principalType: principalType, developerStatus: status}, nil
+	return Principal{authID: authID, principalType: principalType, developerStatus: status, accountStatus: account}, nil
 }
 
 func (principal Principal) AuthID() AuthID                   { return principal.authID }
 func (principal Principal) PrincipalType() PrincipalType     { return principal.principalType }
 func (principal Principal) DeveloperStatus() DeveloperStatus { return principal.developerStatus }
+
+func (p Principal) AccountStatus() AccountStatus { return p.accountStatus }

@@ -25,14 +25,14 @@ func TestPrincipalRepository_BatchGetAndUniqueAuthID(t *testing.T) {
 	}
 	collection := database.Collection(PrincipalCollection)
 	_, err := collection.InsertMany(t.Context(), []any{
-		bson.M{"authId": "user-a", "principalType": "USER", "developerStatus": "APPROVED"},
-		bson.M{"authId": "user-b", "principalType": "USER", "developerStatus": "SUSPENDED"},
-		bson.M{"authId": "ordinary-user", "principalType": "USER", "developerStatus": nil},
+		bson.M{"authId": "user-a", "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": "APPROVED"},
+		bson.M{"authId": "user-b", "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": "SUSPENDED"},
+		bson.M{"authId": "ordinary-user", "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": nil},
 	})
 	if err != nil {
 		t.Fatalf("insert fixtures: %v", err)
 	}
-	_, err = collection.InsertOne(t.Context(), bson.M{"authId": "user-a", "principalType": "USER", "developerStatus": "PENDING"})
+	_, err = collection.InsertOne(t.Context(), bson.M{"authId": "user-a", "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": "PENDING"})
 	if !drivermongo.IsDuplicateKeyError(err) {
 		t.Fatalf("duplicate insert error = %v, want duplicate key", err)
 	}
@@ -63,7 +63,7 @@ func TestPrincipalRepository_CorruptRecordFailsClosed(t *testing.T) {
 		t.Fatalf("EnsurePrincipalSchema() error = %v", err)
 	}
 	_, err := database.Collection(PrincipalCollection).InsertOne(t.Context(), bson.M{
-		"authId": "corrupt-user", "principalType": "USER", "developerStatus": "UNKNOWN",
+		"authId": "corrupt-user", "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": "UNKNOWN",
 	})
 	if err != nil {
 		t.Fatalf("insert corrupt fixture: %v", err)

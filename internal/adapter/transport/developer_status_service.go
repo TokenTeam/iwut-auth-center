@@ -35,12 +35,18 @@ func (service *DeveloperStatusService) BatchGetDeveloperStatuses(
 	responseEntries := make([]*developerstatusv1.DeveloperStatusEntry, 0, len(entries))
 	for _, entry := range entries {
 		status, ok := developerStatusToProto(entry.DeveloperStatus)
-		if !ok {
+		account, accountOK := developerstatusv1.AccountStatus_value["ACCOUNT_STATUS_"+string(entry.AccountStatus)]
+		if entry.AccountStatus == domain.AccountClosed && entry.DeveloperStatus == "" {
+			status = developerstatusv1.DeveloperStatus_DEVELOPER_STATUS_UNSPECIFIED
+			ok = true
+		}
+		if !ok || !accountOK || account == 0 {
 			return nil, toTransportError(errInternalTransport)
 		}
 		responseEntries = append(responseEntries, &developerstatusv1.DeveloperStatusEntry{
 			AuthId:          entry.AuthID.String(),
 			DeveloperStatus: status,
+			AccountStatus:   developerstatusv1.AccountStatus(account),
 		})
 	}
 	return &developerstatusv1.BatchGetDeveloperStatusesResponse{Entries: responseEntries}, nil
@@ -54,6 +60,8 @@ func developerStatusToProto(status domain.DeveloperStatus) (developerstatusv1.De
 		return developerstatusv1.DeveloperStatus_DEVELOPER_STATUS_APPROVED, true
 	case domain.DeveloperStatusRejected:
 		return developerstatusv1.DeveloperStatus_DEVELOPER_STATUS_REJECTED, true
+	case domain.DeveloperStatusWithdrawn:
+		return developerstatusv1.DeveloperStatus_DEVELOPER_STATUS_WITHDRAWN, true
 	case domain.DeveloperStatusSuspended:
 		return developerstatusv1.DeveloperStatus_DEVELOPER_STATUS_SUSPENDED, true
 	default:

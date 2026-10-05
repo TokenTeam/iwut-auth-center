@@ -53,7 +53,7 @@ func TestDeveloperStatusContractMatchesPlatformV1(t *testing.T) {
 		t.Fatalf("response descriptor = %v", response.Fields())
 	}
 	entry := (&developerstatusv1.DeveloperStatusEntry{}).ProtoReflect().Descriptor()
-	if entry.Fields().Len() != 2 || int32(entry.Fields().ByName("auth_id").Number()) != 1 || int32(entry.Fields().ByName("developer_status").Number()) != 2 {
+	if entry.Fields().Len() != 3 || int32(entry.Fields().ByName("auth_id").Number()) != 1 || int32(entry.Fields().ByName("developer_status").Number()) != 2 {
 		t.Fatalf("entry descriptor = %v", entry.Fields())
 	}
 }

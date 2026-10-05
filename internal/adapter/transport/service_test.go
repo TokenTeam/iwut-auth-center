@@ -40,8 +40,8 @@ func TestDeveloperStatusService_BR_DEV_003_PreservesRequestOrder(t *testing.T) {
 	first, _ := developerdomain.NewAuthID("suspended")
 	second, _ := developerdomain.NewAuthID("approved")
 	handler := &fakeDeveloperStatusHandler{entries: []developerusecase.DeveloperStatusEntry{
-		{AuthID: first, DeveloperStatus: developerdomain.DeveloperStatusSuspended},
-		{AuthID: second, DeveloperStatus: developerdomain.DeveloperStatusApproved},
+		{AccountStatus: developerdomain.AccountActive, AuthID: first, DeveloperStatus: developerdomain.DeveloperStatusSuspended},
+		{AccountStatus: developerdomain.AccountActive, AuthID: second, DeveloperStatus: developerdomain.DeveloperStatusApproved},
 	}}
 	service := NewDeveloperStatusService(handler)
 

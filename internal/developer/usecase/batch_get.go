@@ -17,6 +17,7 @@ var (
 )
 
 type DeveloperStatusEntry struct {
+	AccountStatus   domain.AccountStatus
 	AuthID          domain.AuthID
 	DeveloperStatus domain.DeveloperStatus
 }
@@ -69,10 +70,10 @@ func (handler *BatchGetDeveloperStatusesHandler) Handle(
 	entries := make([]DeveloperStatusEntry, 0, len(authIDs))
 	for _, authID := range authIDs {
 		principal, found := byID[authID]
-		if !found || principal.PrincipalType() != domain.PrincipalTypeUser || !principal.DeveloperStatus().IsValid() {
+		if !found || principal.PrincipalType() != domain.PrincipalTypeUser || principal.AccountStatus() != domain.AccountClosed && !principal.DeveloperStatus().IsValid() {
 			return nil, ErrDeveloperStatusNotFound
 		}
-		entries = append(entries, DeveloperStatusEntry{AuthID: authID, DeveloperStatus: principal.DeveloperStatus()})
+		entries = append(entries, DeveloperStatusEntry{AuthID: authID, DeveloperStatus: principal.DeveloperStatus(), AccountStatus: principal.AccountStatus()})
 	}
 	if len(byID) != len(authIDs) {
 		return nil, fmt.Errorf("%w: repository returned unrequested principal", port.ErrDeveloperStatusUnavailable)

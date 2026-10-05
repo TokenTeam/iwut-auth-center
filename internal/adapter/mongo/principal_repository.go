@@ -16,6 +16,7 @@ import (
 const PrincipalCollection = "auth_principals"
 
 type principalDocument struct {
+	AccountStatus   string  `bson:"accountStatus"`
 	AuthID          string  `bson:"authId"`
 	PrincipalType   string  `bson:"principalType"`
 	DeveloperStatus *string `bson:"developerStatus"`
@@ -67,6 +68,7 @@ func (repository *PrincipalRepository) BatchGet(
 			"authId":          1,
 			"principalType":   1,
 			"developerStatus": 1,
+			"accountStatus":   1,
 		}),
 	)
 	if err != nil {
@@ -101,7 +103,7 @@ func principalFromDocument(document principalDocument) (domain.Principal, error)
 	if document.DeveloperStatus != nil {
 		status = domain.DeveloperStatus(*document.DeveloperStatus)
 	}
-	return domain.NewPrincipal(authID, domain.PrincipalType(document.PrincipalType), status)
+	return domain.NewPrincipalWithAccountStatus(authID, domain.PrincipalType(document.PrincipalType), status, domain.AccountStatus(document.AccountStatus))
 }
 
 var _ port.PrincipalRepository = (*PrincipalRepository)(nil)
