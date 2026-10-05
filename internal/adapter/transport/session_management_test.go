@@ -21,6 +21,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protowire"
@@ -189,8 +190,20 @@ func TestSessionManagementRequestAndWireBoundaries(t *testing.T) {
 		{"oversize", bytesField(2, strings.Repeat("a", 16384)), &pb.ListOwnSessionsRequest{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := codec.Unmarshal(tc.data, tc.request); status.Code(err) != codes.InvalidArgument {
-				t.Fatal(err)
+			if err := codec.Unmarshal(tc.data, tc.request); err != nil {
+				t.Fatalf("codec must defer UC020 rejection to handler: %v", err)
+			}
+			h := &sessionManagementStub{}
+			service := NewSessionManagementService(h, &sessionManagementGate{})
+			var err error
+			switch request := tc.request.(type) {
+			case *pb.ListOwnSessionsRequest:
+				_, err = service.ListOwnSessions(managementContext(t), request)
+			case *pb.RevokeOwnSessionsRequest:
+				_, err = service.RevokeOwnSessions(managementContext(t), request)
+			}
+			if status.Code(err) != codes.InvalidArgument || kerrors.FromError(err).Reason != d.ErrInvalidRequest.Error() || h.calls != 0 {
+				t.Fatalf("invalid wire reached usecase or lost reason: %v calls=%d", err, h.calls)
 			}
 		})
 	}
@@ -334,5 +347,71 @@ func TestSessionManagementNativeListenerMetadata(t *testing.T) {
 				t.Fatal(gate.source)
 			}
 		})
+	}
+}
+
+// Marshal deliberately preserves malformed wire bytes while response decoding
+// remains the normal Proto codec. This verifies grpc-go's actual decoder path.
+type managementRawCodec struct{ encoding.Codec }
+
+func (c managementRawCodec) Marshal(v any) ([]byte, error) {
+	if data, ok := v.([]byte); ok {
+		return data, nil
+	}
+	return c.Codec.Marshal(v)
+}
+func TestSessionManagementNativeMalformedWireReturnsBusinessError(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &sessionManagementStub{page: managementPage()}
+	gate := &sessionManagementGate{}
+	server := kgrpc.NewServer(kgrpc.Listener(listener), kgrpc.Middleware(userEndpointAuthenticationMiddleware(nil, nil, nil, true)), kgrpc.Options(grpc.ForceServerCodec(NewProfileStrictCodec())))
+	pb.RegisterSessionManagementServiceServer(server, NewSessionManagementService(h, gate))
+	done := make(chan error, 1)
+	go func() { done <- server.Start(context.Background()) }()
+	t.Cleanup(func() { _ = server.Stop(context.Background()); <-done })
+	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	ctx = metadata.NewOutgoingContext(ctx, metadata.Pairs("x-iwut-session", managementToken()))
+	rawCodec := managementRawCodec{encoding.GetCodec("proto")}
+	for _, tc := range []struct {
+		name   string
+		data   []byte
+		method string
+	}{
+		{"duplicate-size", []byte{8, 10, 8, 11}, pb.SessionManagementService_ListOwnSessions_FullMethodName},
+		{"unknown", []byte{24, 1}, pb.SessionManagementService_ListOwnSessions_FullMethodName},
+		{"truncated", []byte{18, 3, 'a'}, pb.SessionManagementService_ListOwnSessions_FullMethodName},
+		{"oversize", protowire.AppendString([]byte{18}, strings.Repeat("x", 16384)), pb.SessionManagementService_ListOwnSessions_FullMethodName},
+		{"revoke-truncated", []byte{10, 3, 'a'}, pb.SessionManagementService_RevokeOwnSessions_FullMethodName},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var headers metadata.MD
+			var response proto.Message = &pb.OwnSessionPage{}
+			if tc.method == pb.SessionManagementService_RevokeOwnSessions_FullMethodName {
+				response = &pb.SessionsRevoked{}
+			}
+			err := conn.Invoke(ctx, tc.method, tc.data, response, grpc.ForceCodec(rawCodec), grpc.Header(&headers))
+			if status.Code(err) != codes.InvalidArgument || kerrors.FromError(err).Reason != d.ErrInvalidRequest.Error() || !reflect.DeepEqual(headers.Get("cache-control"), []string{"no-store"}) {
+				t.Fatalf("error=%v headers=%v", err, headers)
+			}
+		})
+	}
+	var headers metadata.MD
+	zero := int32(0)
+	_, err = pb.NewSessionManagementServiceClient(conn).ListOwnSessions(ctx, &pb.ListOwnSessionsRequest{PageSize: &zero}, grpc.Header(&headers))
+	if status.Code(err) != codes.InvalidArgument || kerrors.FromError(err).Reason != d.ErrInvalidRequest.Error() || !reflect.DeepEqual(headers.Get("cache-control"), []string{"no-store"}) {
+		t.Fatalf("explicit zero: error=%v headers=%v", err, headers)
+	}
+	_ = server.Stop(context.Background())
+	if h.calls != 0 || gate.source != "127.0.0.1" {
+		t.Fatalf("malformed request calls=%d source=%q", h.calls, gate.source)
 	}
 }
