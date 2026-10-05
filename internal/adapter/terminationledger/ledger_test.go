@@ -33,6 +33,7 @@ func TestDurableIdempotentRecordSurvivesReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	value := fixture()
+	storeReservation(t, l, value)
 	var wg sync.WaitGroup
 	for i := 0; i < 16; i++ {
 		wg.Add(1)
@@ -71,6 +72,7 @@ func TestLedgerFailsClosedOnCorruption(t *testing.T) {
 				t.Fatal(err)
 			}
 			value := fixture()
+			storeReservation(t, l, value)
 			if err := l.Store(context.Background(), value); err != nil {
 				t.Fatal(err)
 			}
@@ -97,6 +99,7 @@ func TestLedgerFailsClosedOnCorruption(t *testing.T) {
 				}
 			case "second_termination":
 				value.OperationID = "99999999-9999-4999-8999-000000000002"
+				storeReservation(t, l, value)
 				data, err = canonical(value)
 				if err == nil {
 					err = os.WriteFile(filepath.Join(dir, value.OperationID+".json"), data, 0600)
@@ -156,6 +159,7 @@ func TestInterruptedPublishAndCancellation(t *testing.T) {
 	if err := l.Store(ctx, fixture()); err == nil {
 		t.Fatal("cancelled write accepted")
 	}
+	storeReservation(t, l, fixture())
 	if err := l.Store(context.Background(), fixture()); err != nil {
 		t.Fatal(err)
 	}

@@ -116,7 +116,18 @@ func (l *Ledger) Store(ctx context.Context, value domain.Termination) error {
 	if err != nil {
 		return err
 	}
+	reservations, err := l.Reservations(ctx, value.OperationID)
+	if err != nil {
+		return err
+	}
+	if reservations.AuthID != value.AuthID || reservations.Handle != nil && reservations.Handle.ClaimedAt.After(value.TerminatedAt) {
+		return errors.New("termination namespace reservations mismatch")
+	}
 	path := filepath.Join(l.directory, value.OperationID+".json")
+	return l.publish(ctx, path, encoded, func(path string) ([]byte, error) { _, encoded, err := l.read(path); return encoded, err })
+}
+
+func (l *Ledger) publish(ctx context.Context, path string, encoded []byte, read func(string) ([]byte, error)) error {
 	tmp, err := os.CreateTemp(l.directory, ".pending-*")
 	if err != nil {
 		return err
@@ -141,7 +152,7 @@ func (l *Ledger) Store(ctx context.Context, value domain.Termination) error {
 		if !errors.Is(err, os.ErrExist) {
 			return err
 		}
-		_, existing, readErr := l.read(path)
+		existing, readErr := read(path)
 		if readErr != nil {
 			return readErr
 		}
@@ -169,6 +180,8 @@ func (l *Ledger) Records(ctx context.Context) ([]domain.Termination, error) {
 	}
 	result := make([]domain.Termination, 0, len(entries))
 	seen := make(map[string]domain.Termination)
+	keyOwners := make(map[string]string)
+	handleOwners := make(map[string]string)
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -180,12 +193,36 @@ func (l *Ledger) Records(ctx context.Context) ([]domain.Termination, error) {
 			}
 			continue // Unacknowledged files are recovered from Mongo's durable outbox.
 		}
+		if strings.HasSuffix(entry.Name(), reservationsSuffix) {
+			if _, _, err := l.readReservations(filepath.Join(l.directory, entry.Name())); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		value, _, err := l.read(filepath.Join(l.directory, entry.Name()))
 		if err != nil {
 			return nil, fmt.Errorf("termination ledger verification failed: %w", err)
 		}
+		reservations, err := l.Reservations(ctx, value.OperationID)
+		if err != nil || reservations.AuthID != value.AuthID || reservations.Handle != nil && reservations.Handle.ClaimedAt.After(value.TerminatedAt) {
+			return nil, errors.New("termination namespace reservations missing or inconsistent")
+		}
 		if previous, ok := seen[value.AuthID]; ok && previous.OperationID != value.OperationID {
 			return nil, errors.New("multiple terminal operations for one account")
+		}
+		for _, fingerprint := range reservations.Fingerprints {
+			key := string(fingerprint)
+			if previous, ok := keyOwners[key]; ok && previous != value.AuthID {
+				return nil, errors.New("conflicting permanent credential occupancy")
+			}
+			keyOwners[key] = value.AuthID
+		}
+		if reservations.Handle != nil {
+			handle := reservations.Handle.DeveloperHandle
+			if previous, ok := handleOwners[handle]; ok && previous != value.AuthID {
+				return nil, errors.New("conflicting permanent handle occupancy")
+			}
+			handleOwners[handle] = value.AuthID
 		}
 		seen[value.AuthID] = value
 		result = append(result, value)
