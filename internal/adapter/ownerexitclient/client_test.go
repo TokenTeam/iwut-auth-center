@@ -45,3 +45,42 @@ func TestStatusIdentityAndCleanupValidation(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+func TestRecoveryObservationKeepsTupleAndStateStrict(t *testing.T) {
+	receipt, _ := uuid.NewV7()
+	o := d.Operation{AuthID: "closed-user", OperationID: uuid.NewString(), Purpose: d.Closure}
+	r := &pb.AccountOwnerExitStatus{AuthId: o.AuthID, OperationId: o.OperationID, Purpose: pb.Purpose_PURPOSE_ACCOUNT_CLOSURE, Decision: pb.Decision_DECISION_PENDING, ReceiptId: receipt.String(), CleanupState: pb.CleanupState_CLEANUP_STATE_NOT_REQUIRED}
+	got, e := validateObserved(o, r)
+	if e != nil || got.Decision != d.Pending || got.ReceiptID != r.ReceiptId {
+		t.Fatal(got, e)
+	}
+	for _, change := range []func(*pb.AccountOwnerExitStatus){func(v *pb.AccountOwnerExitStatus) { v.AuthId = "other" }, func(v *pb.AccountOwnerExitStatus) { v.OperationId = uuid.NewString() }, func(v *pb.AccountOwnerExitStatus) { v.Purpose = pb.Purpose_PURPOSE_DEVELOPER_WITHDRAWAL }, func(v *pb.AccountOwnerExitStatus) { v.ReceiptId = "" }, func(v *pb.AccountOwnerExitStatus) { v.Decision = pb.Decision(42) }, func(v *pb.AccountOwnerExitStatus) { v.CleanupState = pb.CleanupState_CLEANUP_STATE_COMPLETE }} {
+		bad := proto.Clone(r).(*pb.AccountOwnerExitStatus)
+		change(bad)
+		if _, e = validateObserved(o, bad); e == nil {
+			t.Fatal("recovery trusted malformed observation", bad)
+		}
+	}
+	r.Decision = pb.Decision_DECISION_COMMITTED
+	r.CleanupState = pb.CleanupState_CLEANUP_STATE_PENDING
+	if got, e = validateObserved(o, r); e != nil || got.Decision != d.Committed {
+		t.Fatal(got, e)
+	}
+	r.CleanupState = pb.CleanupState_CLEANUP_STATE_COMPLETE
+	if _, e = validateObserved(o, r); e != nil {
+		t.Fatal(e)
+	}
+	r.ReceiptId = ""
+	if _, e = validateObserved(o, r); e == nil {
+		t.Fatal("committed receipt missing")
+	}
+	r.Decision = pb.Decision_DECISION_CANCELLED
+	r.CleanupState = pb.CleanupState_CLEANUP_STATE_NOT_REQUIRED
+	if got, e = validateObserved(o, r); e != nil || got.Decision != d.Cancelled {
+		t.Fatal(got, e)
+	}
+	o.Decision = d.Committed
+	if _, e = validateObserved(o, r); e == nil {
+		t.Fatal("known decision silently weakened")
+	}
+}

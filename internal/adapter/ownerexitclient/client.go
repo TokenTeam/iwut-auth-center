@@ -107,7 +107,36 @@ func (c *Client) Finish(ctx context.Context, o d.Operation) (d.Status, error) {
 	}
 	return validate(o, r)
 }
+
+// validateObserved is reserved for restoration: the caller knows the immutable
+// tuple but has no local decision to compare. App reports facts; the consumer
+// must still reconcile them with its independently durable Auth termination.
+func validateObserved(o d.Operation, r *pb.AccountOwnerExitStatus) (d.Status, error) {
+	if !d.ValidAuthID(o.AuthID) || !d.ValidOperationID(o.OperationID) || purpose(o.Purpose) == pb.Purpose_PURPOSE_UNSPECIFIED || o.Decision != "" || r == nil || r.AuthId != o.AuthID || r.OperationId != o.OperationID || r.Purpose != purpose(o.Purpose) || o.ReceiptID != "" && o.ReceiptID != r.ReceiptId {
+		return d.Status{}, d.ErrUnavailable
+	}
+	switch r.Decision {
+	case pb.Decision_DECISION_PENDING:
+		if !d.ValidReceiptID(r.ReceiptId) || r.CleanupState != pb.CleanupState_CLEANUP_STATE_NOT_REQUIRED {
+			return d.Status{}, d.ErrUnavailable
+		}
+		return d.Status{AuthID: o.AuthID, OperationID: o.OperationID, Purpose: o.Purpose, Decision: d.Pending, ReceiptID: r.ReceiptId, CleanupState: "NOT_REQUIRED"}, nil
+	case pb.Decision_DECISION_COMMITTED:
+		if !d.ValidReceiptID(r.ReceiptId) {
+			return d.Status{}, d.ErrUnavailable
+		}
+		o.Decision = d.Committed
+	case pb.Decision_DECISION_CANCELLED:
+		o.Decision = d.Cancelled
+	default:
+		return d.Status{}, d.ErrUnavailable
+	}
+	return validate(o, r)
+}
 func (c *Client) Status(ctx context.Context, o d.Operation) (d.Status, error) {
+	if !d.ValidAuthID(o.AuthID) || !d.ValidOperationID(o.OperationID) || purpose(o.Purpose) == pb.Purpose_PURPOSE_UNSPECIFIED || o.Decision != "" && (o.Decision != d.Committed && o.Decision != d.Cancelled) {
+		return d.Status{}, d.ErrInvalid
+	}
 	ctx, cancel, e := c.context(ctx)
 	if e != nil {
 		return d.Status{}, e
@@ -116,6 +145,9 @@ func (c *Client) Status(ctx context.Context, o d.Operation) (d.Status, error) {
 	r, e := c.rpc.GetAccountOwnerExitStatus(ctx, &pb.GetAccountOwnerExitStatusRequest{AuthId: o.AuthID, OperationId: o.OperationID})
 	if e != nil {
 		return d.Status{}, d.ErrUnavailable
+	}
+	if o.Decision == "" {
+		return validateObserved(o, r)
 	}
 	return validate(o, r)
 }
