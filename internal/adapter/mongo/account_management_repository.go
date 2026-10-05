@@ -8,6 +8,7 @@ import (
 	m "go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	d "iwut-auth-center/internal/account/domain"
+	admin "iwut-auth-center/internal/administrator/domain"
 	ap "iwut-auth-center/internal/authentication/port"
 	"math"
 	"time"
@@ -28,11 +29,7 @@ func NewAccountManagementRepository(a *AuthenticationRepository) (*AccountManage
 	if a == nil {
 		return nil, d.ErrUnavailable
 	}
-	admins, ok := any(a).(AccountAdministration)
-	if !ok {
-		return nil, d.ErrUnavailable
-	}
-	return &AccountManagementRepository{a, admins}, nil
+	return &AccountManagementRepository{a, a}, nil
 }
 func EnsureAccountManagementSchema(ctx context.Context, db *m.Database) error {
 	_, err := db.Collection(AccountStatusAuditCollection).Indexes().CreateMany(ctx, []m.IndexModel{{Keys: bson.D{{Key: "eventId", Value: 1}}, Options: options.Index().SetUnique(true).SetName("account_status_event_unique")}, {Keys: bson.D{{Key: "subjectAuthId", Value: 1}, {Key: "occurredAt", Value: 1}, {Key: "eventId", Value: 1}}, Options: options.Index().SetName("account_status_subject_history")}})
@@ -59,7 +56,7 @@ func (r *AccountManagementRepository) authorize(tx context.Context, actor string
 		return err
 	}
 	if err := r.admins.RequireAdministratorTx(tx, actor); err != nil {
-		if err.Error() == "PLATFORM_ADMIN_FORBIDDEN" {
+		if errors.Is(err, admin.ErrForbidden) {
 			return d.ErrForbidden
 		}
 		return err
@@ -141,7 +138,7 @@ func (r *AccountManagementRepository) Manage(ctx context.Context, c d.Command) (
 		}
 		if c.Action == "DISABLE" {
 			if err := r.admins.EnsureAnotherAdministratorTx(tx, c.SubjectAuthID); err != nil {
-				if err.Error() == "LAST_PLATFORM_ADMIN_REQUIRED" {
+				if errors.Is(err, admin.ErrLast) {
 					return d.ErrLastAdmin
 				}
 				return err

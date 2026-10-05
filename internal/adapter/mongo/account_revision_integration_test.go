@@ -139,6 +139,7 @@ func TestAccountRevisionProfileCASRejectsRestoredJWS(t *testing.T) {
 
 func TestAccountRevisionEmailLoginAndBindingNeverRevive(t *testing.T) {
 	f := newEmailLoginFixture(t)
+	clearMailCooldown(t, f)
 	key := newSigningKey(t)
 	oldLogin, err := f.login.Begin(t.Context(), loginBegin(key, "login@example.test"))
 	if err != nil {

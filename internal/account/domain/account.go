@@ -30,7 +30,7 @@ type Command struct {
 }
 
 func ValidSubject(id string) bool {
-	return id != "" && len(id) <= 128 && strings.TrimSpace(id) == id && utf8.ValidString(id)
+	return id != "" && len(id) <= 200 && strings.TrimSpace(id) == id && utf8.ValidString(id)
 }
 func (c Command) Validate() error {
 	if !ValidSubject(c.ActorAuthID) || !ValidSubject(c.SubjectAuthID) || c.ExpectedRevision <= 0 || (c.Action != "DISABLE" && c.Action != "RESTORE") || len(c.Reason) < 1 || len(c.Reason) > 1024 || !utf8.ValidString(c.Reason) || strings.TrimSpace(c.Reason) != c.Reason {

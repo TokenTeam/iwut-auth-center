@@ -6,6 +6,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	m "go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	account "iwut-auth-center/internal/account/domain"
 	d "iwut-auth-center/internal/administrator/domain"
 	review "iwut-auth-center/internal/reviewer/domain"
 	"sync"
@@ -45,7 +46,7 @@ func administratorFixture(t *testing.T) (*PlatformAdministratorRepository, *m.Da
 }
 func adminCandidate(t *testing.T, db *m.Database, id string) {
 	t.Helper()
-	_, e := db.Collection(PrincipalCollection).InsertOne(t.Context(), bson.M{"authId": id, "principalType": "USER", "accountStatus": "ACTIVE", "permissions": bson.A{"app.profile.review", "app.version.review"}, "permissionRevision": int64(1)})
+	_, e := db.Collection(PrincipalCollection).InsertOne(t.Context(), bson.M{"authId": id, "principalType": "USER", "accountStatus": "ACTIVE", "accountRevision": int64(1), "permissions": bson.A{"app.profile.review", "app.version.review"}, "permissionRevision": int64(1)})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -53,11 +54,11 @@ func adminCandidate(t *testing.T, db *m.Database, id string) {
 }
 func TestPlatformAdministratorMongoLastProtectionAndConcurrentSelfRevoke(t *testing.T) {
 	r, db, actor := administratorFixture(t)
-	if _, e := r.Manage(t.Context(), d.Command{ActorAuthID: actor, SubjectAuthID: actor, Action: "REVOKE", Reason: "test", ExpectedRevision: 2}); !errors.Is(e, d.ErrLast) {
+	if _, e := r.Manage(account.WithIdentity(t.Context(), actor, 1), d.Command{ActorAuthID: actor, SubjectAuthID: actor, Action: "REVOKE", Reason: "test", ExpectedRevision: 2}); !errors.Is(e, d.ErrLast) {
 		t.Fatal(e)
 	}
 	adminCandidate(t, db, "second")
-	if _, e := r.Manage(t.Context(), d.Command{ActorAuthID: actor, SubjectAuthID: "second", Action: "GRANT", Reason: "test", ExpectedRevision: 1}); e != nil {
+	if _, e := r.Manage(account.WithIdentity(t.Context(), actor, 1), d.Command{ActorAuthID: actor, SubjectAuthID: "second", Action: "GRANT", Reason: "test", ExpectedRevision: 1}); e != nil {
 		t.Fatal(e)
 	}
 	var wg sync.WaitGroup
@@ -66,7 +67,7 @@ func TestPlatformAdministratorMongoLastProtectionAndConcurrentSelfRevoke(t *test
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, e := r.Manage(t.Context(), d.Command{ActorAuthID: id, SubjectAuthID: id, Action: "REVOKE", Reason: "self revoke", ExpectedRevision: 2})
+			_, e := r.Manage(account.WithIdentity(t.Context(), id, 1), d.Command{ActorAuthID: id, SubjectAuthID: id, Action: "REVOKE", Reason: "self revoke", ExpectedRevision: 2})
 			results <- e
 		}()
 	}
@@ -113,43 +114,43 @@ func TestPlatformAdministratorMongoReadinessCASPaginationAndRevokedActor(t *test
 		t.Fatal(e)
 	}
 	c := d.Command{ActorAuthID: actor, SubjectAuthID: "zz-b", Action: "GRANT", Reason: "test", ExpectedRevision: 1}
-	if _, e = r.Manage(t.Context(), c); !errors.Is(e, d.ErrGrantBlocked) {
+	if _, e = r.Manage(account.WithIdentity(t.Context(), actor, 1), c); !errors.Is(e, d.ErrGrantBlocked) {
 		t.Fatal(e)
 	}
 	c.ExpectedRevision = 2
-	if _, e = r.Manage(t.Context(), c); !errors.Is(e, d.ErrConflict) {
+	if _, e = r.Manage(account.WithIdentity(t.Context(), actor, 1), c); !errors.Is(e, d.ErrConflict) {
 		t.Fatal(e)
 	}
 	c.ExpectedRevision = 1
 	adminVerifiedEmail(t, db, "zz-b")
 	r.recoveryReady = false
-	if _, e = r.Manage(t.Context(), c); !errors.Is(e, d.ErrGrantBlocked) {
+	if _, e = r.Manage(account.WithIdentity(t.Context(), actor, 1), c); !errors.Is(e, d.ErrGrantBlocked) {
 		t.Fatal(e)
 	}
 	r.recoveryReady = true
 	for _, id := range []string{"zz-b", "zz-c"} {
 		c.SubjectAuthID = id
-		if _, e = r.Manage(t.Context(), c); e != nil {
+		if _, e = r.Manage(account.WithIdentity(t.Context(), actor, 1), c); e != nil {
 			t.Fatal(e)
 		}
 	}
-	page, e := r.List(t.Context(), actor, "zz-a", 1)
+	page, e := r.List(account.WithIdentity(t.Context(), actor, 1), actor, "zz-a", 1)
 	if e != nil || len(page.Items) != 1 || page.Items[0].AuthID != "zz-b" || page.NextAfterAuthID != "zz-b" {
 		t.Fatal(page, e)
 	}
 	r.recoveryReady = false
-	if _, e = r.Manage(t.Context(), d.Command{ActorAuthID: actor, SubjectAuthID: "zz-b", Action: "REVOKE", Reason: "test", ExpectedRevision: 2}); e != nil {
+	if _, e = r.Manage(account.WithIdentity(t.Context(), actor, 1), d.Command{ActorAuthID: actor, SubjectAuthID: "zz-b", Action: "REVOKE", Reason: "test", ExpectedRevision: 2}); e != nil {
 		t.Fatal(e)
 	}
-	page, e = r.List(t.Context(), actor, page.NextAfterAuthID, 1)
+	page, e = r.List(account.WithIdentity(t.Context(), actor, 1), actor, page.NextAfterAuthID, 1)
 	if e != nil || len(page.Items) != 1 || page.Items[0].AuthID != "zz-c" || page.NextAfterAuthID != "" {
 		t.Fatal(page, e)
 	}
-	if _, e = r.Get(t.Context(), "zz-b", actor); !errors.Is(e, d.ErrForbidden) {
+	if _, e = r.Get(account.WithIdentity(t.Context(), actor, 1), "zz-b", actor); !errors.Is(e, d.ErrForbidden) {
 		t.Fatal(e)
 	}
 	rr, _ := NewReviewerRepository(r.authentication)
-	if _, e = rr.Get(t.Context(), "zz-b", actor); !errors.Is(e, review.ErrForbidden) {
+	if _, e = rr.Get(account.WithIdentity(t.Context(), actor, 1), "zz-b", actor); !errors.Is(e, review.ErrForbidden) {
 		t.Fatal(e)
 	}
 }
@@ -161,20 +162,20 @@ func TestPlatformAdministratorMongoPartialAndDisabledCannotProtectLast(t *testin
 		t.Fatal(e)
 	}
 	c := d.Command{ActorAuthID: actor, SubjectAuthID: actor, Action: "REVOKE", Reason: "test", ExpectedRevision: 2}
-	if _, e = r.Manage(t.Context(), c); !errors.Is(e, d.ErrLast) {
+	if _, e = r.Manage(account.WithIdentity(t.Context(), actor, 1), c); !errors.Is(e, d.ErrLast) {
 		t.Fatal(e)
 	}
-	if _, e = r.Manage(t.Context(), d.Command{ActorAuthID: actor, SubjectAuthID: "other", Action: "REVOKE", Reason: "test", ExpectedRevision: 1}); e != nil {
+	if _, e = r.Manage(account.WithIdentity(t.Context(), actor, 1), d.Command{ActorAuthID: actor, SubjectAuthID: "other", Action: "REVOKE", Reason: "test", ExpectedRevision: 1}); e != nil {
 		t.Fatal(e)
 	}
 	_, e = db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": "other"}, bson.M{"$set": bson.M{"permissions": bson.A{"auth.reviewer.manage"}}})
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e = r.Get(t.Context(), actor, "other"); !errors.Is(e, d.ErrUnavailable) {
+	if _, e = r.Get(account.WithIdentity(t.Context(), actor, 1), actor, "other"); !errors.Is(e, d.ErrUnavailable) {
 		t.Fatal(e)
 	}
-	if _, e = r.Get(t.Context(), "other", actor); !errors.Is(e, d.ErrUnavailable) {
+	if _, e = r.Get(account.WithIdentity(t.Context(), actor, 1), "other", actor); !errors.Is(e, d.ErrUnavailable) {
 		t.Fatal(e)
 	}
 }
@@ -187,11 +188,11 @@ func TestPlatformAdministratorMongoSharedReviewerCASAndAuditRollback(t *testing.
 	rr, _ := NewReviewerRepository(r.authentication)
 	ch := make(chan error, 2)
 	go func() {
-		_, e := r.Manage(t.Context(), d.Command{ActorAuthID: actor, SubjectAuthID: "candidate", Action: "GRANT", Reason: "test", ExpectedRevision: 1})
+		_, e := r.Manage(account.WithIdentity(t.Context(), actor, 1), d.Command{ActorAuthID: actor, SubjectAuthID: "candidate", Action: "GRANT", Reason: "test", ExpectedRevision: 1})
 		ch <- e
 	}()
 	go func() {
-		_, e := rr.Manage(t.Context(), review.Command{ActorAuthID: actor, SubjectAuthID: "candidate", Permission: review.Reviewer, Action: "REVOKE", Reason: "test", ExpectedRevision: 1})
+		_, e := rr.Manage(account.WithIdentity(t.Context(), actor, 1), review.Command{ActorAuthID: actor, SubjectAuthID: "candidate", Permission: review.Reviewer, Action: "REVOKE", Reason: "test", ExpectedRevision: 1})
 		ch <- e
 	}()
 	success := 0
@@ -211,10 +212,10 @@ func TestPlatformAdministratorMongoSharedReviewerCASAndAuditRollback(t *testing.
 	if e := db.RunCommand(t.Context(), bson.D{{Key: "collMod", Value: PlatformAdminAuditCollection}, {Key: "validator", Value: bson.M{"subjectAuthId": bson.M{"$ne": "rollback"}}}, {Key: "validationLevel", Value: "strict"}}).Err(); e != nil {
 		t.Fatal(e)
 	}
-	if _, e := r.Manage(t.Context(), d.Command{ActorAuthID: actor, SubjectAuthID: "rollback", Action: "GRANT", Reason: "test", ExpectedRevision: 1}); !errors.Is(e, d.ErrUnavailable) {
+	if _, e := r.Manage(account.WithIdentity(t.Context(), actor, 1), d.Command{ActorAuthID: actor, SubjectAuthID: "rollback", Action: "GRANT", Reason: "test", ExpectedRevision: 1}); !errors.Is(e, d.ErrUnavailable) {
 		t.Fatal(e)
 	}
-	state, e := r.Get(t.Context(), actor, "rollback")
+	state, e := r.Get(account.WithIdentity(t.Context(), actor, 1), actor, "rollback")
 	if e != nil || state.Granted || state.Revision != 1 {
 		t.Fatal(state, e)
 	}
@@ -292,7 +293,7 @@ func TestPlatformAdministratorMongoUnknownCommit(t *testing.T) {
 	t.Cleanup(func() {
 		_ = admin.RunCommand(context.Background(), bson.D{{Key: "configureFailPoint", Value: "failCommand"}, {Key: "mode", Value: "off"}}).Err()
 	})
-	ctx, cancel := context.WithTimeout(t.Context(), 150*time.Millisecond)
+	ctx, cancel := context.WithTimeout(account.WithIdentity(t.Context(), actor, 1), 150*time.Millisecond)
 	defer cancel()
 	out, e := r.Manage(ctx, d.Command{ActorAuthID: actor, SubjectAuthID: "unknown", Action: "GRANT", Reason: "test", ExpectedRevision: 1})
 	if e == nil || out.AuthID != "" {

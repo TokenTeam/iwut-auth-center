@@ -145,6 +145,7 @@ func runReviewerFlow(t *testing.T, env map[string]string, conn *grpc.ClientConn,
 		t.Fatal(current, err)
 	}
 	runApplicationReviewFlow(t, env, conn, serviceKey, keyFile, subject, adminctx, token, issue)
+	runAccountManagementFlow(t, env, conn, admin, issue)
 	runPlatformAdministratorFlow(t, env, conn, admin, subject, issue, bindEmail)
 	// A modified payload cannot manufacture management authority.
 	pieces := strings.Split(ordinary, ".")

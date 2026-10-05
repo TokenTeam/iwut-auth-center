@@ -603,3 +603,42 @@ create a fresh disposable database; never delete production consumed markers.
 Normal credential recovery uses email login. A separate audited offline break-glass
 recovery procedure for loss of all administrator login methods is still a production
 readiness dependency and is not implemented by this UC.
+
+## User account disable and restore (UC022)
+
+`AUTH_ACCOUNT_MANAGEMENT_ENDPOINTS_ENABLED=true` registers the native gRPC and
+HTTP/JSON `AccountManagementService`. It requires the user endpoint runtime and
+an initialized UC021 administrator. Exact HTTP routes are
+`POST /v1/user-accounts:get-status` and `POST /v1/user-accounts:manage-status`;
+both consume an Auth-audience USER JWS carrying `auth.account.manage` and the
+current account generation. The current full administrator bundle is checked
+again in the shared Mongo authentication transaction. Reasons remain in audit
+storage; status queries do not disclose them.
+
+`accountRevision` is a positive BSON int64 initialized to 1 by registration.
+Every successful disable or restore increments it. Device/email login proofs,
+email binding operations, Sessions and OAuth interaction/code/access/family
+records bind that immutable generation. Disabling and restoring never rebinds
+old materials, scans historical tokens or recreates a Session. Credentials and
+verified email bindings remain available for a fresh login. Old-generation
+Sessions do not occupy current LRU capacity. Missing or invalid revisions fail
+closed: there is no implicit generation 1 upgrade for old test databases.
+
+Auth audience USER JWS carry `account_revision` as a canonical positive decimal
+string. Auth consumers verify it against current authoritative account state,
+including the final profile-write CAS and reviewer/admin transaction. App JWS,
+OIDC ID tokens and delegation JWS do not gain this claim; already-issued
+short-lived downstream identities retain the documented TTL/leeway window.
+
+Account status changes and immutable audit events commit together, preserving
+independent permissions, Developer state and consent. Disabling the last ACTIVE
+administrator is rejected under the same fence as administrator revocation.
+Closed accounts cannot be restored. Turning off the management endpoints does
+not turn off generation checks.
+
+| Environment | Default | Purpose |
+| --- | --- | --- |
+| `AUTH_ACCOUNT_MANAGEMENT_ENDPOINTS_ENABLED` | false | Enable the two management methods |
+| `AUTH_ACCOUNT_MANAGEMENT_READ_PER_MINUTE` | 60 | Reads per signed actor |
+| `AUTH_ACCOUNT_MANAGEMENT_WRITE_PER_MINUTE` | 10 | Writes per signed actor |
+| `AUTH_ACCOUNT_MANAGEMENT_MAX_BUCKETS` | 4096 | Bounded read/write limiter state |

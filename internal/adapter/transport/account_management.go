@@ -30,7 +30,7 @@ func (s *AccountManagementService) ManageUserAccountStatus(ctx context.Context, 
 	if err != nil {
 		return nil, accountError(d.ErrIdentity)
 	}
-	if r == nil || r.ExpectedAccountRevision == nil {
+	if r == nil || len(r.ProtoReflect().GetUnknown()) > 0 || r.ExpectedAccountRevision == nil {
 		return nil, accountError(d.ErrInvalid)
 	}
 	action := ""
@@ -53,7 +53,7 @@ func (s *AccountManagementService) GetUserAccountStatus(ctx context.Context, r *
 	if err != nil {
 		return nil, accountError(d.ErrIdentity)
 	}
-	if r == nil {
+	if r == nil || len(r.ProtoReflect().GetUnknown()) > 0 {
 		return nil, accountError(d.ErrInvalid)
 	}
 	out, err := s.service.Get(ctx, actor, r.SubjectAuthId)

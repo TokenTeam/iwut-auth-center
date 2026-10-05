@@ -312,6 +312,9 @@ func invalidHTTPInput(r *http.Request) error {
 	case strings.HasPrefix(r.URL.Path, "/v1/users/me/credentials/"):
 		reason = "INVALID_CREDENTIAL_ID"
 	}
+	if r.URL.Path == "/v1/user-accounts:get-status" || r.URL.Path == "/v1/user-accounts:manage-status" {
+		reason = "INVALID_ACCOUNT_STATUS_REQUEST"
+	}
 	return kerrors.BadRequest(reason, "invalid request")
 }
 
@@ -352,7 +355,7 @@ func authHTTPErrorEncoder(w http.ResponseWriter, r *http.Request, err error) {
 	switch converted.Reason {
 	case "DEVELOPER_APPLICATION_REQUEST_TOO_LARGE", "EMAIL_LOGIN_REQUEST_TOO_LARGE", "EMAIL_REQUEST_TOO_LARGE", "REGISTRATION_INPUT_TOO_LARGE", "AUTHENTICATION_INPUT_TOO_LARGE", profiledomain.ErrLimit.Error():
 		converted.Code = http.StatusRequestEntityTooLarge
-	case "PLATFORM_ADMIN_GRANT_BLOCKED", "LAST_PLATFORM_ADMIN_REQUIRED", "PERMISSION_REVISION_EXHAUSTED":
+	case "ACCOUNT_REVISION_EXHAUSTED", "PLATFORM_ADMIN_GRANT_BLOCKED", "LAST_PLATFORM_ADMIN_REQUIRED", "PERMISSION_REVISION_EXHAUSTED":
 		converted.Code = http.StatusConflict
 	case "DEVELOPER_HANDLE_CHANGE_NOT_ALLOWED", "DEVELOPER_EMAIL_REQUIRED", "EMAIL_FLOW_MISMATCH", profiledomain.ErrExhausted.Error():
 		converted.Code = http.StatusConflict

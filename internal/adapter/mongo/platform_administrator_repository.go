@@ -8,6 +8,7 @@ import (
 	m "go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	d "iwut-auth-center/internal/administrator/domain"
+	ap "iwut-auth-center/internal/authentication/port"
 	"time"
 )
 
@@ -126,7 +127,7 @@ func (a *AuthenticationRepository) administratorSnapshotTx(ctx context.Context, 
 	if raw.Lookup("accountStatus").StringValue() == "CLOSED" {
 		return d.Snapshot{}, d.ErrSubject
 	}
-	if !identityFields(raw, map[string]bson.Type{"permissionRevision": bson.TypeInt64, "permissions": bson.TypeArray}) {
+	if !identityFields(raw, map[string]bson.Type{"accountRevision": bson.TypeInt64, "permissionRevision": bson.TypeInt64, "permissions": bson.TypeArray}) || raw.Lookup("accountRevision").Int64() <= 0 {
 		return d.Snapshot{}, d.ErrUnavailable
 	}
 	p, err := adminPermissions(raw.Lookup("permissions"))
@@ -141,6 +142,12 @@ func (a *AuthenticationRepository) administratorSnapshotTx(ctx context.Context, 
 // RequireAdministratorTx is used only within WithAuthTransaction. All governance
 // reads and writes verify the durable initialization and current complete bundle.
 func (a *AuthenticationRepository) RequireAdministratorTx(ctx context.Context, id string) error {
+	if err := a.ConfirmIdentityTx(ctx, id); err != nil {
+		if errors.Is(err, ap.ErrAuthenticationFailed) {
+			return d.ErrForbidden
+		}
+		return d.ErrUnavailable
+	}
 	if _, err := a.administratorMarkerTx(ctx); err != nil {
 		return err
 	}
