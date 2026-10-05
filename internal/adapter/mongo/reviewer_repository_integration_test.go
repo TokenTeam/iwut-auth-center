@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-func reviewerFixture(t *testing.T) (*ReviewerRepository, *drivermongo.Database, string) {
+func reviewerFixture(t *testing.T, skipBootstrap ...bool) (*ReviewerRepository, *drivermongo.Database, string) {
 	t.Helper()
 	a, db, s, _ := sessionRevocationFixture(t)
 	if err := EnsureReviewerSchema(t.Context(), db); err != nil {
@@ -23,11 +23,19 @@ func reviewerFixture(t *testing.T) (*ReviewerRepository, *drivermongo.Database, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.Collection(PrincipalCollection).InsertOne(t.Context(), bson.M{"authId": "admin", "principalType": "USER", "accountStatus": "ACTIVE", "permissions": bson.A{domain.Manager}, "permissionRevision": int64(1), "developerStatus": nil})
+	_, err = db.Collection(PrincipalCollection).InsertOne(t.Context(), bson.M{"authId": "admin", "principalType": "USER", "accountStatus": "ACTIVE", "permissions": bson.A{}, "permissionRevision": int64(1), "developerStatus": nil})
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, _ := NewReviewerRepository(a)
+	if len(skipBootstrap) == 0 {
+		seedAdministrator(t, a, "admin")
+	} else {
+		if e := EnsurePlatformAdministratorSchema(t.Context(), db); e != nil {
+			t.Fatal(e)
+		}
+		adminVerifiedEmail(t, db, s.AuthID)
+	}
+	r, _ := NewReviewerRepository(a, true)
 	return r, db, s.AuthID
 }
 func TestReviewerMongoAtomicAuditConcurrencyAndSubjectRules(t *testing.T) {
@@ -89,7 +97,7 @@ func TestReviewerMongoAtomicAuditConcurrencyAndSubjectRules(t *testing.T) {
 	}
 }
 func TestReviewerMongoBootstrapDurableNoResurrection(t *testing.T) {
-	r, db, id := reviewerFixture(t)
+	r, db, id := reviewerFixture(t, true)
 	applied, err := r.Bootstrap(t.Context(), id)
 	if err != nil || !applied {
 		t.Fatal(applied, err)
@@ -99,7 +107,7 @@ func TestReviewerMongoBootstrapDurableNoResurrection(t *testing.T) {
 		t.Fatal(applied, err)
 	}
 	var audit bson.M
-	if err = db.Collection(PermissionAuditCollection).FindOne(t.Context(), bson.M{"subjectAuthId": id}).Decode(&audit); err != nil {
+	if err = db.Collection(PlatformAdminAuditCollection).FindOne(t.Context(), bson.M{"subjectAuthId": id}).Decode(&audit); err != nil {
 		t.Fatal(err)
 	}
 	if audit["actorType"] != "BOOTSTRAP_COMMAND" || audit["actorAuthId"] != nil {
@@ -117,14 +125,14 @@ func TestReviewerMongoBootstrapDurableNoResurrection(t *testing.T) {
 	if err != nil || applied {
 		t.Fatal(applied, err)
 	}
-	state, err = r.Get(t.Context(), "admin", id)
+	state, err = r.read(t.Context(), id)
 	if err != nil || state.Has(domain.Manager) || state.Revision != 3 {
 		t.Fatal(state, err)
 	}
 	if _, err = r.Bootstrap(t.Context(), "admin"); !errors.Is(err, domain.ErrBootstrapConsumed) {
 		t.Fatal(err)
 	}
-	count, _ := db.Collection(PermissionAuditCollection).CountDocuments(t.Context(), bson.M{})
+	count, _ := db.Collection(PlatformAdminAuditCollection).CountDocuments(t.Context(), bson.M{})
 	if count != 1 {
 		t.Fatal(count)
 	}
@@ -160,7 +168,7 @@ func TestReviewerMongoRevokeSynchronizesIdentityIssuance(t *testing.T) {
 			if err := EnsureReviewerSchema(t.Context(), db); err != nil {
 				t.Fatal(err)
 			}
-			_, err := db.Collection(PrincipalCollection).InsertOne(t.Context(), bson.M{"authId": "admin", "principalType": "USER", "accountStatus": "ACTIVE", "permissions": bson.A{domain.Manager}, "permissionRevision": int64(1)})
+			_, err := db.Collection(PrincipalCollection).InsertOne(t.Context(), bson.M{"authId": "admin", "principalType": "USER", "accountStatus": "ACTIVE", "permissions": bson.A{}, "permissionRevision": int64(1)})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -168,6 +176,7 @@ func TestReviewerMongoRevokeSynchronizesIdentityIssuance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			seedAdministrator(t, issuer.authentication, "admin")
 			repo, _ := NewReviewerRepository(issuer.authentication)
 			entered, release := make(chan struct{}), make(chan struct{})
 			done := make(chan error, 1)

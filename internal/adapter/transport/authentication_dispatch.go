@@ -35,6 +35,12 @@ func userEndpointAuthenticationMiddleware(service *ServiceIdentityVerifier, prof
 			if developerApplicationMethod(tr.Operation()) || oauthGrantMethod(tr.Operation()) {
 				return handler(ctx, request)
 			}
+			if isPlatformAdministratorOperation(tr.Operation()) {
+				if profile == nil {
+					return nil, transportStatus(codes.Unauthenticated, "USER_IDENTITY_REQUIRED", "user identity is required")
+				}
+				return profile(handler)(ctx, request)
+			}
 			switch tr.Operation() {
 			case authv1.AuthenticationService_BeginUserRegistration_FullMethodName,
 				authv1.AuthenticationService_CompleteUserRegistration_FullMethodName,

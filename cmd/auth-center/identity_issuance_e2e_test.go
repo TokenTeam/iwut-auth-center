@@ -24,6 +24,7 @@ import (
 	mongoadapter "iwut-auth-center/internal/adapter/mongo"
 	"iwut-auth-center/internal/adapter/transport"
 	"iwut-auth-center/internal/config"
+	"iwut-auth-center/internal/testutil/smtpcapture"
 	"os"
 	"path/filepath"
 	"sort"
@@ -37,6 +38,7 @@ func TestE2E_IdentityIssuance_ProductionWire(t *testing.T) {
 	if uri == "" {
 		t.Skip("run make test-mongo")
 	}
+	capture := smtpcapture.New(t, "implicit_tls")
 	serviceKey, callers := testServiceCallerRegistry(t)
 	decoded, _ := base64.StdEncoding.DecodeString(callers)
 	var registry map[string]map[string]any
@@ -62,6 +64,13 @@ func TestE2E_IdentityIssuance_ProductionWire(t *testing.T) {
 	keyMap, _ := json.Marshal(map[string]string{"identity-k1": keyFile})
 	dbName := fmt.Sprintf("iwut_identity_wire_%d", time.Now().UnixNano())
 	env := map[string]string{config.IdentityIssuanceEnabledEnv: "true", config.UserEndpointsEnabledEnv: "true", config.MongoURIEnv: uri, config.MongoDatabaseEnv: dbName, config.ServiceCallersEnv: callers, config.HTTPAddrEnv: reserveAddress(t), config.GRPCAddrEnv: reserveAddress(t), "AUTH_AUTHENTICATION_SERVICE_ID": "iwut-auth-center:test", "AUTH_SESSION_TTL": "24h", "AUTH_ASSOC_KEY_VERSION": "v1", "AUTH_ASSOC_ENCRYPT_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32)), "AUTH_ASSOC_LOOKUP_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, 32)), "AUTH_PROFILE_CATALOG_FILE": catalogFile, "AUTH_USER_IDENTITY_ISSUER": "identity-test", "AUTH_USER_IDENTITY_PUBLIC_KEYS_JSON": string(keyMap), "AUTH_USER_IDENTITY_SIGNING_KID": "identity-k1", "AUTH_USER_IDENTITY_PRIVATE_KEY_PEM_B64": base64.StdEncoding.EncodeToString(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(identityKey)}))}
+	ca := filepath.Join(dir, "smtp-ca.pem")
+	if err := os.WriteFile(ca, capture.CAPEM, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range map[string]string{"AUTH_PLATFORM_ADMIN_ENDPOINTS_ENABLED": "true", "AUTH_PLATFORM_ADMIN_WRITE_PER_MINUTE": "1000", "AUTH_EMAIL_RECOVERY_READY": "true", "AUTH_EMAIL_BINDING_ENABLED": "true", "AUTH_EMAIL_BINDING_HMAC_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{3}, 32)), "AUTH_EMAIL_LOGIN_ENABLED": "true", "AUTH_EMAIL_LOGIN_CODE_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)), "AUTH_SMTP_ADDR": capture.Address, "AUTH_SMTP_FROM": "auth@example.test", "AUTH_SMTP_TLS_MODE": "implicit_tls", "AUTH_SMTP_CA_FILE": ca} {
+		env[key] = value
+	}
 	configuration, err := config.Load(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
 	if err != nil {
 		t.Fatal(err)
@@ -83,7 +92,7 @@ func TestE2E_IdentityIssuance_ProductionWire(t *testing.T) {
 	}
 	connection, stop := startUserApp(t, app, cleanup, env[config.GRPCAddrEnv])
 	defer stop()
-	runReviewerFlow(t, env, connection, serviceKey, keyFile)
+	runReviewerFlow(t, env, connection, serviceKey, keyFile, capture)
 	client := identityv1.NewUserIdentityServiceClient(connection)
 	auth := authv1.NewAuthenticationServiceClient(connection)
 	device, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

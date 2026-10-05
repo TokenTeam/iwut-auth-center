@@ -33,6 +33,7 @@ type LookupEnv func(key string) (value string, found bool)
 
 type Config struct {
 	OAuth                    *OAuth
+	PlatformAdministrator    *PlatformAdministrator
 	DeveloperApplication     *DeveloperApplication
 	EmailBinding             *EmailBinding
 	EmailLogin               *EmailBinding
@@ -149,6 +150,10 @@ func Load(lookup LookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	platformAdministrator, err := loadPlatformAdministrator(lookup, userEndpoints)
+	if err != nil {
+		return Config{}, err
+	}
 	oauth, err := loadOAuth(lookup)
 	if err != nil {
 		return Config{}, err
@@ -157,13 +162,14 @@ func Load(lookup LookupEnv) (Config, error) {
 		return Config{}, ErrInvalidConfiguration
 	}
 	return Config{
-		OAuth:                oauth,
-		DeveloperApplication: developerApplication,
-		EmailBinding:         emailBinding,
-		EmailLogin:           emailLogin,
-		IdentityIssuance:     issuance,
-		UserEndpoints:        userEndpoints,
-		HTTPAddr:             httpAddress, GRPCAddr: address, MongoURI: mongoURI, MongoDatabase: database,
+		PlatformAdministrator: platformAdministrator,
+		OAuth:                 oauth,
+		DeveloperApplication:  developerApplication,
+		EmailBinding:          emailBinding,
+		EmailLogin:            emailLogin,
+		IdentityIssuance:      issuance,
+		UserEndpoints:         userEndpoints,
+		HTTPAddr:              httpAddress, GRPCAddr: address, MongoURI: mongoURI, MongoDatabase: database,
 		ServiceCallers: callers, ServiceIdentityMaxTTL: maxTTL, ServiceIdentityClockSkew: clockSkew,
 	}, nil
 }

@@ -7,6 +7,7 @@ import (
 	"iwut-auth-center/internal/adapter/emailprotocol"
 	"iwut-auth-center/internal/adapter/identitysigner"
 	"iwut-auth-center/internal/adapter/smtpmail"
+	adminusecase "iwut-auth-center/internal/administrator/usecase"
 	developerusecase "iwut-auth-center/internal/developer/usecase"
 	emaildomain "iwut-auth-center/internal/emailbinding/domain"
 	emailusecase "iwut-auth-center/internal/emailbinding/usecase"
@@ -74,6 +75,9 @@ func provideUserEndpoints(configuration config.Config, database *drivermongo.Dat
 	defer cancel()
 	if err := mongoadapter.EnsureAuthenticationSchema(ctx, database); err != nil {
 		return nil, fmt.Errorf("ensure authentication schema: %w", err)
+	}
+	if err := mongoadapter.EnsurePlatformAdministratorSchema(ctx, database); err != nil {
+		return nil, err
 	}
 	if err := mongoadapter.EnsureReviewerSchema(ctx, database); err != nil {
 		return nil, err
@@ -194,7 +198,20 @@ func provideUserEndpoints(configuration config.Config, database *drivermongo.Dat
 		}
 		developerApplication = transport.NewDeveloperApplicationService(developerusecase.NewApplication(repo, gate, dc.RecoveryReady && emailLoginService != nil), c.Authentication.MaxMessageBytes)
 	}
+	var administrator *transport.PlatformAdministratorService
+	if ac := configuration.PlatformAdministrator; ac != nil {
+		repo, err := mongoadapter.NewPlatformAdministratorRepository(repository, ac.RecoveryReady && emailLoginService != nil)
+		if err != nil {
+			return nil, err
+		}
+		gate, err := deviceprotocol.NewLimiter(deviceprotocol.RateLimits{BeginGlobal: 1000000, CompleteGlobal: 1000000, BeginSource: ac.ReadPerMinute, CompleteLocator: ac.WritePerMinute, MaxBuckets: ac.MaxBuckets})
+		if err != nil {
+			return nil, err
+		}
+		administrator = transport.NewPlatformAdministratorService(adminusecase.New(repo, gate))
+	}
 	return &transport.UserEndpoints{
+		PlatformAdministrator:         administrator,
 		DeveloperApplication:          developerApplication,
 		EmailBinding:                  emailService,
 		EmailLogin:                    emailLoginService,

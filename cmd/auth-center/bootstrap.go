@@ -9,8 +9,8 @@ import (
 	mongo "iwut-auth-center/internal/adapter/mongo"
 	"iwut-auth-center/internal/config"
 	"iwut-auth-center/internal/reviewer/domain"
-	"iwut-auth-center/internal/reviewer/usecase"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -47,6 +47,9 @@ func bootstrapPlatformAdmin(args []string, out io.Writer) error {
 	if err = mongo.EnsurePrincipalSchema(ctx, db); err != nil {
 		return err
 	}
+	if err = mongo.EnsurePlatformAdministratorSchema(ctx, db); err != nil {
+		return err
+	}
 	if err = mongo.EnsureReviewerSchema(ctx, db); err != nil {
 		return err
 	}
@@ -54,16 +57,25 @@ func bootstrapPlatformAdmin(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	repo, err := mongo.NewReviewerRepository(auth)
+	ready, err := strconv.ParseBool(env("AUTH_EMAIL_RECOVERY_READY", "false"))
+	if err != nil {
+		return errors.New("invalid AUTH_EMAIL_RECOVERY_READY")
+	}
+	login, err := strconv.ParseBool(env("AUTH_EMAIL_LOGIN_ENABLED", "false"))
+	if err != nil {
+		return errors.New("invalid AUTH_EMAIL_LOGIN_ENABLED")
+	}
+	repo, err := mongo.NewPlatformAdministratorRepository(auth, ready && login)
 	if err != nil {
 		return err
 	}
-	applied, err := usecase.New(repo).Bootstrap(ctx, *id)
+	result, err := repo.Bootstrap(ctx, *id)
 	if err != nil {
 		return err
 	}
 	return json.NewEncoder(out).Encode(struct {
 		AuthID  string `json:"authId"`
 		Applied bool   `json:"applied"`
-	}{*id, applied})
+		EventID string `json:"eventId"`
+	}{*id, result.Applied, result.EventID})
 }

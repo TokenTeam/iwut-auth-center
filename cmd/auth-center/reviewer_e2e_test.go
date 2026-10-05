@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	authpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
+	emailpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_binding"
 	identitypb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/identity"
 	pb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/reviewer_permission"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
@@ -22,14 +23,16 @@ import (
 	"google.golang.org/protobuf/proto"
 	"io"
 	"iwut-auth-center/internal/config"
+	"iwut-auth-center/internal/testutil/smtpcapture"
 	"net/http"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 )
 
-func runReviewerFlow(t *testing.T, env map[string]string, conn *grpc.ClientConn, serviceKey *rsa.PrivateKey, keyFile string) {
+func runReviewerFlow(t *testing.T, env map[string]string, conn *grpc.ClientConn, serviceKey *rsa.PrivateKey, keyFile string, capture *smtpcapture.Server) {
 	t.Helper()
 	auth := authpb.NewAuthenticationServiceClient(conn)
 	issuer := identitypb.NewUserIdentityServiceClient(conn)
@@ -41,6 +44,23 @@ func runReviewerFlow(t *testing.T, env map[string]string, conn *grpc.ClientConn,
 		return u
 	}
 	admin, subject := register("reviewer-admin"), register("reviewer-subject")
+	bindEmail := func(user *authpb.UserRegistrationResult, email string) {
+		t.Helper()
+		client := emailpb.NewEmailBindingServiceClient(conn)
+		ctx := metadata.NewOutgoingContext(t.Context(), metadata.Pairs("x-iwut-session", user.Session.SessionToken))
+		challenge, err := client.BeginSetEmail(ctx, &emailpb.BeginSetEmailRequest{RequestId: uuid.NewString(), Email: email, Intent: &emailpb.BeginSetEmailRequest_Binding{Binding: &emailpb.BindEmailIntent{ExpectedRevision: proto.Int64(0)}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		match := regexp.MustCompile(`Verification code: ([0-9]{8})`).FindStringSubmatch(capture.Next(t).Body)
+		if len(match) != 2 {
+			t.Fatal("missing code")
+		}
+		if _, err = client.CompleteSetEmail(ctx, &emailpb.CompleteSetEmailRequest{OperationId: challenge.OperationId, Code: match[1]}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bindEmail(admin, "administrator@example.test")
 	issue := func(user *authpb.UserRegistrationResult, aud string) string {
 		ctx := metadata.AppendToOutgoingContext(serviceCallContext(t, t.Context(), serviceKey, "gateway", "app-center-2026-01", "iwut-auth-center"), "x-iwut-session", user.Session.SessionToken)
 		result, err := issuer.IssueUserIdentityFromSession(ctx, &identitypb.IssueUserIdentityFromSessionRequest{Audience: aud})
@@ -61,6 +81,8 @@ func runReviewerFlow(t *testing.T, env map[string]string, conn *grpc.ClientConn,
 	}
 	t.Setenv(config.MongoURIEnv, env[config.MongoURIEnv])
 	t.Setenv(config.MongoDatabaseEnv, env[config.MongoDatabaseEnv])
+	t.Setenv("AUTH_EMAIL_RECOVERY_READY", "true")
+	t.Setenv("AUTH_EMAIL_LOGIN_ENABLED", "true")
 	var output bytes.Buffer
 	if err := bootstrapPlatformAdmin([]string{"--auth-id", admin.AuthId}, &output); err != nil {
 		t.Fatal(err)
@@ -123,6 +145,7 @@ func runReviewerFlow(t *testing.T, env map[string]string, conn *grpc.ClientConn,
 		t.Fatal(current, err)
 	}
 	runApplicationReviewFlow(t, env, conn, serviceKey, keyFile, subject, adminctx, token, issue)
+	runPlatformAdministratorFlow(t, env, conn, admin, subject, issue, bindEmail)
 	// A modified payload cannot manufacture management authority.
 	pieces := strings.Split(ordinary, ".")
 	pieces[1] = strings.Split(token, ".")[1]

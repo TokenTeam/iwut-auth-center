@@ -8,6 +8,7 @@ import (
 	kt "github.com/go-kratos/kratos/v2/transport"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/proto"
+	admin "iwut-auth-center/internal/administrator/domain"
 	"iwut-auth-center/internal/reviewer/domain"
 	"iwut-auth-center/internal/reviewer/usecase"
 	"slices"
@@ -27,7 +28,7 @@ func UserCapabilityIdentityMiddleware(v *UserIdentityVerifier) middleware.Middle
 			if !ok {
 				return nil, reviewerError(domain.ErrForbidden)
 			}
-			if !isReviewerOperation(tr.Operation()) {
+			if !isReviewerOperation(tr.Operation()) && !isPlatformAdministratorOperation(tr.Operation()) {
 				return UserProfileIdentityMiddleware(v)(next)(ctx, req)
 			}
 			values := tr.RequestHeader().Values(UserIdentityHeader)
@@ -41,7 +42,14 @@ func UserCapabilityIdentityMiddleware(v *UserIdentityVerifier) middleware.Middle
 			if err != nil {
 				return nil, transportStatus(codes.Unauthenticated, "INVALID_USER_IDENTITY", "invalid user identity")
 			}
-			if !slices.Contains(identity.Permissions, domain.Manager) {
+			required := domain.Manager
+			if isPlatformAdministratorOperation(tr.Operation()) {
+				required = admin.Manager
+			}
+			if !slices.Contains(identity.Permissions, required) {
+				if isPlatformAdministratorOperation(tr.Operation()) {
+					return nil, platformAdministratorError(admin.ErrForbidden)
+				}
 				return nil, reviewerError(domain.ErrForbidden)
 			}
 			if msg, ok := req.(proto.Message); !ok || proto.Size(msg) > 16*1024 {

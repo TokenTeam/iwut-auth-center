@@ -69,7 +69,7 @@ func Project(s Snapshot, audience, jti string, now time.Time, ttl time.Duration)
 		return Claims{}, ErrSessionInvalid
 	}
 	c := Claims{AuthID: s.AuthID, Audience: audience, JTI: jti, IssuedAt: iat, ExpiresAt: exp, Permissions: []string{}}
-	allowed := []string{"auth.reviewer.manage"}
+	allowed := []string{"auth.account.manage", "auth.developer.manage", "auth.platform-admin.manage", "auth.reviewer.manage"}
 	if audience == AppAudience {
 		allowed = []string{"app.profile.review", "app.version.review"}
 		c.DeveloperStatus = s.DeveloperStatus

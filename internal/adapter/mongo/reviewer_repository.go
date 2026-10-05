@@ -7,6 +7,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	drivermongo "go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	admin "iwut-auth-center/internal/administrator/domain"
 	"iwut-auth-center/internal/reviewer/domain"
 	"time"
 )
@@ -14,13 +15,17 @@ import (
 const PermissionAuditCollection = "auth_permission_audit_events"
 const bootstrapMarker = "platform-admin-bootstrap"
 
-type ReviewerRepository struct{ authentication *AuthenticationRepository }
+type ReviewerRepository struct {
+	authentication *AuthenticationRepository
+	recoveryReady  bool
+}
 
-func NewReviewerRepository(a *AuthenticationRepository) (*ReviewerRepository, error) {
+func NewReviewerRepository(a *AuthenticationRepository, recoveryReady ...bool) (*ReviewerRepository, error) {
 	if a == nil {
 		return nil, domain.ErrUnavailable
 	}
-	return &ReviewerRepository{a}, nil
+	ready := len(recoveryReady) > 0 && recoveryReady[0]
+	return &ReviewerRepository{a, ready}, nil
 }
 func EnsureReviewerSchema(ctx context.Context, db *drivermongo.Database) error {
 	_, err := db.Collection(PermissionAuditCollection).Indexes().CreateMany(ctx, []drivermongo.IndexModel{
@@ -82,28 +87,21 @@ func (r *ReviewerRepository) read(ctx context.Context, id string) (domain.State,
 		}
 		s.Permissions = append(s.Permissions, v.StringValue())
 	}
+	if _, err := admin.Membership(s.Permissions); err != nil {
+		return domain.State{}, domain.ErrUnavailable
+	}
 	if !s.Valid() {
 		return domain.State{}, domain.ErrUnavailable
 	}
 	return s, nil
 }
 func (r *ReviewerRepository) authorize(ctx context.Context, actor string) error {
-	s, err := r.read(ctx, actor)
-	if errors.Is(err, domain.ErrSubject) {
+	err := r.authentication.RequireAdministratorTx(ctx, actor)
+	if errors.Is(err, admin.ErrForbidden) {
 		return domain.ErrForbidden
 	}
 	if err != nil {
-		return err
-	}
-	if !s.Has(domain.Manager) {
-		return domain.ErrForbidden
-	}
-	result, err := r.authentication.database.Collection(PrincipalCollection).UpdateOne(ctx, bson.M{"authId": actor, "principalType": "USER", "accountStatus": "ACTIVE", "permissionRevision": s.Revision, "permissions": domain.Manager}, bson.M{"$inc": bson.M{"authenticationFence": int64(1)}})
-	if err != nil {
-		return err
-	}
-	if result.MatchedCount != 1 {
-		return domain.ErrForbidden
+		return domain.ErrUnavailable
 	}
 	return nil
 }
@@ -124,6 +122,7 @@ func (r *ReviewerRepository) Get(ctx context.Context, actor, subject string) (do
 }
 func (r *ReviewerRepository) Manage(ctx context.Context, c domain.Command) (domain.State, error) {
 	var result domain.State
+	eventID := uuid.NewString()
 	err := r.transaction(ctx, func(tx context.Context) error {
 		if err := r.authorize(tx, c.ActorAuthID); err != nil {
 			return err
@@ -136,7 +135,7 @@ func (r *ReviewerRepository) Manage(ctx context.Context, c domain.Command) (doma
 		if err != nil {
 			return err
 		}
-		if err = r.write(tx, before, next, c.Permission, c.Action, c.Reason, "USER", c.ActorAuthID, uuid.NewString()); err != nil {
+		if err = r.write(tx, before, next, c.Permission, c.Action, c.Reason, "USER", c.ActorAuthID, eventID); err != nil {
 			return err
 		}
 		result = next
@@ -168,44 +167,15 @@ func (r *ReviewerRepository) write(ctx context.Context, before, after domain.Sta
 	return err
 }
 func (r *ReviewerRepository) Bootstrap(ctx context.Context, id string) (bool, error) {
-	applied := false
-	err := r.transaction(ctx, func(tx context.Context) error {
-		applied = false
-		var marker bson.Raw
-		err := r.authentication.database.Collection(AuthenticationRuntimeCollection).FindOne(tx, bson.M{"_id": bootstrapMarker}).Decode(&marker)
-		if err == nil {
-			if !identityFields(marker, map[string]bson.Type{"subjectAuthId": bson.TypeString, "eventId": bson.TypeString, "occurredAt": bson.TypeDateTime}) {
-				return domain.ErrUnavailable
-			}
-			if marker.Lookup("subjectAuthId").StringValue() != id {
-				return domain.ErrBootstrapConsumed
-			}
-			return nil
-		}
-		if !errors.Is(err, drivermongo.ErrNoDocuments) {
-			return err
-		}
-		before, err := r.read(tx, id)
-		if err != nil {
-			return err
-		}
-		next, err := domain.Change(before, domain.Manager, "GRANT", before.Revision)
-		if err != nil {
-			return err
-		}
-		eventID := uuid.NewString()
-		if err = r.write(tx, before, next, domain.Manager, "GRANT", "one-time platform administrator bootstrap", "BOOTSTRAP_COMMAND", "", eventID); err != nil {
-			return err
-		}
-		_, err = r.authentication.database.Collection(AuthenticationRuntimeCollection).InsertOne(tx, bson.M{"_id": bootstrapMarker, "subjectAuthId": id, "eventId": eventID, "occurredAt": r.authentication.currentTime(time.Time{})})
-		if err != nil {
-			return err
-		}
-		applied = true
-		return nil
-	})
+	repo, _ := NewPlatformAdministratorRepository(r.authentication, r.recoveryReady)
+	result, err := repo.Bootstrap(ctx, id)
 	if err != nil {
-		return false, err
+		for _, pair := range []struct{ from, to error }{{admin.ErrBootstrapConsumed, domain.ErrBootstrapConsumed}, {admin.ErrSubject, domain.ErrSubject}, {admin.ErrConflict, domain.ErrConflict}, {admin.ErrExhausted, domain.ErrExhausted}} {
+			if errors.Is(err, pair.from) {
+				return false, pair.to
+			}
+		}
+		return false, domain.ErrUnavailable
 	}
-	return applied, nil
+	return result.Applied, nil
 }

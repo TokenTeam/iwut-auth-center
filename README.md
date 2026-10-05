@@ -220,7 +220,7 @@ unknown commit results fail closed and may require a fresh RPC. No token result
 is persisted or cached. A signed result authorized before revocation remains
 valid through its short lifetime and consumer clock skew.
 
-The Auth audience receives only `auth.reviewer.manage`; the App audience receives
+The Auth audience receives the four UC021 management permissions; the App audience receives
 `app.profile.review` and `app.version.review`, plus a valid existing Developer
 status when present.
 These are intersections with current authoritative permissions, never grants.
@@ -255,7 +255,7 @@ gRPC and HTTP. Gateway uses SESSION policy with `iwut-auth-center` audience:
   and `permissionRevision` (ProtoJSON decimal string).
 
 A verified user JWS must contain `auth.reviewer.manage`; all four operations also
-confirm the actor's current ACTIVE USER state and current grant in Mongo. Only
+confirm the actor's current ACTIVE USER state, complete UC021 bundle and consumed initialization in Mongo. Only
 ACTIVE USER subjects are eligible. Repeated actions and stale revisions return
 409; query current state after an uncertain response before deciding to retry.
 Each mutation preserves the other review permission and all unrelated capabilities.
@@ -270,17 +270,23 @@ Provision the first administrator explicitly, after registering that user:
 ```sh
 AUTH_CENTER_MONGO_URI='mongodb://127.0.0.1:27017/?replicaSet=rs0' \
 AUTH_CENTER_MONGO_DATABASE='iwut_auth_center' \
+AUTH_EMAIL_RECOVERY_READY=true AUTH_EMAIL_LOGIN_ENABLED=true \
 go run ./cmd/auth-center bootstrap-platform-admin --auth-id '<existing-auth-id>'
 ```
 
-The command requires only Mongo configuration and does not open listeners or load
-service/profile/signing configuration. JSON output contains `authId` and `applied`.
-A durable global marker permits a same-subject replay with `applied:false`, without
-restoring a later-revoked grant; another subject is rejected. Bootstrap grants only
-`auth.reviewer.manage`, never reviewer authority. Audit attribution uses
-`actorType:BOOTSTRAP_COMMAND` with no fabricated `actorAuthId`; ordinary management
-uses `actorType:USER` and the verified administrator ID. No generic administrator
-management API is provided here.
+The command uses Mongo configuration plus the two explicit email readiness flags;
+it does not open listeners or load service/profile/signing configuration. The target
+must already have an ACTIVE USER and verified email. JSON output contains `authId`,
+`applied` and `eventId`. A single durable consumed marker permits same-subject replay
+with `applied:false` and the original event ID, without restoring later-revoked
+permissions. A different subject or incompatible/partial old initialization fails
+closed. There is no migration or automatic startup grant.
+
+Bootstrap grants the complete UC021 bundle: `auth.platform-admin.manage`,
+`auth.reviewer.manage`, `auth.account.manage`, `auth.developer.manage`. It never grants
+`app.profile.review` or `app.version.review`. Initialization writes
+`auth_platform_admin_audit_events` with `actorType:BOOTSTRAP_COMMAND` and no fabricated
+actor ID. Consumed bootstrap is not a recovery backdoor.
 
 All changes join the same Mongo transaction fence as Session-to-JWS issuance.
 Signing begun after a committed revoke sees the new permissions; existing JWSs
@@ -550,3 +556,50 @@ independent grants, non-Tester STABLE/GREY access, cohort shrink/restoration,
 publication clearing, stale codes and route-channel restrictions.
 Its isolated App build uses a deterministic public DNS resolver through a
 Go build overlay; it does not alter App source or system DNS.
+
+## Platform administrator management (UC-AUTH-021)
+
+`AUTH_PLATFORM_ADMIN_ENDPOINTS_ENABLED` defaults to false; enabling it requires
+`AUTH_USER_ENDPOINTS_ENABLED=true`. The independent generated service exposes:
+
+- `POST /v1/platform-administrators:manage`: GRANT/REVOKE with `subjectAuthId`,
+  required positive `expectedPermissionRevision` and a trimmed 1–1024-byte `reason`.
+- `POST /v1/platform-administrators:get`: current eligibility by `subjectAuthId`.
+- `POST /v1/platform-administrators:list`: granted members including disabled ones,
+  `pageSize` default 20 (1–50), and exclusive lexical `afterAuthId` cursor.
+
+Native gRPC exposes the matching three exact `PlatformAdministratorService` methods.
+Gateway must use SESSION policy and the Auth audience, adding `/auth-center` externally.
+Direct Session, service tokens, App-audience JWS and OAuth access tokens are rejected.
+The service verifies the signed management claim and reads the current complete
+administrator bundle before every read/write. HTTP uses strict ProtoJSON, no query,
+16 KiB bodies and `Cache-Control: no-store`. Gateway route rollout remains separate.
+
+Grants require a verified email and both `AUTH_EMAIL_RECOVERY_READY=true` and an
+operationally configured `AUTH_EMAIL_LOGIN_ENABLED=true`. These conditions do not
+block revocation or reads. The four permissions are an indivisible bundle; partial
+stored bundles fail closed. Changes preserve reviewer permissions, Developer state
+and Sessions. All changes share `permissionRevision` with UC004, so concurrent
+commands compete on one revision. Unknown commits return unavailable; query current
+state before retrying. Self-revocation returns success, then the old JWS loses access.
+
+The global authentication transaction fence protects the last ACTIVE administrator,
+including concurrent self-revocations. Disabled administrators cannot satisfy the
+invariant. Account disabling and closing must reuse the same shared helper and fence.
+Audit events are append-only in `auth_platform_admin_audit_events`; no audit edit/delete
+endpoint exists. Existing signed identities may remain valid at offline consumers
+until expiry, but Auth management handlers online-check current authority.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `AUTH_PLATFORM_ADMIN_READ_PER_MINUTE` | 60 | Reads per authenticated actor |
+| `AUTH_PLATFORM_ADMIN_WRITE_PER_MINUTE` | 10 | Writes per authenticated actor |
+| `AUTH_PLATFORM_ADMIN_MAX_BUCKETS` | 4096 | Bounded combined read/write buckets |
+
+The explicit first-deployment bootstrap above is performed during maintenance;
+create and verify the user first, then stop listeners for provisioning. There is no
+legacy bootstrap migration. To test a changed initialization format, explicitly
+create a fresh disposable database; never delete production consumed markers.
+Normal credential recovery uses email login. A separate audited offline break-glass
+recovery procedure for loss of all administrator login methods is still a production
+readiness dependency and is not implemented by this UC.
