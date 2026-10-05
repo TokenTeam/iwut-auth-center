@@ -94,7 +94,7 @@ func newOAuthFixture(t *testing.T) *oauthFixture {
 	if e := EnsureOAuthSchema(ctx, db); e != nil {
 		t.Fatal(e)
 	}
-	if _, e := db.Collection(PrincipalCollection).UpdateOne(ctx, bson.M{"authId": f.c.AuthID}, bson.M{"$set": bson.M{"developerStatus": "APPROVED"}}); e != nil {
+	if _, e := db.Collection(PrincipalCollection).UpdateOne(ctx, bson.M{"authId": f.c.AuthID}, bson.M{"$set": bson.M{"developerStatus": "APPROVED", "developerRevision": int64(1)}}); e != nil {
 		t.Fatal(e)
 	}
 	if _, e := db.Collection("auth_developer_handles").InsertOne(ctx, bson.M{"authId": f.c.AuthID, "developerHandle": "testdev"}); e != nil {

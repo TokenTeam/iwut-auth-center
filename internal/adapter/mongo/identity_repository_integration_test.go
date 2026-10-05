@@ -25,7 +25,7 @@ func (f identitySignerFunc) Sign(ctx context.Context, c domain.Claims) (string, 
 func identityFixture(t *testing.T) (*IdentityRepository, *drivermongo.Database, SessionDocument, string, identityport.Tokens, identityport.Signer) {
 	t.Helper()
 	authentication, db, session, _ := sessionRevocationFixture(t)
-	_, err := db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": session.AuthID}, bson.M{"$set": bson.M{"permissions": bson.A{"app.version.review"}, "permissionRevision": int64(1), "developerStatus": "APPROVED"}})
+	_, err := db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": session.AuthID}, bson.M{"$set": bson.M{"permissions": bson.A{"app.version.review"}, "permissionRevision": int64(1), "developerStatus": "APPROVED", "developerRevision": int64(1)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestIdentityMongoConcurrentCapabilitiesAndRevocation(t *testing.T) {
 	}
 	// Direct writer deliberately does not use the global authentication fence.
 	// Issuance touches the principal too, so retries cannot confirm stale abilities.
-	if _, err := db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": session.AuthID}, bson.M{"$set": bson.M{"permissions": bson.A{}, "developerStatus": "SUSPENDED"}, "$inc": bson.M{"permissionRevision": int64(1)}}); err != nil {
+	if _, err := db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": session.AuthID}, bson.M{"$set": bson.M{"permissions": bson.A{}, "developerStatus": "SUSPENDED", "developerRevision": int64(1)}, "$inc": bson.M{"permissionRevision": int64(1)}}); err != nil {
 		t.Fatal(err)
 	}
 	wg.Wait()

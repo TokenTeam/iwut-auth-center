@@ -72,6 +72,7 @@ func TestE2E_DeveloperApplication_ProductionWireAndAppCenter(t *testing.T) {
 	keys, _ := json.Marshal(map[string]string{"identity-k1": keyFile})
 	dbName := "uc013_wire_" + uuid.NewString()
 	env := map[string]string{config.UserEndpointsEnabledEnv: "true", config.IdentityIssuanceEnabledEnv: "true", config.MongoURIEnv: uri, config.MongoDatabaseEnv: dbName, config.ServiceCallersEnv: callers, config.HTTPAddrEnv: reserveAddress(t), config.GRPCAddrEnv: reserveAddress(t), "AUTH_AUTHENTICATION_SERVICE_ID": "iwut-auth-center:test", "AUTH_SESSION_TTL": "24h", "AUTH_ASSOC_KEY_VERSION": "v1", "AUTH_ASSOC_ENCRYPT_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32)), "AUTH_ASSOC_LOOKUP_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, 32)), "AUTH_PROFILE_CATALOG_FILE": catalog, "AUTH_USER_IDENTITY_ISSUER": "identity-test", "AUTH_USER_IDENTITY_PUBLIC_KEYS_JSON": string(keys), "AUTH_USER_IDENTITY_SIGNING_KID": "identity-k1", "AUTH_USER_IDENTITY_PRIVATE_KEY_PEM_B64": base64.StdEncoding.EncodeToString(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})), "AUTH_EMAIL_BINDING_ENABLED": "true", "AUTH_EMAIL_BINDING_HMAC_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{3}, 32)), "AUTH_EMAIL_LOGIN_ENABLED": "true", "AUTH_EMAIL_LOGIN_CODE_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)), "AUTH_SMTP_ADDR": capture.Address, "AUTH_SMTP_FROM": "auth@example.test", "AUTH_SMTP_TLS_MODE": "implicit_tls", "AUTH_SMTP_CA_FILE": ca, "AUTH_DEVELOPER_APPLICATION_ENABLED": "true", "AUTH_EMAIL_RECOVERY_READY": "true", "AUTH_DEVELOPER_ACCOUNT_PER_MINUTE": "1000", "AUTH_DEVELOPER_SOURCE_PER_MINUTE": "1000", "AUTH_DEVELOPER_GLOBAL_PER_MINUTE": "10000"}
+	env["AUTH_DEVELOPER_MANAGEMENT_ENDPOINTS_ENABLED"] = "true"
 	load := func() config.Config {
 		c, e := config.Load(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
 		if e != nil {
@@ -279,6 +280,7 @@ func TestE2E_DeveloperApplication_ProductionWireAndAppCenter(t *testing.T) {
 	t.Run("actual App Center", func(t *testing.T) {
 		developerActualAppFlow(t, uri, keyFile, env[config.GRPCAddrEnv], serviceKey, user.AuthId, issue)
 	})
+	managementIdentity := runDeveloperManagementFlow(t, env, conn, user, issue, keyFile, serviceKey)
 	// Simulate an imported APPROVED principal without activation history, then
 	// bind through the actual email flow and explicitly claim its first handle.
 	legacyDevice, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -291,7 +293,7 @@ func TestE2E_DeveloperApplication_ProductionWireAndAppCenter(t *testing.T) {
 	if _, e = emailClient.CompleteSetEmail(legacyCtx, &emailpb.CompleteSetEmailRequest{OperationId: legacyEmail.OperationId, Code: nextCode()}); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = db.Collection(mongo.PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": legacy.AuthId}, bson.M{"$set": bson.M{"developerStatus": "APPROVED"}}); e != nil {
+	if _, e = db.Collection(mongo.PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": legacy.AuthId}, bson.M{"$set": bson.M{"developerStatus": "APPROVED", "developerRevision": int64(1)}}); e != nil {
 		t.Fatal(e)
 	}
 	legacyEligibility, e := client.GetOwnDeveloperEligibility(legacyCtx, &pb.GetOwnDeveloperEligibilityRequest{})
@@ -341,6 +343,7 @@ func TestE2E_DeveloperApplication_ProductionWireAndAppCenter(t *testing.T) {
 	if code != 429 || h.Get("Retry-After") != "60" || !bytes.Contains(body, []byte("DEVELOPER_APPLICATION_RATE_LIMITED")) {
 		t.Fatal(code, string(body), h)
 	}
+	runDeveloperManagementRecoveryClosed(t, closedConn, user.AuthId, managementIdentity)
 	newDevice, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	ordinary, _ := registerUser(t, authpb.NewAuthenticationServiceClient(closedConn), newDevice, bytes.Repeat([]byte{8}, 32))
 	ordinaryCtx := sessionCallContext(t.Context(), ordinary.Session.SessionToken)
@@ -349,7 +352,7 @@ func TestE2E_DeveloperApplication_ProductionWireAndAppCenter(t *testing.T) {
 		t.Fatal(blocked, e)
 	}
 	// Historical APPROVED stays nullable and does not manufacture activation history.
-	if _, e = db.Collection(mongo.PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": ordinary.AuthId}, bson.M{"$set": bson.M{"developerStatus": "APPROVED"}}); e != nil {
+	if _, e = db.Collection(mongo.PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": ordinary.AuthId}, bson.M{"$set": bson.M{"developerStatus": "APPROVED", "developerRevision": int64(1)}}); e != nil {
 		t.Fatal(e)
 	}
 	historical, e := closedClient.GetOwnDeveloperEligibility(ordinaryCtx, &pb.GetOwnDeveloperEligibilityRequest{})

@@ -114,7 +114,7 @@ func TestOAuthE2E_ProductionWireActualAppProvider(t *testing.T) {
 	reviewer, _ := registerUser(t, auth, device2, bytes.Repeat([]byte{12}, 32))
 	// Fixtures establish previously accepted enrollment/reviewer state; all App
 	// registration, reviews, publication and Tester admission use production APIs.
-	if _, e = db.Collection(ma.PrincipalCollection).UpdateOne(ctx, bson.M{"authId": user.AuthId}, bson.M{"$set": bson.M{"developerStatus": "APPROVED"}}); e != nil {
+	if _, e = db.Collection(ma.PrincipalCollection).UpdateOne(ctx, bson.M{"authId": user.AuthId}, bson.M{"$set": bson.M{"developerStatus": "APPROVED", "developerRevision": int64(1)}}); e != nil {
 		t.Fatal(e)
 	}
 	if _, e = db.Collection("auth_developer_handles").InsertOne(ctx, bson.M{"authId": user.AuthId, "developerHandle": "oauthauthor"}); e != nil {

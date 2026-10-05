@@ -255,9 +255,9 @@ func seedPrincipalFixtures(t *testing.T, uri, databaseName string) {
 		t.Fatalf("ensure principal schema: %v", err)
 	}
 	_, err = database.Collection(mongoadapter.PrincipalCollection).InsertMany(t.Context(), []any{
-		bson.M{"authId": "developer-approved", "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": "APPROVED"},
-		bson.M{"authId": "developer-suspended", "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": "SUSPENDED"},
-		bson.M{"authId": "ordinary-user", "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": nil},
+		bson.M{"authId": "developer-approved", "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": "APPROVED", "developerRevision": int64(1)},
+		bson.M{"authId": "developer-suspended", "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": "SUSPENDED", "developerRevision": int64(1)},
+		bson.M{"authId": "ordinary-user", "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": nil, "developerRevision": int64(0)},
 		bson.M{"authId": "system-reviewer", "principalType": "SYSTEM"},
 	})
 	if err != nil {

@@ -13,6 +13,7 @@ const Reviewer = "app.version.review"
 const Manager = "auth.reviewer.manage"
 
 var (
+	ErrIdentity          = errors.New("INVALID_USER_IDENTITY")
 	ErrInvalid           = errors.New("INVALID_REVIEWER_PERMISSION_INPUT")
 	ErrForbidden         = errors.New("REVIEWER_MANAGEMENT_FORBIDDEN")
 	ErrSubject           = errors.New("REVIEWER_SUBJECT_UNAVAILABLE")

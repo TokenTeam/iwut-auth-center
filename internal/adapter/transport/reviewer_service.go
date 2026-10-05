@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	account "iwut-auth-center/internal/account/domain"
 	admin "iwut-auth-center/internal/administrator/domain"
+	developer "iwut-auth-center/internal/developer/domain"
 	"iwut-auth-center/internal/reviewer/domain"
 	"iwut-auth-center/internal/reviewer/usecase"
 	"slices"
@@ -32,7 +33,7 @@ func UserCapabilityIdentityMiddleware(v *UserIdentityVerifier) middleware.Middle
 			if accountManagementMethod(tr.Operation()) {
 				return accountManagementIdentity(v)(next)(ctx, req)
 			}
-			if !isReviewerOperation(tr.Operation()) && !isPlatformAdministratorOperation(tr.Operation()) {
+			if !isReviewerOperation(tr.Operation()) && !isPlatformAdministratorOperation(tr.Operation()) && !isDeveloperManagementOperation(tr.Operation()) {
 				return UserProfileIdentityMiddleware(v)(next)(ctx, req)
 			}
 			values := tr.RequestHeader().Values(UserIdentityHeader)
@@ -51,7 +52,13 @@ func UserCapabilityIdentityMiddleware(v *UserIdentityVerifier) middleware.Middle
 			if isPlatformAdministratorOperation(tr.Operation()) {
 				required = admin.Manager
 			}
+			if isDeveloperManagementOperation(tr.Operation()) {
+				required = developer.DeveloperManager
+			}
 			if !slices.Contains(identity.Permissions, required) {
+				if isDeveloperManagementOperation(tr.Operation()) {
+					return nil, developerManagementError(developer.ErrManagementForbidden)
+				}
 				if isPlatformAdministratorOperation(tr.Operation()) {
 					return nil, platformAdministratorError(admin.ErrForbidden)
 				}
@@ -117,7 +124,7 @@ func reviewerError(err error) error {
 	for _, entry := range []struct {
 		err  error
 		code codes.Code
-	}{{domain.ErrInvalid, codes.InvalidArgument}, {domain.ErrForbidden, codes.PermissionDenied}, {domain.ErrSubject, codes.NotFound}, {domain.ErrConflict, codes.Aborted}, {domain.ErrExhausted, codes.Aborted}} {
+	}{{domain.ErrIdentity, codes.Unauthenticated}, {domain.ErrInvalid, codes.InvalidArgument}, {domain.ErrForbidden, codes.PermissionDenied}, {domain.ErrSubject, codes.NotFound}, {domain.ErrConflict, codes.Aborted}, {domain.ErrExhausted, codes.Aborted}} {
 		if errors.Is(err, entry.err) {
 			code = entry.code
 			reason = entry.err.Error()

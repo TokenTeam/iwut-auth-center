@@ -113,12 +113,7 @@ func (tx *oauthTx) Session(raw string, now time.Time) (d.Session, error) {
 	return d.Session{AccountRevision: ss.AccountRevision, ID: ss.SessionID, AuthID: ss.AuthID, AuthenticatedAt: ss.AuthenticatedAt, ExpiresAt: ss.ExpiresAt}, nil
 }
 func (tx *oauthTx) User(id string) (d.User, error) {
-	var raw struct {
-		AuthID    string `bson:"authId"`
-		Type      string `bson:"principalType"`
-		Status    string `bson:"accountStatus"`
-		Developer string `bson:"developerStatus"`
-	}
+	var raw bson.Raw
 	err := tx.r.db.Collection(PrincipalCollection).FindOne(tx.ctx, bson.M{"authId": id}).Decode(&raw)
 	if errors.Is(err, m.ErrNoDocuments) {
 		return d.User{}, d.ErrGrant
@@ -126,8 +121,14 @@ func (tx *oauthTx) User(id string) (d.User, error) {
 	if err != nil {
 		return d.User{}, d.ErrUnavailable
 	}
-	if raw.AuthID != id || raw.Type != "USER" || raw.Status != "ACTIVE" {
+	if !identityFields(raw, map[string]bson.Type{"authId": bson.TypeString, "principalType": bson.TypeString, "accountStatus": bson.TypeString}) {
+		return d.User{}, d.ErrUnavailable
+	}
+	if raw.Lookup("authId").StringValue() != id || raw.Lookup("principalType").StringValue() != "USER" || raw.Lookup("accountStatus").StringValue() != "ACTIVE" {
 		return d.User{}, d.ErrGrant
+	}
+	if !validDeveloperLifecycle(raw) {
+		return d.User{}, d.ErrUnavailable
 	}
 	if _, err := tx.r.db.Collection(PrincipalCollection).UpdateOne(tx.ctx, bson.M{"authId": id, "accountStatus": "ACTIVE"}, bson.M{"$inc": bson.M{"authenticationFence": int64(1)}}); err != nil {
 		return d.User{}, d.ErrUnavailable
@@ -139,7 +140,7 @@ func (tx *oauthTx) User(id string) (d.User, error) {
 		}
 		return d.User{}, d.ErrUnavailable
 	}
-	user := d.User{AccountRevision: revision, AuthID: id, DeveloperApproved: raw.Developer == "APPROVED"}
+	user := d.User{AccountRevision: revision, AuthID: id, DeveloperApproved: raw.Lookup("developerStatus").Type == bson.TypeString && raw.Lookup("developerStatus").StringValue() == "APPROVED"}
 	var binding bindingDocument
 	err = tx.r.db.Collection(EmailBindingCollection).FindOne(tx.ctx, bson.M{"authId": id}).Decode(&binding)
 	if err != nil && !errors.Is(err, m.ErrNoDocuments) {

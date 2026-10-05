@@ -21,7 +21,7 @@ func developerFixture(t *testing.T) (*DeveloperApplicationRepository, *m.Databas
 	if err := EnsureEmailSchema(t.Context(), db); err != nil {
 		t.Fatal(err)
 	}
-	_, err := db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": s.AuthID}, bson.M{"$set": bson.M{"developerStatus": nil, "permissions": bson.A{"future.permission"}, "permissionRevision": int64(5), "profile": bson.M{"field": "kept"}, "associationGroupId": "kept"}})
+	_, err := db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": s.AuthID}, bson.M{"$set": bson.M{"developerStatus": nil, "developerRevision": int64(0), "permissions": bson.A{"future.permission"}, "permissionRevision": int64(5), "profile": bson.M{"field": "kept"}, "associationGroupId": "kept"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestDeveloperMongoConcurrentActivationPreservesAccount(t *testing.T) {
 		t.Fatal(event)
 	}
 	for _, status := range []string{"PENDING", "REJECTED", "SUSPENDED"} {
-		_, e := db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": s.AuthID}, bson.M{"$set": bson.M{"developerStatus": status}})
+		_, e := db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": s.AuthID}, bson.M{"$set": bson.M{"developerStatus": status, "developerRevision": int64(1)}})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -187,7 +187,7 @@ func TestDeveloperMongoHistoricalAndCorruptState(t *testing.T) {
 	t.Run("historical", func(t *testing.T) {
 		r, db, s := developerFixture(t)
 		for _, status := range []string{"APPROVED", "PENDING", "REJECTED", "SUSPENDED"} {
-			if _, e := db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": s.AuthID}, bson.M{"$set": bson.M{"developerStatus": status}}); e != nil {
+			if _, e := db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": s.AuthID}, bson.M{"$set": bson.M{"developerStatus": status, "developerRevision": int64(1)}}); e != nil {
 				t.Fatal(e)
 			}
 			out, e := r.Evaluate(t.Context(), s.TokenDigest, developerRead)

@@ -642,3 +642,63 @@ not turn off generation checks.
 | `AUTH_ACCOUNT_MANAGEMENT_READ_PER_MINUTE` | 60 | Reads per signed actor |
 | `AUTH_ACCOUNT_MANAGEMENT_WRITE_PER_MINUTE` | 10 | Writes per signed actor |
 | `AUTH_ACCOUNT_MANAGEMENT_MAX_BUCKETS` | 4096 | Bounded read/write limiter state |
+
+## Developer suspension and restoration (UC-AUTH-023)
+
+`AUTH_DEVELOPER_MANAGEMENT_ENDPOINTS_ENABLED=false` by default. Enabling it requires
+user endpoints. Native gRPC `DeveloperManagementService` and strict HTTP/JSON expose
+`POST /v1/developers:manage-status` and `POST /v1/developers:get-managed-status`.
+Gateway uses SESSION with Auth audience; Auth accepts only a valid USER JWS with
+`auth.developer.manage`, then online-checks account generation and the entire current
+administrator bundle. Invalid account generations produce 401, revoked management
+membership 403. Bodies have a 16 KiB cap, no query/unknown/duplicate fields, and
+responses use `Cache-Control: no-store`.
+
+Commands carry `subjectAuthId`, SUSPEND/RESTORE, required positive
+`expectedDeveloperRevision` and a trimmed 1–1024-byte reason. The revision starts at
+0 for ordinary users and becomes 1 on first UC013 activation; every successful
+lifecycle transition increments it exactly once. Missing/wrong BSON types and
+partial legacy state are rejected rather than migrated. Existing activation/handle
+history is preserved. SUSPEND accepts only APPROVED; RESTORE only SUSPENDED and
+requires a currently verified email, `AUTH_EMAIL_RECOVERY_READY=true`, and the
+configured email-login runtime. WITHDRAWN, PENDING and REJECTED cannot be restored.
+The target may have an ACTIVE or DISABLED account; qualification restoration does
+not restore a disabled account.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `AUTH_DEVELOPER_MANAGEMENT_READ_PER_MINUTE` | 60 | Read requests per authenticated actor |
+| `AUTH_DEVELOPER_MANAGEMENT_WRITE_PER_MINUTE` | 10 | Mutations per authenticated actor |
+| `AUTH_DEVELOPER_MANAGEMENT_MAX_BUCKETS` | 4096 | Bounded read/write bucket capacity |
+
+The Mongo authentication transaction fence makes status, revision, lifecycle audit
+and cancellation of pending owner exits atomic. `auth_developer_lifecycle_audit_events`
+records distinct events without changing UC013's one-time activation audit.
+`CancelPendingOwnerExitsTx` writes CANCELLED plus a durable pending notification in
+`auth_account_owner_exit_operations`; UC024's coordinator delivers/retries it after
+commit. App availability cannot block a governance transaction. Neither a committed
+withdrawal nor a committed account closure can be cancelled by suspension.
+
+Session, credential, email, accountRevision, ordinary user grants, independent
+reviewer/administrator permissions and permanent handle ownership are preserved.
+New App-audience JWSs carry the changed Developer status; Auth's UC002 directory
+reports it immediately. App's existing APPROVED-only application/version/profile,
+publication, tester-administration and OAuth-client owner commands consume these
+claims. Offline App verifier consumers retain the documented prior-JWS TTL window;
+App's current-owner checks apply only where its own UC defines them.
+
+The real production-Wire/App test exercises CreateApplication under new SUSPENDED
+claims, the old APPROVED JWS window, restored qualification and the preserved
+ordinary profile/Session. It also reads UC002 and exercises restoration with the
+actual email-login runtime disabled. Mongo OAuth tests show owner suspension blocks
+UserInfo/refresh while retaining user grants and unconsumed refresh credentials;
+restoration resumes eligible credentials without reviving separately revoked tokens.
+No publication slot, catalog entry or application URL is removed by this UC.
+
+UC025 can retire the original bootstrap audit after its 180-day retention only by
+atomically recording `auditRetiredAt` on the durable consumed marker and deleting the
+event, after verifying the original subject's legal minimal CLOSED tombstone. The
+marker reader still validates any extant original event, and accepts absence only
+with a non-future retention receipt and a valid closed subject. This preserves other
+administrators' access after founder account cleanup without allowing arbitrary
+missing/corrupt audit evidence to initialize or restore privileges.

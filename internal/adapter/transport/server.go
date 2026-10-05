@@ -20,6 +20,7 @@ import (
 	accountpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/account_management"
 	authv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 	developerapplicationpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_application"
+	developermanagementpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_management"
 	developerstatusv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_status"
 	emailv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_binding"
 	emailloginv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_login"
@@ -45,6 +46,7 @@ type ServerConfig struct {
 
 // UserEndpoints is an optional, fully validated runtime assembled before listening.
 type UserEndpoints struct {
+	DeveloperManagement           *DeveloperManagementService
 	PlatformAdministrator         *PlatformAdministratorService
 	AccountManagement             *AccountManagementService
 	DeveloperApplication          *DeveloperApplicationService
@@ -148,6 +150,9 @@ func newGRPCServer(
 		if endpoints.AccountManagement != nil {
 			accountpb.RegisterAccountManagementServiceServer(server, endpoints.AccountManagement)
 		}
+		if endpoints.DeveloperManagement != nil {
+			developermanagementpb.RegisterDeveloperManagementServiceServer(server, endpoints.DeveloperManagement)
+		}
 		authv1.RegisterAuthenticationServiceServer(server, endpoints.Authentication)
 		profilev1.RegisterUserProfileServiceServer(server, endpoints.Profile)
 		if endpoints.Reviewer != nil {
@@ -208,6 +213,9 @@ func newHTTPServer(configuration ServerConfig, verifier *ServiceIdentityVerifier
 		if endpoints.AccountManagement != nil {
 			accountpb.RegisterAccountManagementServiceHTTPServer(server, endpoints.AccountManagement)
 		}
+		if endpoints.DeveloperManagement != nil {
+			developermanagementpb.RegisterDeveloperManagementServiceHTTPServer(server, endpoints.DeveloperManagement)
+		}
 		authv1.RegisterAuthenticationServiceHTTPServer(server, endpoints.Authentication)
 		profilev1.RegisterUserProfileServiceHTTPServer(server, endpoints.Profile)
 		if endpoints.Reviewer != nil {
@@ -248,6 +256,8 @@ func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 	return func(r *http.Request, value any) error {
 		limit := authenticationLimit
 		switch value.(type) {
+		case *developermanagementpb.ManageDeveloperStatusRequest, *developermanagementpb.GetManagedDeveloperStatusRequest:
+			limit = min(limit, 16*1024)
 		case *adminpb.ManagePlatformAdministratorRequest, *adminpb.GetPlatformAdministratorRequest, *adminpb.ListPlatformAdministratorsRequest:
 			limit = min(limit, 16*1024)
 		case *accountpb.ManageUserAccountStatusRequest, *accountpb.GetUserAccountStatusRequest:
@@ -291,6 +301,8 @@ func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 func invalidHTTPInput(r *http.Request) error {
 	reason := "INVALID_LOGIN_INPUT"
 	switch {
+	case r.URL.Path == "/v1/developers:manage-status" || r.URL.Path == "/v1/developers:get-managed-status":
+		reason = "INVALID_DEVELOPER_MANAGEMENT_REQUEST"
 	case strings.HasPrefix(r.URL.Path, "/v1/platform-administrators:"):
 		reason = "INVALID_PLATFORM_ADMIN_REQUEST"
 	case strings.HasPrefix(r.URL.Path, "/v1/users/me/application-grants"):
@@ -355,7 +367,7 @@ func authHTTPErrorEncoder(w http.ResponseWriter, r *http.Request, err error) {
 	switch converted.Reason {
 	case "DEVELOPER_APPLICATION_REQUEST_TOO_LARGE", "EMAIL_LOGIN_REQUEST_TOO_LARGE", "EMAIL_REQUEST_TOO_LARGE", "REGISTRATION_INPUT_TOO_LARGE", "AUTHENTICATION_INPUT_TOO_LARGE", profiledomain.ErrLimit.Error():
 		converted.Code = http.StatusRequestEntityTooLarge
-	case "ACCOUNT_REVISION_EXHAUSTED", "PLATFORM_ADMIN_GRANT_BLOCKED", "LAST_PLATFORM_ADMIN_REQUIRED", "PERMISSION_REVISION_EXHAUSTED":
+	case "DEVELOPER_RESTORE_BLOCKED", "DEVELOPER_REVISION_EXHAUSTED", "ACCOUNT_REVISION_EXHAUSTED", "PLATFORM_ADMIN_GRANT_BLOCKED", "LAST_PLATFORM_ADMIN_REQUIRED", "PERMISSION_REVISION_EXHAUSTED":
 		converted.Code = http.StatusConflict
 	case "DEVELOPER_HANDLE_CHANGE_NOT_ALLOWED", "DEVELOPER_EMAIL_REQUIRED", "EMAIL_FLOW_MISMATCH", profiledomain.ErrExhausted.Error():
 		converted.Code = http.StatusConflict

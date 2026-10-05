@@ -20,11 +20,11 @@ func reviewerFixture(t *testing.T, skipBootstrap ...bool) (*ReviewerRepository, 
 	if err := EnsureReviewerSchema(t.Context(), db); err != nil {
 		t.Fatal(err)
 	}
-	_, err := db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": s.AuthID}, bson.M{"$set": bson.M{"permissions": bson.A{}, "permissionRevision": int64(1), "developerStatus": nil}})
+	_, err := db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": s.AuthID}, bson.M{"$set": bson.M{"permissions": bson.A{}, "permissionRevision": int64(1), "developerStatus": nil, "developerRevision": int64(0)}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.Collection(PrincipalCollection).InsertOne(t.Context(), bson.M{"authId": "admin", "principalType": "USER", "accountStatus": "ACTIVE", "accountRevision": int64(1), "permissions": bson.A{}, "permissionRevision": int64(1), "developerStatus": nil})
+	_, err = db.Collection(PrincipalCollection).InsertOne(t.Context(), bson.M{"authId": "admin", "principalType": "USER", "accountStatus": "ACTIVE", "accountRevision": int64(1), "permissions": bson.A{}, "permissionRevision": int64(1), "developerStatus": nil, "developerRevision": int64(0)})
 	if err != nil {
 		t.Fatal(err)
 	}

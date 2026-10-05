@@ -158,7 +158,7 @@ func TestE2E_IdentityIssuance_ProductionWire(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	mutate(bson.M{"permissions": bson.A{"app.version.review", "auth.reviewer.manage", "future.permission"}, "developerStatus": "APPROVED"})
+	mutate(bson.M{"permissions": bson.A{"app.version.review", "auth.reviewer.manage", "future.permission"}, "developerStatus": "APPROVED", "developerRevision": int64(1)})
 	for _, aud := range []string{"iwut-app-center", "iwut-auth-center"} {
 		r, e := client.IssueUserIdentityFromSession(callCtx("gateway", user.Session.SessionToken), &identityv1.IssueUserIdentityFromSessionRequest{Audience: aud})
 		if e != nil {
@@ -179,7 +179,7 @@ func TestE2E_IdentityIssuance_ProductionWire(t *testing.T) {
 			t.Fatal(p)
 		}
 	}
-	mutate(bson.M{"permissions": bson.A{}, "developerStatus": nil})
+	mutate(bson.M{"permissions": bson.A{}, "developerStatus": nil, "developerRevision": int64(0)})
 	second, e := client.IssueUserIdentityFromSession(callCtx("gateway", user.Session.SessionToken), request)
 	if e != nil || len(identityPayload(t, second.IdentityJws)["permissions"].([]any)) != 0 {
 		t.Fatal("cached capabilities", e)

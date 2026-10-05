@@ -146,11 +146,11 @@ func TestPlatformAdministratorMongoReadinessCASPaginationAndRevokedActor(t *test
 	if e != nil || len(page.Items) != 1 || page.Items[0].AuthID != "zz-c" || page.NextAfterAuthID != "" {
 		t.Fatal(page, e)
 	}
-	if _, e = r.Get(account.WithIdentity(t.Context(), actor, 1), "zz-b", actor); !errors.Is(e, d.ErrForbidden) {
+	if _, e = r.Get(account.WithIdentity(t.Context(), "zz-b", 1), "zz-b", actor); !errors.Is(e, d.ErrForbidden) {
 		t.Fatal(e)
 	}
 	rr, _ := NewReviewerRepository(r.authentication)
-	if _, e = rr.Get(account.WithIdentity(t.Context(), actor, 1), "zz-b", actor); !errors.Is(e, review.ErrForbidden) {
+	if _, e = rr.Get(account.WithIdentity(t.Context(), "zz-b", 1), "zz-b", actor); !errors.Is(e, review.ErrForbidden) {
 		t.Fatal(e)
 	}
 }
@@ -175,7 +175,7 @@ func TestPlatformAdministratorMongoPartialAndDisabledCannotProtectLast(t *testin
 	if _, e = r.Get(account.WithIdentity(t.Context(), actor, 1), actor, "other"); !errors.Is(e, d.ErrUnavailable) {
 		t.Fatal(e)
 	}
-	if _, e = r.Get(account.WithIdentity(t.Context(), "other", 1), "other", actor); !errors.Is(e, d.ErrForbidden) {
+	if _, e = r.Get(account.WithIdentity(t.Context(), "other", 1), "other", actor); !errors.Is(e, d.ErrIdentity) {
 		t.Fatal(e)
 	}
 }

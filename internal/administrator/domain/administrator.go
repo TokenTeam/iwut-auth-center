@@ -16,6 +16,7 @@ func Permissions() []string {
 }
 
 var (
+	ErrIdentity          = errors.New("INVALID_USER_IDENTITY")
 	ErrInvalid           = errors.New("INVALID_PLATFORM_ADMIN_REQUEST")
 	ErrForbidden         = errors.New("PLATFORM_ADMIN_FORBIDDEN")
 	ErrSubject           = errors.New("PLATFORM_ADMIN_SUBJECT_UNAVAILABLE")
@@ -27,7 +28,7 @@ var (
 	ErrUnavailable       = errors.New("PLATFORM_ADMIN_UNAVAILABLE")
 	ErrBootstrapConsumed = errors.New("PLATFORM_ADMIN_BOOTSTRAP_CONSUMED")
 )
-var Errors = []error{ErrInvalid, ErrForbidden, ErrSubject, ErrConflict, ErrGrantBlocked, ErrLast, ErrExhausted, ErrRate, ErrUnavailable, ErrBootstrapConsumed}
+var Errors = []error{ErrIdentity, ErrInvalid, ErrForbidden, ErrSubject, ErrConflict, ErrGrantBlocked, ErrLast, ErrExhausted, ErrRate, ErrUnavailable, ErrBootstrapConsumed}
 
 type Blocked struct{ Blocker string }
 

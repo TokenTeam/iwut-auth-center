@@ -222,7 +222,22 @@ func provideUserEndpoints(configuration config.Config, database *drivermongo.Dat
 		}
 		accountManagement = transport.NewAccountManagementService(accountusecase.NewConfigured(repo, ac.ReadPerMinute, ac.WritePerMinute, ac.MaxBuckets))
 	}
-	return &transport.UserEndpoints{AccountManagement: accountManagement, PlatformAdministrator: administrator,
+	var developerManagement *transport.DeveloperManagementService
+	if dc := configuration.DeveloperManagement; dc != nil {
+		if err := mongoadapter.EnsureDeveloperManagementSchema(ctx, database); err != nil {
+			return nil, err
+		}
+		repo, err := mongoadapter.NewDeveloperManagementRepository(repository, dc.RecoveryReady && emailLoginService != nil)
+		if err != nil {
+			return nil, err
+		}
+		gate, err := deviceprotocol.NewLimiter(deviceprotocol.RateLimits{BeginGlobal: 1000000, CompleteGlobal: 1000000, BeginSource: dc.ReadPerMinute, CompleteLocator: dc.WritePerMinute, MaxBuckets: dc.MaxBuckets})
+		if err != nil {
+			return nil, err
+		}
+		developerManagement = transport.NewDeveloperManagementService(developerusecase.NewManagement(repo, gate))
+	}
+	return &transport.UserEndpoints{DeveloperManagement: developerManagement, AccountManagement: accountManagement, PlatformAdministrator: administrator,
 		DeveloperApplication:          developerApplication,
 		EmailBinding:                  emailService,
 		EmailLogin:                    emailLoginService,

@@ -90,7 +90,7 @@ func (r *IdentityRepository) WithSession(ctx context.Context, digest []byte, pre
 		if principalType != "USER" || accountStatus != "ACTIVE" {
 			return fail(domain.ErrUnavailable)
 		}
-		if !identityFields(raw, map[string]bson.Type{"permissions": bson.TypeArray, "permissionRevision": bson.TypeInt64}) {
+		if !identityFields(raw, map[string]bson.Type{"permissions": bson.TypeArray, "permissionRevision": bson.TypeInt64}) || !validDeveloperLifecycle(raw) {
 			return fail(domain.ErrUnavailable)
 		}
 		if err := a.ConfirmAccountTx(tx, session.AuthID, session.AccountRevision); errors.Is(err, authport.ErrAuthenticationFailed) {

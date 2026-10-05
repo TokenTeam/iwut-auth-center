@@ -36,7 +36,7 @@ func userEndpointAuthenticationMiddleware(service *ServiceIdentityVerifier, prof
 			if developerApplicationMethod(tr.Operation()) || oauthGrantMethod(tr.Operation()) {
 				return handler(ctx, request)
 			}
-			if isPlatformAdministratorOperation(tr.Operation()) || accountManagementMethod(tr.Operation()) {
+			if isPlatformAdministratorOperation(tr.Operation()) || accountManagementMethod(tr.Operation()) || isDeveloperManagementOperation(tr.Operation()) {
 				if profile == nil {
 					return nil, accountError(account.ErrIdentity)
 				}

@@ -63,13 +63,6 @@ func (repository *PrincipalRepository) BatchGet(
 	cursor, err := repository.collection.Find(
 		ctx,
 		bson.M{"authId": bson.M{"$in": values}},
-		options.Find().SetProjection(bson.M{
-			"_id":             0,
-			"authId":          1,
-			"principalType":   1,
-			"developerStatus": 1,
-			"accountStatus":   1,
-		}),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("%w: batch read principals: %v", port.ErrDeveloperStatusUnavailable, err)
@@ -78,9 +71,29 @@ func (repository *PrincipalRepository) BatchGet(
 
 	principals := make([]domain.Principal, 0, len(authIDs))
 	for cursor.Next(ctx) {
-		var document principalDocument
-		if err := cursor.Decode(&document); err != nil {
+		var raw bson.Raw
+		if err := cursor.Decode(&raw); err != nil {
 			return nil, fmt.Errorf("%w: decode principal: %v", port.ErrDeveloperStatusUnavailable, err)
+		}
+		if !identityFields(raw, map[string]bson.Type{"authId": bson.TypeString, "principalType": bson.TypeString}) {
+			return nil, port.ErrDeveloperStatusUnavailable
+		}
+		if raw.Lookup("principalType").StringValue() == "USER" {
+			account := raw.Lookup("accountStatus")
+			if account.Type != bson.TypeString {
+				return nil, port.ErrDeveloperStatusUnavailable
+			}
+			if account.StringValue() == "CLOSED" {
+				if !validClosedPrincipal(raw) {
+					return nil, port.ErrDeveloperStatusUnavailable
+				}
+			} else if !validDeveloperLifecycle(raw) {
+				return nil, port.ErrDeveloperStatusUnavailable
+			}
+		}
+		var document principalDocument
+		if bson.Unmarshal(raw, &document) != nil {
+			return nil, port.ErrDeveloperStatusUnavailable
 		}
 		principal, err := principalFromDocument(document)
 		if err != nil {

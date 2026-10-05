@@ -65,7 +65,20 @@ func (a *AuthenticationRepository) administratorMarkerTx(ctx context.Context) (b
 		return nil, d.ErrUnavailable
 	}
 	var audit bson.Raw
-	if err := a.database.Collection(PlatformAdminAuditCollection).FindOne(ctx, bson.M{"eventId": raw.Lookup("eventId").StringValue(), "subjectAuthId": raw.Lookup("subjectAuthId").StringValue(), "actorType": "BOOTSTRAP_COMMAND", "operation": "GRANT", "bundleVersion": int32(1), "occurredAt": time.UnixMilli(raw.Lookup("occurredAt").DateTime())}).Decode(&audit); err != nil {
+	err := a.database.Collection(PlatformAdminAuditCollection).FindOne(ctx, bson.M{"eventId": raw.Lookup("eventId").StringValue()}).Decode(&audit)
+	if errors.Is(err, m.ErrNoDocuments) {
+		if !a.validBootstrapAuditRetirementTx(ctx, raw) {
+			return nil, d.ErrUnavailable
+		}
+		return raw, nil
+	}
+	if err != nil {
+		return nil, d.ErrUnavailable
+	}
+	if retired := raw.Lookup("auditRetiredAt"); retired.Type != 0 && !a.validBootstrapAuditRetirementTx(ctx, raw) {
+		return nil, d.ErrUnavailable
+	}
+	if !identityFields(audit, map[string]bson.Type{"eventId": bson.TypeString, "subjectAuthId": bson.TypeString, "actorType": bson.TypeString, "operation": bson.TypeString, "bundleVersion": bson.TypeInt32, "occurredAt": bson.TypeDateTime}) || audit.Lookup("subjectAuthId").StringValue() != raw.Lookup("subjectAuthId").StringValue() || audit.Lookup("actorType").StringValue() != "BOOTSTRAP_COMMAND" || audit.Lookup("operation").StringValue() != "GRANT" || audit.Lookup("bundleVersion").Int32() != 1 || audit.Lookup("occurredAt").DateTime() != raw.Lookup("occurredAt").DateTime() {
 		return nil, d.ErrUnavailable
 	}
 	if !identityFields(audit, map[string]bson.Type{"beforePermissionRevision": bson.TypeInt64, "afterPermissionRevision": bson.TypeInt64, "beforePermissions": bson.TypeArray, "afterPermissions": bson.TypeArray}) || audit.Lookup("actorAuthId").Type != 0 {
@@ -89,6 +102,26 @@ func (a *AuthenticationRepository) administratorMarkerTx(ctx context.Context) (b
 	}
 	return raw, nil
 }
+
+// A retention receipt is written only by UC025's audited cleanup transaction.
+// Absence alone cannot prove lawful deletion, even for an old bootstrap event.
+func (a *AuthenticationRepository) validBootstrapAuditRetirementTx(ctx context.Context, marker bson.Raw) bool {
+	retired := marker.Lookup("auditRetiredAt")
+	if retired.Type != bson.TypeDateTime {
+		return false
+	}
+	at := time.UnixMilli(retired.DateTime())
+	now := a.currentTime(time.Time{})
+	if at.Before(time.UnixMilli(marker.Lookup("occurredAt").DateTime()).Add(180*24*time.Hour)) || at.After(now) {
+		return false
+	}
+	var tomb bson.Raw
+	if a.database.Collection(PrincipalCollection).FindOne(ctx, bson.M{"authId": marker.Lookup("subjectAuthId").StringValue()}).Decode(&tomb) != nil {
+		return false
+	}
+	return validClosedPrincipal(tomb) && tomb.Lookup("terminatedAt").DateTime() <= retired.DateTime()
+}
+
 func adminPermissions(v bson.RawValue) ([]string, error) {
 	if v.Type != bson.TypeArray {
 		return nil, d.ErrUnavailable
@@ -144,7 +177,7 @@ func (a *AuthenticationRepository) administratorSnapshotTx(ctx context.Context, 
 func (a *AuthenticationRepository) RequireAdministratorTx(ctx context.Context, id string) error {
 	if err := a.ConfirmIdentityTx(ctx, id); err != nil {
 		if errors.Is(err, ap.ErrAuthenticationFailed) {
-			return d.ErrForbidden
+			return d.ErrIdentity
 		}
 		return d.ErrUnavailable
 	}

@@ -120,6 +120,13 @@ func (r *DeveloperApplicationRepository) Evaluate(ctx context.Context, digest []
 		default:
 			return fail(d.ErrApplicationUnavailable)
 		}
+		if raw.Lookup("developerRevision").Type != bson.TypeInt64 {
+			return fail(d.ErrApplicationUnavailable)
+		}
+		developerRevision := raw.Lookup("developerRevision").Int64()
+		if (s.Status == "" && developerRevision != 0) || (s.Status != "" && developerRevision < 1) {
+			return fail(d.ErrApplicationUnavailable)
+		}
 		var activation bson.Raw
 		err = a.database.Collection(DeveloperActivationCollection).FindOne(tx, bson.M{"authId": s.AuthID}).Decode(&activation)
 		if err == nil {
@@ -170,8 +177,10 @@ func (r *DeveloperApplicationRepository) Evaluate(ctx context.Context, digest []
 				before = nil
 				filterStatus = nil
 				set["developerStatus"] = "APPROVED"
+				set["developerRevision"] = int64(1)
+				set["developerStatusChangedAt"] = now
 			}
-			result, err := a.database.Collection(PrincipalCollection).UpdateOne(tx, bson.M{"authId": s.AuthID, "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": filterStatus}, bson.M{"$set": set})
+			result, err := a.database.Collection(PrincipalCollection).UpdateOne(tx, bson.M{"authId": s.AuthID, "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": filterStatus, "developerRevision": developerRevision}, bson.M{"$set": set})
 			if err != nil {
 				return err
 			}

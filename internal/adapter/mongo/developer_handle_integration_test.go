@@ -32,7 +32,7 @@ func developerAdditionalUser(t *testing.T, db *m.Database) SessionDocument {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	session := SessionDocument{AccountRevision: 1, SessionID: sessionID, AuthID: authID, AuthenticationMethod: "DEVICE_CREDENTIAL", CredentialID: credentialID, TokenDigest: digest, CreatedAt: now, AuthenticatedAt: now, LastUsedAt: now, ExpiresAt: now.Add(time.Hour)}
 	for collection, doc := range map[string]any{
-		PrincipalCollection:    bson.M{"authId": authID, "principalType": "USER", "accountStatus": "ACTIVE", "accountRevision": int64(1), "developerStatus": nil, "permissions": bson.A{}, "permissionRevision": int64(1)},
+		PrincipalCollection:    bson.M{"authId": authID, "principalType": "USER", "accountStatus": "ACTIVE", "accountRevision": int64(1), "developerStatus": nil, "developerRevision": int64(0), "permissions": bson.A{}, "permissionRevision": int64(1)},
 		CredentialCollection:   CredentialDocument{AuthID: authID, CredentialID: credentialID, ProtocolVersion: "iwut-device-v1", PublicKey: public, Fingerprint: fingerprint, CreatedAt: now},
 		SessionCollection:      session,
 		EmailBindingCollection: bindingDocument{AuthID: authID, Email: authID + "@example.test", Revision: 1, VerifiedAt: now},
@@ -83,7 +83,7 @@ func TestDeveloperHandleMongoConcurrentNamesAndRetention(t *testing.T) {
 				t.Fatal(collection, n, e)
 			}
 		}
-		if _, e = db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": a.s.AuthID}, bson.M{"$set": bson.M{"developerStatus": "SUSPENDED"}}); e != nil {
+		if _, e = db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": a.s.AuthID}, bson.M{"$set": bson.M{"developerStatus": "SUSPENDED", "developerRevision": int64(1)}}); e != nil {
 			t.Fatal(e)
 		}
 		if _, e = r.Evaluate(t.Context(), a.s.TokenDigest, developerApplyName("alice")); !errors.Is(e, d.ErrReapplication) {
@@ -145,7 +145,7 @@ func TestDeveloperHandleMongoLegacyClaimAndIndexUpgrade(t *testing.T) {
 		t.Fatal(e)
 	}
 	then := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
-	if _, e := db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": s.AuthID}, bson.M{"$set": bson.M{"developerStatus": "APPROVED"}}); e != nil {
+	if _, e := db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": s.AuthID}, bson.M{"$set": bson.M{"developerStatus": "APPROVED", "developerRevision": int64(1)}}); e != nil {
 		t.Fatal(e)
 	}
 	legacyEvent := bson.M{"eventId": "legacy", "actorAuthId": s.AuthID, "subjectAuthId": s.AuthID, "action": developerApplyAction, "beforeStatus": nil, "afterStatus": "APPROVED", "emailBindingRevision": int64(1), "occurredAt": then, "result": "APPROVED"}
@@ -221,7 +221,7 @@ func TestDeveloperHandleMongoLegacyClaimAndIndexUpgrade(t *testing.T) {
 }
 func TestDeveloperHandleMongoHistoricalWithoutActivationAndGates(t *testing.T) {
 	r, db, s := developerFixture(t)
-	if _, e := db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": s.AuthID}, bson.M{"$set": bson.M{"developerStatus": "APPROVED"}}); e != nil {
+	if _, e := db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": s.AuthID}, bson.M{"$set": bson.M{"developerStatus": "APPROVED", "developerRevision": int64(1)}}); e != nil {
 		t.Fatal(e)
 	}
 	closed := func(s d.ApplicationState) (d.HandleClaim, error) {
@@ -287,7 +287,7 @@ func TestDeveloperHandleMongoDamagedOwnershipNeverBecomesLegacy(t *testing.T) {
 	}
 	t.Run("legacy claim owner deleted", func(t *testing.T) {
 		r, db, s := developerFixture(t)
-		if _, e := db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": s.AuthID}, bson.M{"$set": bson.M{"developerStatus": "APPROVED"}}); e != nil {
+		if _, e := db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": s.AuthID}, bson.M{"$set": bson.M{"developerStatus": "APPROVED", "developerRevision": int64(1)}}); e != nil {
 			t.Fatal(e)
 		}
 		if _, e := r.Evaluate(t.Context(), s.TokenDigest, developerApply); e != nil {
@@ -378,7 +378,7 @@ func TestDeveloperHandleMongoConstraintIdentityAndClaimRollback(t *testing.T) {
 	})
 	t.Run("historical claim audit rollback", func(t *testing.T) {
 		r, db, s := developerFixture(t)
-		if _, e := db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": s.AuthID}, bson.M{"$set": bson.M{"developerStatus": "APPROVED"}}); e != nil {
+		if _, e := db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": s.AuthID}, bson.M{"$set": bson.M{"developerStatus": "APPROVED", "developerRevision": int64(1)}}); e != nil {
 			t.Fatal(e)
 		}
 		if e := db.RunCommand(t.Context(), bson.D{{Key: "collMod", Value: DeveloperApplicationAuditCollection}, {Key: "validator", Value: bson.M{"neverPresent": bson.M{"$exists": true}}}}).Err(); e != nil {

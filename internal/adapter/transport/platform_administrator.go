@@ -96,7 +96,7 @@ func platformAdministratorError(err error) error {
 	for _, p := range []struct {
 		err  error
 		code codes.Code
-	}{{d.ErrInvalid, codes.InvalidArgument}, {d.ErrForbidden, codes.PermissionDenied}, {d.ErrSubject, codes.NotFound}, {d.ErrConflict, codes.Aborted}, {d.ErrGrantBlocked, codes.FailedPrecondition}, {d.ErrLast, codes.FailedPrecondition}, {d.ErrExhausted, codes.FailedPrecondition}, {d.ErrRate, codes.ResourceExhausted}} {
+	}{{d.ErrIdentity, codes.Unauthenticated}, {d.ErrInvalid, codes.InvalidArgument}, {d.ErrForbidden, codes.PermissionDenied}, {d.ErrSubject, codes.NotFound}, {d.ErrConflict, codes.Aborted}, {d.ErrGrantBlocked, codes.FailedPrecondition}, {d.ErrLast, codes.FailedPrecondition}, {d.ErrExhausted, codes.FailedPrecondition}, {d.ErrRate, codes.ResourceExhausted}} {
 		if errors.Is(err, p.err) {
 			code, reason = p.code, p.err.Error()
 			break

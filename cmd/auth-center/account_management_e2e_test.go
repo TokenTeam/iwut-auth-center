@@ -8,6 +8,8 @@ import (
 	"crypto/sha256"
 	pb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/account_management"
 	authpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
+	adminpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/platform_administrator"
+	reviewpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/reviewer_permission"
 	profilepb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/user_profile"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"google.golang.org/grpc"
@@ -23,7 +25,7 @@ import (
 	"time"
 )
 
-func runAccountManagementFlow(t *testing.T, env map[string]string, conn *grpc.ClientConn, admin *authpb.UserRegistrationResult, issue func(*authpb.UserRegistrationResult, string) string) {
+func runAccountManagementFlow(t *testing.T, env map[string]string, conn *grpc.ClientConn, admin *authpb.UserRegistrationResult, issue func(*authpb.UserRegistrationResult, string) string, bind func(*authpb.UserRegistrationResult, string)) {
 	t.Helper()
 	client := pb.NewAccountManagementServiceClient(conn)
 	auth := authpb.NewAuthenticationServiceClient(conn)
@@ -52,6 +54,12 @@ func runAccountManagementFlow(t *testing.T, env map[string]string, conn *grpc.Cl
 	if _, err = client.ManageUserAccountStatus(ctx, &pb.ManageUserAccountStatusRequest{SubjectAuthId: admin.AuthId, Action: pb.AccountStatusAction_ACCOUNT_STATUS_ACTION_DISABLE, ExpectedAccountRevision: proto.Int64(1), Reason: "last admin"}); status.Code(err) != codes.FailedPrecondition {
 		t.Fatal("last administrator disabled", err)
 	}
+	bind(user, "managed-admin@example.test")
+	admins := adminpb.NewPlatformAdministratorServiceClient(conn)
+	if _, err := admins.ManagePlatformAdministrator(ctx, &adminpb.ManagePlatformAdministratorRequest{SubjectAuthId: user.AuthId, Action: adminpb.Action_GRANT, ExpectedPermissionRevision: proto.Int64(1), Reason: "test old administrator generation"}); err != nil {
+		t.Fatal(err)
+	}
+	oldAdminCtx := metadata.NewOutgoingContext(t.Context(), metadata.Pairs("x-iwut-identity", issue(user, "iwut-auth-center")))
 	pending, err := auth.BeginDeviceLogin(t.Context(), &authpb.BeginDeviceLoginRequest{CredentialLocator: &authpb.BeginDeviceLoginRequest_CredentialId{CredentialId: user.CredentialId}})
 	if err != nil {
 		t.Fatal(err)
@@ -76,6 +84,15 @@ func runAccountManagementFlow(t *testing.T, env map[string]string, conn *grpc.Cl
 	}
 	if _, err = profilepb.NewUserProfileServiceClient(conn).GetOwnProfile(oldUserCtx, &profilepb.GetOwnProfileRequest{}); status.Code(err) != codes.Unauthenticated {
 		t.Fatal("old JWS revived", err)
+	}
+	if _, err := admins.GetPlatformAdministrator(oldAdminCtx, &adminpb.GetPlatformAdministratorRequest{SubjectAuthId: admin.AuthId}); status.Code(err) != codes.Unauthenticated {
+		t.Fatal("old admin generation", err)
+	}
+	if _, err := reviewpb.NewReviewerPermissionServiceClient(conn).GetApplicationReviewPermissions(oldAdminCtx, &reviewpb.GetApplicationReviewPermissionsRequest{SubjectAuthId: user.AuthId}); status.Code(err) != codes.Unauthenticated {
+		t.Fatal("old reviewer-manager generation", err)
+	}
+	if _, err := admins.ManagePlatformAdministrator(ctx, &adminpb.ManagePlatformAdministratorRequest{SubjectAuthId: user.AuthId, Action: adminpb.Action_REVOKE, ExpectedPermissionRevision: proto.Int64(2), Reason: "end generation test"}); err != nil {
+		t.Fatal(err)
 	}
 	fresh := loginUser(t, auth, key, user.CredentialId)
 	user.Session = fresh

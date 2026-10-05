@@ -25,14 +25,14 @@ func TestPrincipalRepository_BatchGetAndUniqueAuthID(t *testing.T) {
 	}
 	collection := database.Collection(PrincipalCollection)
 	_, err := collection.InsertMany(t.Context(), []any{
-		bson.M{"authId": "user-a", "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": "APPROVED"},
-		bson.M{"authId": "user-b", "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": "SUSPENDED"},
-		bson.M{"authId": "ordinary-user", "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": nil},
+		bson.M{"authId": "user-a", "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": "APPROVED", "developerRevision": int64(1)},
+		bson.M{"authId": "user-b", "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": "SUSPENDED", "developerRevision": int64(1)},
+		bson.M{"authId": "ordinary-user", "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": nil, "developerRevision": int64(0)},
 	})
 	if err != nil {
 		t.Fatalf("insert fixtures: %v", err)
 	}
-	_, err = collection.InsertOne(t.Context(), bson.M{"authId": "user-a", "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": "PENDING"})
+	_, err = collection.InsertOne(t.Context(), bson.M{"authId": "user-a", "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": "PENDING", "developerRevision": int64(1)})
 	if !drivermongo.IsDuplicateKeyError(err) {
 		t.Fatalf("duplicate insert error = %v, want duplicate key", err)
 	}

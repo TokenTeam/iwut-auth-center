@@ -2,20 +2,22 @@ package mongo
 
 import (
 	"errors"
+	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	d "iwut-auth-center/internal/developer/domain"
 	p "iwut-auth-center/internal/developer/port"
 	u "iwut-auth-center/internal/developer/usecase"
 	"testing"
+	"time"
 )
 
 func TestBR_DEV_003_LifecycleMongoProjection(t *testing.T) {
 	db := integrationDatabase(t)
 	_, err := db.Collection(PrincipalCollection).InsertMany(t.Context(), []any{
-		bson.M{"authId": "withdrawn", "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": "WITHDRAWN"},
-		bson.M{"authId": "disabled", "principalType": "USER", "accountStatus": "DISABLED", "developerStatus": "SUSPENDED"},
-		bson.M{"authId": "closed", "principalType": "USER", "accountStatus": "CLOSED"},
-		bson.M{"authId": "broken", "principalType": "USER", "developerStatus": "APPROVED"},
+		bson.M{"authId": "withdrawn", "principalType": "USER", "accountStatus": "ACTIVE", "developerStatus": "WITHDRAWN", "developerRevision": int64(1)},
+		bson.M{"authId": "disabled", "principalType": "USER", "accountStatus": "DISABLED", "developerStatus": "SUSPENDED", "developerRevision": int64(1)},
+		bson.M{"authId": "closed", "principalType": "USER", "accountStatus": "CLOSED", "accountRevision": int64(2), "terminatedAt": time.Now(), "closureOperationId": uuid.NewString()},
+		bson.M{"authId": "broken", "principalType": "USER", "developerStatus": "APPROVED", "developerRevision": int64(1)},
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -39,7 +39,7 @@ func (r *ReviewerRepository) transaction(ctx context.Context, fn func(context.Co
 	err := r.authentication.WithAuthTransaction(ctx, func(tx context.Context) error {
 		applicationErr = nil
 		err := fn(tx)
-		for _, known := range []error{domain.ErrForbidden, domain.ErrSubject, domain.ErrConflict, domain.ErrExhausted, domain.ErrBootstrapConsumed, domain.ErrUnavailable} {
+		for _, known := range []error{domain.ErrIdentity, domain.ErrForbidden, domain.ErrSubject, domain.ErrConflict, domain.ErrExhausted, domain.ErrBootstrapConsumed, domain.ErrUnavailable} {
 			if errors.Is(err, known) {
 				applicationErr = known
 				break
@@ -97,6 +97,9 @@ func (r *ReviewerRepository) read(ctx context.Context, id string) (domain.State,
 }
 func (r *ReviewerRepository) authorize(ctx context.Context, actor string) error {
 	err := r.authentication.RequireAdministratorTx(ctx, actor)
+	if errors.Is(err, admin.ErrIdentity) {
+		return domain.ErrIdentity
+	}
 	if errors.Is(err, admin.ErrForbidden) {
 		return domain.ErrForbidden
 	}
