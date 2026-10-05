@@ -45,6 +45,9 @@ func canonicalReservations(value d.NamespaceReservations) ([]byte, error) {
 	if !validOperationID(value.OperationID) || value.AuthID == "" || len(value.AuthID) > 200 || !utf8.ValidString(value.AuthID) || strings.TrimSpace(value.AuthID) != value.AuthID {
 		return nil, errors.New("invalid namespace reservation identity")
 	}
+	if len(value.Fingerprints) == 0 {
+		return nil, errors.New("namespace reservations require at least one credential fingerprint")
+	}
 	r := reservationsRecord{Version: 1, AuthID: value.AuthID, OperationID: value.OperationID, Fingerprints: []string{}}
 	// Sort by raw fingerprint bytes, independently of base64's alphabet order.
 	fingerprints := make([][]byte, 0, len(value.Fingerprints))

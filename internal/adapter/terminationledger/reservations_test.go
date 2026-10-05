@@ -130,7 +130,7 @@ func TestNamespaceCanonicalSortingDeduplicationAndInvalidInput(t *testing.T) {
 	}
 }
 func TestNamespaceCorruptionFailsClosedAtReadStoreAndStartup(t *testing.T) {
-	for _, mutation := range []string{"missing", "truncated", "unknown", "duplicate", "unsorted", "duplicate_key", "wrong_auth", "wrong_name", "permissive", "symlink", "future_claim"} {
+	for _, mutation := range []string{"missing", "truncated", "unknown", "duplicate", "unsorted", "duplicate_key", "empty_keys", "null_keys", "wrong_auth", "wrong_name", "permissive", "symlink", "future_claim"} {
 		t.Run(mutation, func(t *testing.T) {
 			dir := privateDirectory(t)
 			l, err := Open(dir)
@@ -156,15 +156,19 @@ func TestNamespaceCorruptionFailsClosedAtReadStoreAndStartup(t *testing.T) {
 				err = os.WriteFile(path, append([]byte(`{"extra":1,`), data[1:]...), 0600)
 			case "duplicate":
 				err = os.WriteFile(path, append([]byte(`{"version":1,`), data[1:]...), 0600)
-			case "unsorted", "duplicate_key":
+			case "unsorted", "duplicate_key", "empty_keys", "null_keys":
 				var record reservationsRecord
 				if err = json.Unmarshal(data, &record); err != nil {
 					t.Fatal(err)
 				}
 				if mutation == "unsorted" {
 					record.Fingerprints[0], record.Fingerprints[1] = record.Fingerprints[1], record.Fingerprints[0]
-				} else {
+				} else if mutation == "duplicate_key" {
 					record.Fingerprints = append(record.Fingerprints, record.Fingerprints[0])
+				} else if mutation == "empty_keys" {
+					record.Fingerprints = []string{}
+				} else {
+					record.Fingerprints = nil
 				}
 				data, err = json.Marshal(record)
 				if err == nil {
@@ -243,6 +247,36 @@ func TestConflictingPermanentNamespacesFailStartup(t *testing.T) {
 			}
 			if _, err = Open(dir); err == nil {
 				t.Fatal("conflicting permanent namespace accepted")
+			}
+		})
+	}
+}
+
+func TestNamespaceSnapshotCannotOmitEveryCredential(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		fingerprints [][]byte
+	}{{"nil", nil}, {"empty", [][]byte{}}} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := privateDirectory(t)
+			l, err := Open(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			value := reservationsFixture(fixture())
+			value.Fingerprints = tc.fingerprints
+			if _, err := canonicalReservations(value); err == nil {
+				t.Fatal("empty namespace snapshot encoded")
+			}
+			if err := l.StoreReservations(t.Context(), value); err == nil {
+				t.Fatal("empty namespace snapshot published")
+			}
+			if _, err := l.Reservations(t.Context(), value.OperationID); !errors.Is(err, p.ErrReservationsNotFound) {
+				t.Fatalf("failed write left a snapshot: %v", err)
+			}
+			files, err := os.ReadDir(dir)
+			if err != nil || len(files) != 0 {
+				t.Fatalf("failed validation wrote files: %v %v", files, err)
 			}
 		})
 	}
