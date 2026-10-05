@@ -3,6 +3,7 @@ package ownerexitworker
 import (
 	"context"
 	"iwut-auth-center/internal/ownerexit/usecase"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -27,7 +28,9 @@ func (w *Worker) Start(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-timer.C:
-			_ = w.coordinator.Tick(ctx)
+			if e := w.coordinator.Tick(ctx); e != nil && ctx.Err() == nil {
+				slog.Error("account owner exit delivery unavailable")
+			}
 		}
 	}
 }

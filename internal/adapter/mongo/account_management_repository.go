@@ -153,6 +153,11 @@ func (r *AccountManagementRepository) Manage(ctx context.Context, c d.Command) (
 		if updated.MatchedCount != 1 {
 			return d.ErrConflict
 		}
+		if c.Action == "DISABLE" {
+			if err = r.auth.CancelPendingOwnerExitsTx(tx, c.SubjectAuthID, "ACCOUNT_DISABLED", now); err != nil {
+				return err
+			}
+		}
 		_, err = r.auth.database.Collection(AccountStatusAuditCollection).InsertOne(tx, bson.M{"eventId": eventID, "actorAuthId": c.ActorAuthID, "subjectAuthId": c.SubjectAuthID, "action": c.Action, "reason": c.Reason, "beforeStatus": before.Status, "afterStatus": want, "beforeAccountRevision": before.Revision, "afterAccountRevision": result.Revision, "occurredAt": now})
 		return err
 	})

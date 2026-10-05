@@ -269,6 +269,8 @@ func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 	return func(r *http.Request, value any) error {
 		limit := authenticationLimit
 		switch value.(type) {
+		case *withdrawalpb.PrepareDeveloperWithdrawalRequest, *withdrawalpb.ConfirmDeveloperWithdrawalRequest, *withdrawalpb.CancelDeveloperWithdrawalRequest, *withdrawalpb.GetDeveloperWithdrawalRequest:
+			limit = 16 * 1024
 		case *developermanagementpb.ManageDeveloperStatusRequest, *developermanagementpb.GetManagedDeveloperStatusRequest:
 			limit = min(limit, 16*1024)
 		case *adminpb.ManagePlatformAdministratorRequest, *adminpb.GetPlatformAdministratorRequest, *adminpb.ListPlatformAdministratorsRequest:

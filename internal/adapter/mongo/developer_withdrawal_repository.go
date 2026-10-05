@@ -6,7 +6,6 @@ import (
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	m "go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	a "iwut-auth-center/internal/authentication/domain"
 	ap "iwut-auth-center/internal/authentication/port"
 	dev "iwut-auth-center/internal/developer/domain"
@@ -25,8 +24,7 @@ func EnsureDeveloperWithdrawalSchema(ctx context.Context, db *m.Database) error 
 	if e := EnsureOwnerExitSchema(ctx, db); e != nil {
 		return e
 	}
-	_, e := db.Collection("auth_developer_lifecycle_audit_events").Indexes().CreateMany(ctx, []m.IndexModel{{Keys: bson.D{{Key: "eventId", Value: 1}}, Options: options.Index().SetUnique(true).SetName("developer_lifecycle_event_unique")}, {Keys: bson.D{{Key: "subjectAuthId", Value: 1}, {Key: "occurredAt", Value: 1}, {Key: "eventId", Value: 1}}, Options: options.Index().SetName("developer_lifecycle_subject_history")}})
-	return e
+	return EnsureDeveloperManagementSchema(ctx, db)
 }
 func (r *DeveloperWithdrawalRepository) tx(ctx context.Context, fn func(context.Context) error) error {
 	var cause error
@@ -71,15 +69,21 @@ func (r *DeveloperWithdrawalRepository) principal(ctx context.Context, id string
 	if err != nil {
 		return
 	}
-	if !identityFields(raw, map[string]bson.Type{"developerStatus": bson.TypeString, "accountRevision": bson.TypeInt64, "developerRevision": bson.TypeInt64, "permissionRevision": bson.TypeInt64}) {
+	if !identityFields(raw, map[string]bson.Type{"accountRevision": bson.TypeInt64, "developerRevision": bson.TypeInt64, "permissionRevision": bson.TypeInt64}) {
 		err = d.ErrUnavailable
 		return
 	}
-	status = raw.Lookup("developerStatus").StringValue()
+	if !validDeveloperLifecycle(raw) {
+		err = d.ErrUnavailable
+		return
+	}
+	if value := raw.Lookup("developerStatus"); value.Type == bson.TypeString {
+		status = value.StringValue()
+	}
 	ar = raw.Lookup("accountRevision").Int64()
 	dr = raw.Lookup("developerRevision").Int64()
 	pr = raw.Lookup("permissionRevision").Int64()
-	if ar < 1 || dr < 1 || pr < 1 || !dev.DeveloperStatus(status).IsValid() {
+	if ar < 1 || pr < 1 {
 		err = d.ErrUnavailable
 	}
 	return
@@ -236,7 +240,7 @@ func (r *DeveloperWithdrawalRepository) Confirm(ctx context.Context, digest []by
 		if res.MatchedCount != 1 {
 			return d.ErrConflict
 		}
-		_, e = r.auth.database.Collection("auth_developer_lifecycle_audit_events").InsertOne(tx, bson.M{"eventId": uuid.NewString(), "actorAuthId": op.AuthID, "subjectAuthId": op.AuthID, "action": "WITHDRAW", "beforeStatus": "APPROVED", "afterStatus": "WITHDRAWN", "beforeRevision": op.DeveloperRevision, "afterRevision": op.DeveloperRevision + 1, "occurredAt": now, "operationId": op.OperationID})
+		_, e = r.auth.database.Collection(DeveloperLifecycleAuditCollection).InsertOne(tx, bson.M{"eventId": uuid.NewString(), "actorAuthId": op.AuthID, "subjectAuthId": op.AuthID, "action": "WITHDRAW", "beforeStatus": "APPROVED", "afterStatus": "WITHDRAWN", "beforeRevision": op.DeveloperRevision, "afterRevision": op.DeveloperRevision + 1, "occurredAt": now, "operationId": op.OperationID})
 		if e != nil {
 			return e
 		}
