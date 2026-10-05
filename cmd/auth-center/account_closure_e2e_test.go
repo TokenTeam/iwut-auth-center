@@ -65,6 +65,22 @@ func TestAccountClosureActualAppWire(t *testing.T) {
 					t.Fatal(e)
 				}
 			}
+			if !disabled {
+				candidate := map[string]string{}
+				for k, v := range f.Env {
+					candidate[k] = v
+				}
+				candidate["AUTH_ACCOUNT_CLOSURE_ENABLED"] = "false"
+				delete(candidate, "AUTH_TERMINATION_LEDGER_DIR")
+				c, e := config.Load(func(k string) (string, bool) { v, ok := candidate[k]; return v, ok })
+				if e != nil {
+					t.Fatal(e)
+				}
+				if _, cleanup, e := wireApp(c); e == nil {
+					cleanup()
+					t.Fatal("pending proof accepted without closure runtime")
+				}
+			}
 			prepare := &pb.PrepareAccountClosureRequest{OperationId: challenge.OperationId, Signature: signDevice(t, key, challenge.SigningPayload)}
 			var ready *pb.AccountClosurePreparation
 			if disabled {
