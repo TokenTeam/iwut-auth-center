@@ -17,6 +17,9 @@ func (r *AccountClosureRepository) Retain(ctx context.Context, now time.Time, li
 	if limit < 1 || limit > 500 {
 		return d.ErrInvalid
 	}
+	if e := r.retireClosureSecrets(ctx, now, limit); e != nil {
+		return e
+	}
 	return r.transaction(ctx, func(tx context.Context) error {
 		cutoff := now.Add(-180 * 24 * time.Hour)
 		for _, spec := range []struct{ collection, subject, at string }{
@@ -83,60 +86,6 @@ func (r *AccountClosureRepository) Retain(ctx context.Context, now time.Time, li
 			}
 			cur.Close(tx)
 		}
-		// Erase secret digests at their deadline even when a remote cleanup is stuck.
-		cur, e := r.auth.database.Collection(AccountClosureCollection).Find(tx, bson.M{"retainUntil": bson.M{"$lte": now}, "$or": bson.A{bson.M{"receiptDigest": bson.M{"$exists": true}}, bson.M{"confirmationDigest": bson.M{"$exists": true}}, bson.M{"secretsRetiredAt": bson.M{"$exists": false}}}}, options.Find().SetLimit(int64(limit)))
-		if e != nil {
-			return e
-		}
-		defer cur.Close(tx)
-		for cur.Next(tx) {
-			var op closureOperationDocument
-			if cur.Decode(&op) != nil {
-				return d.ErrUnavailable
-			}
-			_, e = r.auth.database.Collection(AccountClosureCollection).UpdateOne(tx, bson.M{"operationId": op.OperationID}, bson.M{"$unset": bson.M{"confirmationDigest": "", "receiptDigest": "", "publicKey": "", "developerHandle": "", "mutationDigest": ""}, "$set": bson.M{"secretsRetiredAt": now}})
-			if e != nil {
-				return e
-			}
-			if op.TerminatedAt == nil {
-				if op.AuthID != "" {
-					owned, e := r.auth.ReadOwnerExitTx(tx, op.AuthID, op.OperationID)
-					if e == nil && (!owned.AppAcknowledged || owned.Decision == owner.Pending) {
-						continue
-					}
-					if e != nil && !errors.Is(e, owner.ErrNotFound) {
-						return e
-					}
-				}
-				_, e = r.auth.database.Collection(AccountClosureCollection).DeleteOne(tx, bson.M{"operationId": op.OperationID})
-				if e != nil {
-					return e
-				}
-				continue
-			}
-			_, e = r.auth.database.Collection(AccountClosureCollection).UpdateOne(tx, bson.M{"operationId": op.OperationID}, bson.M{"$unset": bson.M{"confirmationDigest": "", "receiptDigest": "", "publicKey": "", "developerHandle": "", "mutationDigest": ""}})
-			if e != nil {
-				return e
-			}
-			owned, e := r.auth.ReadOwnerExitTx(tx, op.AuthID, op.OperationID)
-			if e != nil {
-				return e
-			}
-			if op.LocalCleanupComplete && owned.AppAcknowledged && owned.AppCleanupState == "COMPLETE" {
-				_, e = r.auth.database.Collection(AccountClosureCollection).DeleteOne(tx, bson.M{"operationId": op.OperationID})
-				if e != nil {
-					return e
-				}
-				_, e = r.auth.database.Collection(AccountClosureTaskCollection).DeleteOne(tx, bson.M{"operationId": op.OperationID, "localComplete": true})
-				if e != nil {
-					return e
-				}
-			}
-		}
-
-		if e = cur.Err(); e != nil {
-			return e
-		}
 		expired, e := r.auth.database.Collection(AccountClosureCollection).Aggregate(tx, m.Pipeline{bson.D{{Key: "$match", Value: bson.M{"retainUntil": bson.M{"$lte": now}, "terminatedAt": bson.M{"$exists": false}}}}, bson.D{{Key: "$lookup", Value: bson.M{"from": OwnerExitCollection, "localField": "operationId", "foreignField": "operationId", "as": "exitDecision"}}}, bson.D{{Key: "$match", Value: bson.M{"$or": bson.A{bson.M{"exitDecision": bson.M{"$size": 0}}, bson.M{"exitDecision.decision": owner.Cancelled, "exitDecision.appAcknowledged": true}}}}}, bson.D{{Key: "$limit", Value: int64(limit)}}})
 		if e != nil {
 			return e
@@ -177,5 +126,18 @@ func (r *AccountClosureRepository) Retain(ctx context.Context, now time.Time, li
 			}
 		}
 		return tasks.Err()
+	})
+}
+
+// Secret expiry cannot depend on the availability of App or a restored decision
+// receipt. It commits separately from audit/task retirement and is always bounded.
+func (r *AccountClosureRepository) retireClosureSecrets(ctx context.Context, now time.Time, limit int) error {
+	return r.transaction(ctx, func(tx context.Context) error {
+		ids, e := r.batchIDs(tx, AccountClosureCollection, bson.M{"retainUntil": bson.M{"$lte": now}, "$or": bson.A{bson.M{"receiptDigest": bson.M{"$exists": true}}, bson.M{"confirmationDigest": bson.M{"$exists": true}}, bson.M{"secretsRetiredAt": bson.M{"$exists": false}}}}, limit)
+		if e != nil || len(ids) == 0 {
+			return e
+		}
+		_, e = r.auth.database.Collection(AccountClosureCollection).UpdateMany(tx, bson.M{"_id": bson.M{"$in": ids}}, bson.M{"$unset": bson.M{"confirmationDigest": "", "receiptDigest": "", "publicKey": "", "developerHandle": "", "mutationDigest": ""}, "$set": bson.M{"secretsRetiredAt": now}})
+		return e
 	})
 }

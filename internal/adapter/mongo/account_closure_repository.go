@@ -33,7 +33,7 @@ func NewAccountClosureRepository(a *AuthenticationRepository) (*AccountClosureRe
 }
 func EnsureAccountClosureSchema(ctx context.Context, db *m.Database) error {
 	for collection, models := range map[string][]m.IndexModel{
-		AccountClosureCollection:      {{Keys: bson.D{{Key: "operationId", Value: 1}}, Options: options.Index().SetUnique(true)}, {Keys: bson.D{{Key: "requestId", Value: 1}}, Options: options.Index().SetUnique(true)}, {Keys: bson.D{{Key: "authId", Value: 1}, {Key: "state", Value: 1}}}},
+		AccountClosureCollection:      {{Keys: bson.D{{Key: "operationId", Value: 1}}, Options: options.Index().SetUnique(true)}, {Keys: bson.D{{Key: "requestId", Value: 1}}, Options: options.Index().SetUnique(true).SetPartialFilterExpression(bson.M{"requestId": bson.M{"$type": "string"}})}, {Keys: bson.D{{Key: "authId", Value: 1}, {Key: "state", Value: 1}}}},
 		AccountClosureTaskCollection:  {{Keys: bson.D{{Key: "operationId", Value: 1}}, Options: options.Index().SetUnique(true)}},
 		AccountClosureAuditCollection: {{Keys: bson.D{{Key: "operationId", Value: 1}}, Options: options.Index().SetUnique(true)}},
 		CredentialTombstoneCollection: {{Keys: bson.D{{Key: "fingerprint", Value: 1}}, Options: options.Index().SetUnique(true)}},
@@ -73,6 +73,9 @@ func (r *AccountClosureRepository) read(ctx context.Context, id string) (d.Opera
 	if !owner.ValidOperationID(o.OperationID) || len(o.Challenge) != 32 || o.PolicyVersion != d.PolicyVersion || o.ExpiresAt.Sub(o.CreatedAt) != 5*time.Minute {
 		return o, d.ErrUnavailable
 	}
+	if o.FailedAttempts < 0 || o.FailedAttempts > 5 || !slices.Contains([]string{d.Preparing, d.Ready, d.Cancelled, d.TerminationPending, d.Terminated, d.CleanupComplete}, o.State) {
+		return o, d.ErrUnavailable
+	}
 	if o.Acceptable && (!owner.ValidAuthID(o.AuthID) || o.AccountRevision <= 0) {
 		return o, d.ErrUnavailable
 	}
@@ -90,7 +93,7 @@ func (r *AccountClosureRepository) save(ctx context.Context, o d.Operation) erro
 func (r *AccountClosureRepository) Begin(ctx context.Context, o d.Operation) (d.Operation, error) {
 	var out d.Operation
 	e := r.transaction(ctx, func(tx context.Context) error {
-		_, e := r.auth.database.Collection(AccountClosureCollection).DeleteOne(tx, bson.M{"requestId": o.RequestID, "retainUntil": bson.M{"$lte": o.CreatedAt}, "terminatedAt": bson.M{"$exists": false}})
+		_, e := r.auth.database.Collection(AccountClosureCollection).UpdateMany(tx, bson.M{"requestId": o.RequestID, "createdAt": bson.M{"$lte": o.CreatedAt.Add(-24 * time.Hour)}}, bson.M{"$unset": bson.M{"requestId": ""}})
 		if e != nil {
 			return e
 		}
@@ -177,6 +180,9 @@ func (r *AccountClosureRepository) snapshot(ctx context.Context, o d.Operation) 
 	if !identityFields(raw, map[string]bson.Type{"principalType": bson.TypeString, "accountStatus": bson.TypeString, "accountRevision": bson.TypeInt64, "developerRevision": bson.TypeInt64, "permissionRevision": bson.TypeInt64, "permissions": bson.TypeArray}) {
 		return o, "", d.ErrUnavailable
 	}
+	if !validDeveloperLifecycle(raw) {
+		return o, "", d.ErrUnavailable
+	}
 	state := raw.Lookup("accountStatus").StringValue()
 	if raw.Lookup("principalType").StringValue() != "USER" || (state != "ACTIVE" && state != "DISABLED") || raw.Lookup("accountRevision").Int64() != o.AccountRevision {
 		return o, "", d.ErrProof
@@ -224,8 +230,20 @@ func (r *AccountClosureRepository) snapshot(ctx context.Context, o d.Operation) 
 		}
 	}
 	o.DeveloperHandle = ""
-	if v := raw.Lookup("developerHandle"); v.Type == bson.TypeString {
-		o.DeveloperHandle = v.StringValue()
+	var handle bson.Raw
+	e = r.auth.database.Collection(DeveloperHandleCollection).FindOne(ctx, bson.M{"authId": o.AuthID}).Decode(&handle)
+	if e == nil {
+		if !validHandleDocument(handle) && !validTerminalHandleDocument(handle) {
+			return o, "", d.ErrUnavailable
+		}
+		o.DeveloperHandle = handle.Lookup("developerHandle").StringValue()
+	} else if !errors.Is(e, m.ErrNoDocuments) {
+		return o, "", e
+	} else if v.Type == bson.TypeString && v.StringValue() == "WITHDRAWN" {
+		return o, "", d.ErrUnavailable
+	}
+	if pv := raw.Lookup("developerHandle"); pv.Type != 0 && (pv.Type != bson.TypeString || pv.StringValue() != o.DeveloperHandle) {
+		return o, "", d.ErrUnavailable
 	}
 	hash := sha256.New()
 	cur, e := r.auth.database.Collection(CredentialCollection).Find(ctx, bson.M{"authId": o.AuthID}, options.Find().SetSort(bson.D{{Key: "credentialId", Value: 1}}).SetProjection(bson.M{"_id": 0, "credentialId": 1, "fingerprint": 1, "revokedAt": 1}))

@@ -287,6 +287,9 @@ func ReconcileTerminations(ctx context.Context, repo p.Repository, ledger p.Term
 		if e != nil {
 			return d.ErrUnavailable
 		}
+		if names.AuthID != record.AuthID || names.OperationID != record.OperationID {
+			return d.ErrUnavailable
+		}
 		if e = repo.ReplayReservations(ctx, names); e != nil {
 			return e
 		}
@@ -322,9 +325,13 @@ func (s *Service) Tick(ctx context.Context) error {
 		return e
 	}
 	var failure error
+	overdue := false
 	for _, o := range ops {
 		if o.TerminatedAt == nil {
 			continue
+		}
+		if s.now().Sub(*o.TerminatedAt) > 24*time.Hour {
+			overdue = true
 		}
 		if e = s.repo.Attempt(ctx, o.OperationID, s.now()); e != nil {
 			failure = e
@@ -352,15 +359,15 @@ func (s *Service) Tick(ctx context.Context) error {
 				continue
 			}
 		}
-		if s.now().Sub(*o.TerminatedAt) > 24*time.Hour {
-			failure = d.ErrOverdue
-		}
 		if _, e = s.repo.Cleanup(ctx, o.OperationID, s.now(), 500); e != nil {
 			failure = e
 		}
 	}
 	if e = s.repo.Retain(ctx, s.now(), 500); e != nil {
 		failure = e
+	}
+	if overdue {
+		return errors.Join(failure, d.ErrOverdue)
 	}
 	return failure
 }

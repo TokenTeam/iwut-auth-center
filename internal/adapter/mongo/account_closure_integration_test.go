@@ -3,6 +3,7 @@ package mongo
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	cd "iwut-auth-center/internal/accountclosure/domain"
@@ -246,6 +247,12 @@ func TestAccountClosureUnknownProofAndRequestDedup(t *testing.T) {
 	if _, e = f.service.Prepare(t.Context(), c.OperationID, signAuthentication(t, f.key, ordinary.SigningPayload)); !errors.Is(e, cd.ErrProof) {
 		t.Fatalf("login signature accepted=%v", e)
 	}
+	f.clock = f.clock.Add(25 * time.Hour)
+	fresh, e := f.service.Begin(t.Context(), in)
+	if e != nil || fresh.OperationID == a.OperationID {
+		t.Fatalf("24-hour dedupe did not expire=%v %v", fresh, e)
+	}
+
 }
 func TestAccountClosurePreviewChangesInvalidate(t *testing.T) {
 	for _, change := range []string{"email", "key", "other_key", "permission", "developer", "account"} {
@@ -264,7 +271,7 @@ func TestAccountClosurePreviewChangesInvalidate(t *testing.T) {
 			case "permission":
 				_, e = db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": f.c.AuthID}, bson.M{"$inc": bson.M{"permissionRevision": int64(1)}})
 			case "developer":
-				_, e = db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": f.c.AuthID}, bson.M{"$inc": bson.M{"developerRevision": int64(1)}})
+				_, e = db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": f.c.AuthID}, bson.M{"$inc": bson.M{"developerRevision": int64(1)}, "$set": bson.M{"developerStatus": "PENDING"}})
 			case "account":
 				_, e = db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": f.c.AuthID}, bson.M{"$inc": bson.M{"accountRevision": int64(1)}})
 			}
@@ -336,7 +343,8 @@ func TestAccountClosureCleanupActualCollectionsAndPermanentOccupancy(t *testing.
 		closureInsert(t, f, "auth_oauth_"+kind, bson.M{"_id": "other-" + kind, "data": bson.M{"authid": "other"}})
 	}
 	closureInsert(t, f, "auth_oauth_refresh", bson.M{"_id": "refresh", "data": bson.M{"familyid": "families-id"}})
-	f.authenticationFixture.login(t)
+	ss := f.authenticationFixture.login(t)
+	closureInsert(t, f, "auth_oauth_interactions", bson.M{"_id": "unbound-initial-session", "data": bson.M{"authid": "", "initialsessionid": ss.SessionID, "csrfhash": "secret"}})
 	p := f.ready(t)
 	f.close(t, p)
 	f.acknowledge(t, p.OperationID)
@@ -385,6 +393,9 @@ func TestAccountClosureRestoreReservationsAndRejectWrongLedger(t *testing.T) {
 	second := secondaryCredential(t, f.authenticationFixture, f.c.AuthID)
 	closureInsert(t, f, DeveloperHandleCollection, bson.M{"authId": f.c.AuthID, "developerHandle": "reserved", "claimedAt": f.clock.Add(-time.Hour), "eventId": "event"})
 	p := f.ready(t)
+	if p.Preview.DeveloperHandle != "reserved" {
+		t.Fatal("preview omitted authoritative handle")
+	}
 	f.close(t, p)
 	records, e := f.ledger.Records(t.Context())
 	if e != nil || len(records) != 1 {
@@ -523,5 +534,143 @@ func TestAccountClosureGovernanceBlocksAndAppObligations(t *testing.T) {
 				t.Fatal(p)
 			}
 		})
+	}
+}
+func TestAccountClosureRetiresBootstrapAuditAtomically(t *testing.T) {
+	for _, corrupt := range []bool{false, true} {
+		t.Run(fmt.Sprint(corrupt), func(t *testing.T) {
+			admins, db, subject := administratorFixture(t)
+			a := admins.authentication
+			repo, _ := NewAccountClosureRepository(a)
+			now := time.Now().UTC().Truncate(time.Millisecond)
+			old := now.Add(-181 * 24 * time.Hour)
+			_, e := db.Collection(AuthenticationRuntimeCollection).UpdateOne(t.Context(), bson.M{"_id": bootstrapMarker}, bson.M{"$set": bson.M{"occurredAt": old}})
+			if e != nil {
+				t.Fatal(e)
+			}
+			_, e = db.Collection(PlatformAdminAuditCollection).UpdateMany(t.Context(), bson.M{"actorType": "BOOTSTRAP_COMMAND"}, bson.M{"$set": bson.M{"occurredAt": old}})
+			if e != nil {
+				t.Fatal(e)
+			}
+			tomb := bson.M{"authId": subject, "principalType": "USER", "accountStatus": "CLOSED", "accountRevision": int64(2), "terminatedAt": now.Add(-time.Hour), "closureOperationId": uuid.NewString()}
+			if corrupt {
+				tomb["profile"] = "must-not-survive"
+			}
+			_, e = db.Collection(PrincipalCollection).ReplaceOne(t.Context(), bson.M{"authId": subject}, tomb)
+			if e != nil {
+				t.Fatal(e)
+			}
+			e = repo.Retain(t.Context(), now, 500)
+			if corrupt {
+				if !errors.Is(e, cd.ErrUnavailable) {
+					t.Fatalf("corrupt retirement=%v", e)
+				}
+				n, _ := db.Collection(PlatformAdminAuditCollection).CountDocuments(t.Context(), bson.M{})
+				if n != 1 {
+					t.Fatal("retirement deleted audit after validation failure")
+				}
+				return
+			}
+			if e != nil {
+				t.Fatal(e)
+			}
+			n, _ := db.Collection(PlatformAdminAuditCollection).CountDocuments(t.Context(), bson.M{})
+			if n != 0 {
+				t.Fatal("expired bootstrap audit retained")
+			}
+			if e = a.WithAuthTransaction(t.Context(), func(tx context.Context) error { _, e := a.administratorMarkerTx(tx); return e }); e != nil {
+				t.Fatalf("retired marker rejected=%v", e)
+			}
+		})
+	}
+}
+func TestAccountClosureRecoveryPendingReceiptCannotCancel(t *testing.T) {
+	f := newClosureFixture(t)
+	p := f.ready(t)
+	f.close(t, p)
+	records, e := f.ledger.Records(t.Context())
+	if e != nil {
+		t.Fatal(e)
+	}
+	_, e = f.r.database.Collection(OwnerExitCollection).UpdateOne(t.Context(), bson.M{"operationId": p.OperationID}, bson.M{"$set": bson.M{"decision": owner.Pending, "receiptId": "", "notificationPending": false, "appAcknowledged": false}, "$unset": bson.M{"decidedAt": ""}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = f.repo.Replay(t.Context(), records[0]); e != nil {
+		t.Fatal(e)
+	}
+	owners := NewOwnerExitRepository(f.r)
+	if _, e = owners.Get(t.Context(), f.c.AuthID, p.OperationID); !errors.Is(e, owner.ErrUnavailable) {
+		t.Fatalf("recovering decision exposed=%v", e)
+	}
+	due, e := owners.Due(t.Context(), f.clock.Add(10*time.Minute), 100)
+	if e != nil || len(due) != 0 {
+		t.Fatalf("recovery mistaken for cancellable pending=%v err=%v", due, e)
+	}
+	if e = f.service.Tick(t.Context()); e != nil {
+		t.Fatal(e)
+	}
+	o, e := owners.Get(t.Context(), f.c.AuthID, p.OperationID)
+	if e != nil || o.Decision != owner.Committed || o.ReceiptID != f.app.receipt {
+		t.Fatalf("recovered=%v err=%v", o, e)
+	}
+}
+func TestAccountClosureBatch500ResumesAfterRestart(t *testing.T) {
+	f := newClosureFixture(t)
+	p := f.ready(t)
+	f.close(t, p)
+	var rows []any
+	for i := 0; i < 501; i++ {
+		rows = append(rows, bson.M{"authId": f.c.AuthID, "sessionId": uuid.NewString(), "tokenDigest": []byte(fmt.Sprintf("digest-%d", i))})
+	}
+	if _, e := f.r.database.Collection(SessionCollection).InsertMany(t.Context(), rows); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := f.r.database.Collection(AccountClosureTaskCollection).UpdateOne(t.Context(), bson.M{"operationId": p.OperationID}, bson.M{"$set": bson.M{"step": 10}}); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := f.repo.Cleanup(t.Context(), p.OperationID, f.clock, 500); e != nil {
+		t.Fatal(e)
+	}
+	if n := closureCount(t, f, SessionCollection, bson.M{"authId": f.c.AuthID}); n != 1 {
+		t.Fatalf("batch removed wrong count, remains=%d", n)
+	}
+	restarted, e := NewAccountClosureRepository(f.r)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = restarted.Cleanup(t.Context(), p.OperationID, f.clock, 500); e != nil {
+		t.Fatal(e)
+	}
+	if n := closureCount(t, f, SessionCollection, bson.M{"authId": f.c.AuthID}); n != 0 {
+		t.Fatalf("restart did not resume=%d", n)
+	}
+}
+func TestAccountClosureReceiptExpiryIndependentOfRecovery(t *testing.T) {
+	f := newClosureFixture(t)
+	p := f.ready(t)
+	f.close(t, p)
+	_, e := f.r.database.Collection(OwnerExitCollection).UpdateOne(t.Context(), bson.M{"operationId": p.OperationID}, bson.M{"$set": bson.M{"recoveryReceiptRequired": true}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	f.clock = f.clock.Add(31 * 24 * time.Hour)
+	if e = f.repo.Retain(t.Context(), f.clock, 500); e != nil {
+		t.Fatal(e)
+	}
+	var raw bson.Raw
+	if e = f.r.database.Collection(AccountClosureCollection).FindOne(t.Context(), bson.M{"operationId": p.OperationID}).Decode(&raw); e != nil {
+		t.Fatal(e)
+	}
+	for _, field := range []string{"confirmationDigest", "receiptDigest", "publicKey"} {
+		if raw.Lookup(field).Type != 0 {
+			t.Fatalf("expired %s retained while App unavailable", field)
+		}
+	}
+	if closureCount(t, f, AccountClosureTaskCollection, bson.M{"operationId": p.OperationID}) != 1 {
+		t.Fatal("unfinished task lost")
+	}
+	if _, e = f.service.Get(t.Context(), p.OperationID, p.ReceiptToken); !errors.Is(e, cd.ErrToken) {
+		t.Fatalf("expired receipt usable=%v", e)
 	}
 }

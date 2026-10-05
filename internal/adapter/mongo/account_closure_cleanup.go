@@ -95,7 +95,15 @@ func (r *AccountClosureRepository) Replay(ctx context.Context, t d.Termination) 
 			return e
 		}
 		// Restored pending decisions may be advanced only by the durable terminal fact.
-		old, e := r.auth.ReadOwnerExitTx(tx, t.AuthID, t.OperationID)
+		var old owner.Operation
+		e = r.auth.database.Collection(OwnerExitCollection).FindOne(tx, bson.M{"authId": t.AuthID, "operationId": t.OperationID}).Decode(&old)
+		if errors.Is(e, m.ErrNoDocuments) {
+			e = owner.ErrNotFound
+		}
+		if e == nil && !old.Valid() {
+			return d.ErrUnavailable
+		}
+
 		if errors.Is(e, owner.ErrNotFound) {
 			return nil
 		}
@@ -107,7 +115,8 @@ func (r *AccountClosureRepository) Replay(ctx context.Context, t d.Termination) 
 		}
 		if old.Decision == owner.Pending {
 			if old.ReceiptID == "" {
-				return nil
+				_, e = r.auth.database.Collection(OwnerExitCollection).UpdateOne(tx, bson.M{"operationId": t.OperationID, "decision": owner.Pending}, bson.M{"$set": bson.M{"recoveryReceiptRequired": true}})
+				return e
 			}
 			_, e = r.auth.database.Collection(OwnerExitCollection).UpdateOne(tx, bson.M{"operationId": t.OperationID, "decision": owner.Pending}, bson.M{"$set": bson.M{"decision": owner.Committed, "decidedAt": t.TerminatedAt, "notificationPending": true, "nextAttemptAt": t.TerminatedAt}})
 		}
@@ -122,7 +131,15 @@ func (r *AccountClosureRepository) RecoverOwner(ctx context.Context, t d.Termina
 		if status.AuthID != t.AuthID || status.OperationID != t.OperationID || status.Purpose != owner.Closure || !owner.ValidReceiptID(status.ReceiptID) || (status.Decision != owner.Pending && status.Decision != owner.Committed) {
 			return d.ErrUnavailable
 		}
-		old, e := r.auth.ReadOwnerExitTx(tx, t.AuthID, t.OperationID)
+		var old owner.Operation
+		e := r.auth.database.Collection(OwnerExitCollection).FindOne(tx, bson.M{"authId": t.AuthID, "operationId": t.OperationID}).Decode(&old)
+		if errors.Is(e, m.ErrNoDocuments) {
+			e = owner.ErrNotFound
+		}
+		if e == nil && (!old.Valid() || old.Purpose != owner.Closure) {
+			return d.ErrUnavailable
+		}
+
 		if e == nil {
 			if old.Decision == owner.Cancelled || old.ReceiptID != "" && old.ReceiptID != status.ReceiptID {
 				return d.ErrUnavailable
@@ -284,7 +301,37 @@ func (r *AccountClosureRepository) Cleanup(ctx context.Context, id string, now t
 			col := []string{"interactions", "codes", "access", "grants", "subjects"}[task.Step-5]
 			done, e = r.deleteBatch(tx, "auth_oauth_"+col, bson.M{"$or": bson.A{bson.M{"data.authid": authID}, bson.M{"authId": authID}}}, limit)
 		case 10:
-			done, e = r.deleteBatch(tx, SessionCollection, bson.M{"authId": authID}, limit)
+			cur, err := r.auth.database.Collection(SessionCollection).Find(tx, bson.M{"authId": authID}, options.Find().SetProjection(bson.M{"sessionId": 1}).SetLimit(int64(limit)))
+			if err != nil {
+				return err
+			}
+			var sessionIDs []string
+			for cur.Next(tx) {
+				var ss struct {
+					SessionID string `bson:"sessionId"`
+				}
+				if cur.Decode(&ss) != nil || ss.SessionID == "" {
+					cur.Close(tx)
+					return d.ErrUnavailable
+				}
+				sessionIDs = append(sessionIDs, ss.SessionID)
+			}
+			if e = cur.Err(); e != nil {
+				cur.Close(tx)
+				return e
+			}
+			cur.Close(tx)
+			if len(sessionIDs) == 0 {
+				done = true
+				break
+			}
+			drained, err := r.deleteBatch(tx, "auth_oauth_interactions", bson.M{"$and": bson.A{bson.M{"$or": bson.A{bson.M{"data.authid": ""}, bson.M{"data.authid": bson.M{"$exists": false}}, bson.M{"data.authid": authID}}}, bson.M{"$or": bson.A{bson.M{"data.initialsessionid": bson.M{"$in": sessionIDs}}, bson.M{"data.sessionid": bson.M{"$in": sessionIDs}}}}}}, limit)
+			if err != nil {
+				return err
+			}
+			if drained {
+				_, e = r.auth.database.Collection(SessionCollection).DeleteMany(tx, bson.M{"authId": authID, "sessionId": bson.M{"$in": sessionIDs}})
+			}
 		case 11:
 			done, e = r.cleanupAssociationTx(tx, id, authID, now)
 		case 12:

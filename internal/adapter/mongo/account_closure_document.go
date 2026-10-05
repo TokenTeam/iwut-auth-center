@@ -4,7 +4,7 @@ import "time"
 
 type closureOperationDocument struct {
 	OperationID          string     `bson:"operationId"`
-	RequestID            string     `bson:"requestId"`
+	RequestID            string     `bson:"requestId,omitempty"`
 	LocatorKind          string     `bson:"locatorKind"`
 	LocatorValue         []byte     `bson:"locatorValue"`
 	Challenge            []byte     `bson:"challenge"`
