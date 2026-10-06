@@ -8,7 +8,9 @@ so. Authoritative design lives outside this repository at `../../docs/`.
 
 ## Current work package
 
-**Implemented authentication and OAuth capabilities plus accepted UC-AUTH-021–025 governance. UC020 is now accepted for same-account Session listing and explicit batch revocation.** Before changing behavior, read:
+**UC-AUTH-026 — apply Application closure and issue close reauthentication proofs.** Read `../../docs/auth-center/briefs/UC-AUTH-026.md` as the active work-package input, then preserve the implemented authentication, OAuth, Session and governance behavior referenced by that brief. Deliver the native gRPC-only ApplicationClosure Apply/Get provider, permanent applicationId tombstone and stable receipt; enforce the tombstone at every selected UC014–019 final boundary; deliver Session-authenticated Begin/Complete with a fresh same-device P-256 challenge and fixed five-minute `app.close` proof; add Mongo schema/indexes, exact service permissions, config/Wire and real Auth/App verification. API generator inputs and outputs commit before the service gitlink. Do not implement App Center lifecycle, quota, Tester, OAuth client-slot mutation, UI/Gateway rollout, tombstone deletion or application recovery. Keep all commits local.
+
+Preserve existing capabilities using the following lookup order only when the active brief requires their implementation details:
 
 1. `../../docs/auth-center/briefs/UC-AUTH-013.md` and `../../docs/platform/contracts/auth-developer-application-v1.md`, then `../../docs/auth-center/briefs/UC-AUTH-012.md` and `../../docs/platform/contracts/auth-email-login-v1.md`, then `../../docs/auth-center/briefs/UC-AUTH-011.md`, `../../docs/platform/contracts/auth-email-binding-v1.md` and its public vectors; preserve UC004–010 behavior.
 2. `../../docs/auth-center/briefs/UC-AUTH-004.md` and the corresponding `../../docs/auth-center/briefs/UC-AUTH-005.md` through `UC-AUTH-010.md`.
