@@ -32,8 +32,12 @@ func TestServiceIdentityVerifier_VerifiesRegisteredCallerAndRejectsInvalidClaims
 	verifier, err := NewServiceIdentityVerifier(config.Config{
 		ServiceCallers: []config.ServiceCallerRegistration{{
 			ServiceID: "app-center", Status: "ACTIVE",
-			PublicKeyPEMByKID:       map[string][]byte{"key-1": pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicDER})},
-			Permissions:             []string{PermissionDeveloperStatusRead},
+			PublicKeyPEMByKID: map[string][]byte{"key-1": pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicDER})},
+			Permissions: []string{
+				PermissionDeveloperStatusRead,
+				PermissionApplicationClosureApply,
+				PermissionApplicationClosureRead,
+			},
 			SystemPrincipalPurposes: []string{PurposeAppCenterReviewAutoRejection},
 		}},
 		ServiceIdentityMaxTTL: time.Minute, ServiceIdentityClockSkew: 5 * time.Second,
@@ -49,6 +53,7 @@ func TestServiceIdentityVerifier_VerifiesRegisteredCallerAndRejectsInvalidClaims
 	})
 	identity, err := verifier.Verify(valid)
 	if err != nil || identity.ServiceID != "app-center" || !identity.HasPermission(PermissionDeveloperStatusRead) ||
+		!identity.HasPermission(PermissionApplicationClosureApply) || !identity.HasPermission(PermissionApplicationClosureRead) ||
 		!identity.MayResolveSystemPrincipal(PurposeAppCenterReviewAutoRejection) {
 		t.Fatalf("Verify(valid) = (%#v, %v)", identity, err)
 	}

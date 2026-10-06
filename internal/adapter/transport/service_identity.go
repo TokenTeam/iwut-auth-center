@@ -96,7 +96,8 @@ func NewServiceIdentityVerifier(configuration config.Config) (*ServiceIdentityVe
 		permissions := make(map[string]struct{}, len(registration.Permissions))
 		for _, permission := range registration.Permissions {
 			switch permission {
-			case PermissionOwnerExitRead, PermissionOAuthDelegationIssue, PermissionIdentityIssue, PermissionScopeCatalogRead, PermissionDeveloperStatusRead, PermissionSystemPrincipalResolve:
+			case PermissionOwnerExitRead, PermissionOAuthDelegationIssue, PermissionIdentityIssue, PermissionScopeCatalogRead, PermissionDeveloperStatusRead, PermissionSystemPrincipalResolve,
+				PermissionApplicationClosureApply, PermissionApplicationClosureRead:
 				permissions[permission] = struct{}{}
 			default:
 				return nil, fmt.Errorf("service identity verifier: unknown permission %q", permission)
