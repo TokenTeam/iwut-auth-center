@@ -604,6 +604,44 @@ Normal credential recovery uses email login. A separate audited offline break-gl
 recovery procedure for loss of all administrator login methods is still a production
 readiness dependency and is not implemented by this UC.
 
+## Application operations permissions (UC-AUTH-027)
+
+`AUTH_APPLICATION_OPERATIONS_PERMISSION_ENDPOINTS_ENABLED=false` by default.
+Enabling it requires user endpoints and user identity issuance. Native gRPC and
+strict HTTP/JSON expose:
+
+- `PUT /v1/users/{subject_auth_id}/application-operation-permissions/{permission}`
+  to grant or revoke exactly `app.application.suspend` or
+  `app.application.restore` with a positive expected permission revision and a
+  trimmed 1–1024-byte reason;
+- `GET /v1/users/{subject_auth_id}/application-operation-permissions` to return
+  both permissions in lexical order, their granted/effective state, the account
+  status, shared revision and current grant blockers.
+
+Gateway uses SESSION policy and an Auth-audience USER identity. The signed identity
+must contain `auth.platform-admin.manage`; Auth then verifies the current complete
+platform administrator bundle in the same Mongo transaction as every read or write.
+The operation permissions never authorize their own management. They remain
+independent from Reviewer permissions and the fixed platform administrator bundle.
+
+Granting requires an ACTIVE target, verified email, and both
+`AUTH_EMAIL_RECOVERY_READY=true` and the operational email-login runtime. Reads and
+revocations accept ACTIVE or DISABLED users, and disabled grants remain stored but
+ineffective. CLOSED and SYSTEM targets are unavailable. All mutations share
+`permissionRevision`, `authenticationFence`, and `auth_permission_audit_events`
+with UC004; stale concurrent changes conflict and audit insertion is atomic.
+
+Only App-audience user identities project these permissions. They are not OAuth
+scopes and Auth-audience identities do not contain them. Existing issued App
+identities retain the configured short TTL window after revocation. The App Center
+state transitions that consume these claims are a separate delivery.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `AUTH_APPLICATION_OPERATIONS_PERMISSION_READ_PER_MINUTE` | 60 | Reads per authenticated actor |
+| `AUTH_APPLICATION_OPERATIONS_PERMISSION_WRITE_PER_MINUTE` | 10 | Writes per authenticated actor |
+| `AUTH_APPLICATION_OPERATIONS_PERMISSION_MAX_BUCKETS` | 4096 | Bounded read/write limiter state |
+
 ## User account disable and restore (UC022)
 
 `AUTH_ACCOUNT_MANAGEMENT_ENDPOINTS_ENABLED=true` registers the native gRPC and

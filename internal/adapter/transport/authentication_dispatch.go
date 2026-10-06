@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/proto"
 
+	applicationoperationspb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/application_operations_permission"
 	authv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 	reviewerpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/reviewer_permission"
 )
@@ -36,7 +37,7 @@ func userEndpointAuthenticationMiddleware(service *ServiceIdentityVerifier, prof
 			if sessionManagementMethod(tr.Operation()) || developerWithdrawalMethod(tr.Operation()) || developerApplicationMethod(tr.Operation()) || oauthGrantMethod(tr.Operation()) {
 				return handler(ctx, request)
 			}
-			if isPlatformAdministratorOperation(tr.Operation()) || accountManagementMethod(tr.Operation()) || isDeveloperManagementOperation(tr.Operation()) {
+			if isPlatformAdministratorOperation(tr.Operation()) || accountManagementMethod(tr.Operation()) || isDeveloperManagementOperation(tr.Operation()) || applicationOperationsPermissionMethod(tr.Operation()) {
 				if profile == nil {
 					return nil, accountError(account.ErrIdentity)
 				}
@@ -66,7 +67,9 @@ func userEndpointAuthenticationMiddleware(service *ServiceIdentityVerifier, prof
 				reviewerpb.ReviewerPermissionService_ManageReviewerPermission_FullMethodName,
 				reviewerpb.ReviewerPermissionService_GetReviewerPermission_FullMethodName,
 				reviewerpb.ReviewerPermissionService_ManageApplicationReviewPermission_FullMethodName,
-				reviewerpb.ReviewerPermissionService_GetApplicationReviewPermissions_FullMethodName:
+				reviewerpb.ReviewerPermissionService_GetApplicationReviewPermissions_FullMethodName,
+				applicationoperationspb.ApplicationOperationsPermissionService_ManageApplicationOperationsPermission_FullMethodName,
+				applicationoperationspb.ApplicationOperationsPermissionService_GetApplicationOperationsPermissions_FullMethodName:
 				if profile == nil {
 					return nil, transportStatus(codes.Unauthenticated, "USER_IDENTITY_REQUIRED", "user identity is required")
 				}

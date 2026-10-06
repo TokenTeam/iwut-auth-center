@@ -8,7 +8,7 @@ so. Authoritative design lives outside this repository at `../../docs/`.
 
 ## Current work package
 
-**UC-AUTH-026 — apply Application closure and issue close reauthentication proofs.** Read `../../docs/auth-center/briefs/UC-AUTH-026.md` as the active work-package input, then preserve the implemented authentication, OAuth, Session and governance behavior referenced by that brief. Deliver the native gRPC-only ApplicationClosure Apply/Get provider, permanent applicationId tombstone and stable receipt; enforce the tombstone at every selected UC014–019 final boundary; deliver Session-authenticated Begin/Complete with a fresh same-device P-256 challenge and fixed five-minute `app.close` proof; add Mongo schema/indexes, exact service permissions, config/Wire and real Auth/App verification. API generator inputs and outputs commit before the service gitlink. Do not implement App Center lifecycle, quota, Tester, OAuth client-slot mutation, UI/Gateway rollout, tombstone deletion or application recovery. Keep all commits local.
+**UC-AUTH-027 — manage Application operations permissions.** Read `../../docs/auth-center/briefs/UC-AUTH-027.md` as the active work-package input, then preserve the implemented authentication, OAuth, Session and governance behavior referenced by that brief. Deliver independent `app.application.suspend` and `app.application.restore` grants through exact HTTP/gRPC methods, current full-platform-administrator authorization, the shared permission revision and audit history, ACTIVE/DISABLED target semantics, email/recovery grant gates and App-audience identity projection. Do not add either permission to the fixed administrator bundle or Reviewer API, do not create OAuth scopes, and do not implement App Center suspension/restoration state machines. API generator inputs and outputs commit before the service gitlink. Keep all commits local.
 
 Preserve existing capabilities using the following lookup order only when the active brief requires their implementation details:
 
@@ -91,6 +91,7 @@ internal/scope/usecase/      UC orchestration
 internal/scope/port/         consumer-owned interfaces
 internal/adapter/catalog/    temporary hardcoded provider
 internal/administrator/      fixed platform management membership
+internal/applicationoperations/ independent App operations permission management
 internal/account/            account lifecycle and authentication generation
 internal/ownerexit/          durable cross-service exit coordination
 internal/accountclosure/     dedicated closure proof, termination and cleanup

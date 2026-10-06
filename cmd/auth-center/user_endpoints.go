@@ -10,6 +10,7 @@ import (
 	"iwut-auth-center/internal/adapter/sessionmanagementrate"
 	"iwut-auth-center/internal/adapter/smtpmail"
 	adminusecase "iwut-auth-center/internal/administrator/usecase"
+	applicationoperationsusecase "iwut-auth-center/internal/applicationoperations/usecase"
 	developerusecase "iwut-auth-center/internal/developer/usecase"
 	emaildomain "iwut-auth-center/internal/emailbinding/domain"
 	emailusecase "iwut-auth-center/internal/emailbinding/usecase"
@@ -213,6 +214,18 @@ func provideUserEndpoints(configuration config.Config, database *drivermongo.Dat
 		}
 		administrator = transport.NewPlatformAdministratorService(adminusecase.New(repo, gate))
 	}
+	var applicationOperations *transport.ApplicationOperationsPermissionService
+	if ac := configuration.ApplicationOperationsPermission; ac != nil {
+		repo, err := mongoadapter.NewApplicationOperationsPermissionRepository(repository, ac.RecoveryReady && emailLoginService != nil)
+		if err != nil {
+			return nil, err
+		}
+		gate, err := deviceprotocol.NewLimiter(deviceprotocol.RateLimits{BeginGlobal: 1000000, CompleteGlobal: 1000000, BeginSource: ac.ReadPerMinute, CompleteLocator: ac.WritePerMinute, MaxBuckets: ac.MaxBuckets})
+		if err != nil {
+			return nil, err
+		}
+		applicationOperations = transport.NewApplicationOperationsPermissionService(applicationoperationsusecase.New(repo, gate))
+	}
 	var accountManagement *transport.AccountManagementService
 	if ac := configuration.AccountManagement; ac != nil {
 		if err := mongoadapter.EnsureAccountManagementSchema(ctx, database); err != nil {
@@ -259,6 +272,7 @@ func provideUserEndpoints(configuration config.Config, database *drivermongo.Dat
 		sessionManagement = transport.NewSessionManagementService(service, gate)
 	}
 	return &transport.UserEndpoints{SessionManagement: sessionManagement, DeveloperManagement: developerManagement, AccountManagement: accountManagement, PlatformAdministrator: administrator,
+		ApplicationOperations:         applicationOperations,
 		DeveloperApplication:          developerApplication,
 		EmailBinding:                  emailService,
 		EmailLogin:                    emailLoginService,

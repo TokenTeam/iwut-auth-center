@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	account "iwut-auth-center/internal/account/domain"
 	admin "iwut-auth-center/internal/administrator/domain"
+	applicationoperations "iwut-auth-center/internal/applicationoperations/domain"
 	developer "iwut-auth-center/internal/developer/domain"
 	"iwut-auth-center/internal/reviewer/domain"
 	"iwut-auth-center/internal/reviewer/usecase"
@@ -33,7 +34,7 @@ func UserCapabilityIdentityMiddleware(v *UserIdentityVerifier) middleware.Middle
 			if accountManagementMethod(tr.Operation()) {
 				return accountManagementIdentity(v)(next)(ctx, req)
 			}
-			if !isReviewerOperation(tr.Operation()) && !isPlatformAdministratorOperation(tr.Operation()) && !isDeveloperManagementOperation(tr.Operation()) {
+			if !isReviewerOperation(tr.Operation()) && !isPlatformAdministratorOperation(tr.Operation()) && !isDeveloperManagementOperation(tr.Operation()) && !applicationOperationsPermissionMethod(tr.Operation()) {
 				return UserProfileIdentityMiddleware(v)(next)(ctx, req)
 			}
 			values := tr.RequestHeader().Values(UserIdentityHeader)
@@ -49,7 +50,7 @@ func UserCapabilityIdentityMiddleware(v *UserIdentityVerifier) middleware.Middle
 				return nil, transportStatus(codes.Unauthenticated, "INVALID_USER_IDENTITY", "invalid user identity")
 			}
 			required := domain.Manager
-			if isPlatformAdministratorOperation(tr.Operation()) {
+			if isPlatformAdministratorOperation(tr.Operation()) || applicationOperationsPermissionMethod(tr.Operation()) {
 				required = admin.Manager
 			}
 			if isDeveloperManagementOperation(tr.Operation()) {
@@ -58,6 +59,9 @@ func UserCapabilityIdentityMiddleware(v *UserIdentityVerifier) middleware.Middle
 			if !slices.Contains(identity.Permissions, required) {
 				if isDeveloperManagementOperation(tr.Operation()) {
 					return nil, developerManagementError(developer.ErrManagementForbidden)
+				}
+				if applicationOperationsPermissionMethod(tr.Operation()) {
+					return nil, applicationOperationsPermissionError(applicationoperations.ErrForbidden)
 				}
 				if isPlatformAdministratorOperation(tr.Operation()) {
 					return nil, platformAdministratorError(admin.ErrForbidden)

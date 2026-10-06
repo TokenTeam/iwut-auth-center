@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	applicationoperationspb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/application_operations_permission"
 	authpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 	emailpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_binding"
 	identitypb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/identity"
@@ -43,7 +44,7 @@ func runReviewerFlow(t *testing.T, env map[string]string, conn *grpc.ClientConn,
 		u, _ := registerUser(t, auth, key, token[:])
 		return u
 	}
-	admin, subject := register("reviewer-admin"), register("reviewer-subject")
+	admin, subject, operator := register("reviewer-admin"), register("reviewer-subject"), register("application-operator")
 	bindEmail := func(user *authpb.UserRegistrationResult, email string) {
 		t.Helper()
 		client := emailpb.NewEmailBindingServiceClient(conn)
@@ -61,6 +62,7 @@ func runReviewerFlow(t *testing.T, env map[string]string, conn *grpc.ClientConn,
 		}
 	}
 	bindEmail(admin, "administrator@example.test")
+	bindEmail(operator, "application-operator@example.test")
 	issue := func(user *authpb.UserRegistrationResult, aud string) string {
 		ctx := metadata.AppendToOutgoingContext(serviceCallContext(t, t.Context(), serviceKey, "gateway", "app-center-2026-01", "iwut-auth-center"), "x-iwut-session", user.Session.SessionToken)
 		result, err := issuer.IssueUserIdentityFromSession(ctx, &identitypb.IssueUserIdentityFromSessionRequest{Audience: aud})
@@ -146,6 +148,7 @@ func runReviewerFlow(t *testing.T, env map[string]string, conn *grpc.ClientConn,
 	}
 	runApplicationReviewFlow(t, env, conn, serviceKey, keyFile, subject, adminctx, token, issue)
 	runAccountManagementFlow(t, env, conn, admin, issue, bindEmail)
+	runApplicationOperationsPermissionFlow(t, env, conn, operator, adminctx, token, issue)
 	runPlatformAdministratorFlow(t, env, conn, admin, subject, issue, bindEmail)
 	// A modified payload cannot manufacture management authority.
 	pieces := strings.Split(ordinary, ".")
@@ -154,6 +157,63 @@ func runReviewerFlow(t *testing.T, env map[string]string, conn *grpc.ClientConn,
 		t.Fatal(err)
 	}
 }
+
+func runApplicationOperationsPermissionFlow(t *testing.T, env map[string]string, conn *grpc.ClientConn, subject *authpb.UserRegistrationResult, adminctx context.Context, adminToken string, issue func(*authpb.UserRegistrationResult, string) string) {
+	t.Helper()
+	client := applicationoperationspb.NewApplicationOperationsPermissionServiceClient(conn)
+	query := &applicationoperationspb.GetApplicationOperationsPermissionsRequest{SubjectAuthId: subject.AuthId}
+	if _, err := client.GetApplicationOperationsPermissions(t.Context(), query); status.Code(err) != codes.Unauthenticated {
+		t.Fatal(err)
+	}
+	ordinaryContext := metadata.NewOutgoingContext(t.Context(), metadata.Pairs("x-iwut-identity", issue(subject, "iwut-auth-center")))
+	if _, err := client.GetApplicationOperationsPermissions(ordinaryContext, query); status.Code(err) != codes.PermissionDenied {
+		t.Fatal(err)
+	}
+	appContext := metadata.NewOutgoingContext(t.Context(), metadata.Pairs("x-iwut-identity", issue(subject, "iwut-app-center")))
+	if _, err := client.GetApplicationOperationsPermissions(appContext, query); status.Code(err) != codes.Unauthenticated {
+		t.Fatal(err)
+	}
+	initial, err := client.GetApplicationOperationsPermissions(adminctx, query)
+	if err != nil || initial.PermissionRevision != 1 || initial.AccountStatus != applicationoperationspb.ApplicationOperationsAccountStatus_APPLICATION_OPERATIONS_ACCOUNT_STATUS_ACTIVE || len(initial.Permissions) != 2 || len(initial.GrantBlockers) != 0 {
+		t.Fatal(initial, err)
+	}
+	transport, err := khttp.NewClient(t.Context(), khttp.WithEndpoint("http://"+env[config.HTTPAddrEnv]), khttp.WithTimeout(5*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer transport.Close()
+	httpClient := applicationoperationspb.NewApplicationOperationsPermissionServiceHTTPClient(transport)
+	headers := http.Header{"X-Iwut-Identity": []string{adminToken}}
+	granted, err := httpClient.ManageApplicationOperationsPermission(t.Context(), &applicationoperationspb.ManageApplicationOperationsPermissionRequest{
+		SubjectAuthId:              subject.AuthId,
+		Permission:                 applicationoperationspbPermissionSuspend,
+		Action:                     applicationoperationspb.ApplicationOperationsPermissionAction_APPLICATION_OPERATIONS_PERMISSION_ACTION_GRANT,
+		ExpectedPermissionRevision: proto.Int64(1),
+		Reason:                     "application suspension duty",
+	}, khttp.Header(&headers))
+	if err != nil || granted.PermissionRevision != 2 || !granted.Permissions[1].Granted || !granted.Permissions[1].Effective || granted.Permissions[0].Granted {
+		t.Fatal(granted, err)
+	}
+	appIdentity := identityPayload(t, issue(subject, "iwut-app-center"))
+	if permissions := appIdentity["permissions"].([]any); len(permissions) != 1 || permissions[0] != applicationoperationspbPermissionSuspend {
+		t.Fatal(appIdentity)
+	}
+	if permissions := identityPayload(t, issue(subject, "iwut-auth-center"))["permissions"].([]any); len(permissions) != 0 {
+		t.Fatal(permissions)
+	}
+	revoked, err := client.ManageApplicationOperationsPermission(adminctx, &applicationoperationspb.ManageApplicationOperationsPermissionRequest{
+		SubjectAuthId:              subject.AuthId,
+		Permission:                 applicationoperationspbPermissionSuspend,
+		Action:                     applicationoperationspb.ApplicationOperationsPermissionAction_APPLICATION_OPERATIONS_PERMISSION_ACTION_REVOKE,
+		ExpectedPermissionRevision: proto.Int64(2),
+		Reason:                     "application suspension duty ended",
+	})
+	if err != nil || revoked.PermissionRevision != 3 || revoked.Permissions[1].Granted {
+		t.Fatal(revoked, err)
+	}
+}
+
+const applicationoperationspbPermissionSuspend = "app.application.suspend"
 
 // Cross-service acceptance uses Auth's real signer and the sibling App's real
 // verifier and review handlers. Missing review IDs deliberately stop at 404

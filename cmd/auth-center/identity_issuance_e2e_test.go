@@ -68,7 +68,7 @@ func TestE2E_IdentityIssuance_ProductionWire(t *testing.T) {
 	if err := os.WriteFile(ca, capture.CAPEM, 0600); err != nil {
 		t.Fatal(err)
 	}
-	for key, value := range map[string]string{"AUTH_PLATFORM_ADMIN_ENDPOINTS_ENABLED": "true", "AUTH_PLATFORM_ADMIN_WRITE_PER_MINUTE": "1000", "AUTH_EMAIL_RECOVERY_READY": "true", "AUTH_EMAIL_BINDING_ENABLED": "true", "AUTH_EMAIL_BINDING_HMAC_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{3}, 32)), "AUTH_EMAIL_LOGIN_ENABLED": "true", "AUTH_EMAIL_LOGIN_CODE_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)), "AUTH_SMTP_ADDR": capture.Address, "AUTH_SMTP_FROM": "auth@example.test", "AUTH_SMTP_TLS_MODE": "implicit_tls", "AUTH_SMTP_CA_FILE": ca} {
+	for key, value := range map[string]string{"AUTH_PLATFORM_ADMIN_ENDPOINTS_ENABLED": "true", "AUTH_PLATFORM_ADMIN_WRITE_PER_MINUTE": "1000", "AUTH_APPLICATION_OPERATIONS_PERMISSION_ENDPOINTS_ENABLED": "true", "AUTH_APPLICATION_OPERATIONS_PERMISSION_WRITE_PER_MINUTE": "1000", "AUTH_EMAIL_RECOVERY_READY": "true", "AUTH_EMAIL_BINDING_ENABLED": "true", "AUTH_EMAIL_BINDING_HMAC_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{3}, 32)), "AUTH_EMAIL_LOGIN_ENABLED": "true", "AUTH_EMAIL_LOGIN_CODE_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)), "AUTH_SMTP_ADDR": capture.Address, "AUTH_SMTP_FROM": "auth@example.test", "AUTH_SMTP_TLS_MODE": "implicit_tls", "AUTH_SMTP_CA_FILE": ca} {
 		env[key] = value
 	}
 	configuration, err := config.Load(func(k string) (string, bool) { v, ok := env[k]; return v, ok })

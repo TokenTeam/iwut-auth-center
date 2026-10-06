@@ -22,6 +22,7 @@ import (
 	ownerpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/account_owner_exit"
 	closurereauthpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/application_close_reauth"
 	applicationclosurepb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/application_closure"
+	applicationoperationspb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/application_operations_permission"
 	authv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 	developerapplicationpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_application"
 	developermanagementpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_management"
@@ -60,6 +61,7 @@ type UserEndpoints struct {
 	SessionManagement             *SessionManagementService
 	DeveloperManagement           *DeveloperManagementService
 	PlatformAdministrator         *PlatformAdministratorService
+	ApplicationOperations         *ApplicationOperationsPermissionService
 	AccountManagement             *AccountManagementService
 	DeveloperApplication          *DeveloperApplicationService
 	EmailBinding                  *EmailBindingService
@@ -177,6 +179,9 @@ func newGRPCServer(
 		if endpoints.PlatformAdministrator != nil {
 			adminpb.RegisterPlatformAdministratorServiceServer(server, endpoints.PlatformAdministrator)
 		}
+		if endpoints.ApplicationOperations != nil {
+			applicationoperationspb.RegisterApplicationOperationsPermissionServiceServer(server, endpoints.ApplicationOperations)
+		}
 		if endpoints.AccountManagement != nil {
 			accountpb.RegisterAccountManagementServiceServer(server, endpoints.AccountManagement)
 		}
@@ -252,6 +257,9 @@ func newHTTPServer(configuration ServerConfig, verifier *ServiceIdentityVerifier
 		if endpoints.PlatformAdministrator != nil {
 			adminpb.RegisterPlatformAdministratorServiceHTTPServer(server, endpoints.PlatformAdministrator)
 		}
+		if endpoints.ApplicationOperations != nil {
+			applicationoperationspb.RegisterApplicationOperationsPermissionServiceHTTPServer(server, endpoints.ApplicationOperations)
+		}
 		if endpoints.AccountManagement != nil {
 			accountpb.RegisterAccountManagementServiceHTTPServer(server, endpoints.AccountManagement)
 		}
@@ -308,6 +316,8 @@ func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 			limit = min(limit, 16*1024)
 		case *adminpb.ManagePlatformAdministratorRequest, *adminpb.GetPlatformAdministratorRequest, *adminpb.ListPlatformAdministratorsRequest:
 			limit = min(limit, 16*1024)
+		case *applicationoperationspb.ManageApplicationOperationsPermissionRequest, *applicationoperationspb.GetApplicationOperationsPermissionsRequest:
+			limit = min(limit, 16*1024)
 		case *accountpb.ManageUserAccountStatusRequest, *accountpb.GetUserAccountStatusRequest:
 			limit = 16 * 1024
 		}
@@ -362,6 +372,8 @@ func invalidHTTPInput(r *http.Request) error {
 		reason = "INVALID_DEVELOPER_WITHDRAWAL_REQUEST"
 	case strings.HasPrefix(r.URL.Path, "/v1/platform-administrators:"):
 		reason = "INVALID_PLATFORM_ADMIN_REQUEST"
+	case strings.Contains(r.URL.Path, "/application-operation-permissions"):
+		reason = "INVALID_APPLICATION_OPERATIONS_PERMISSION_REQUEST"
 	case strings.HasPrefix(r.URL.Path, "/v1/users/me/application-grants"):
 		reason = "OAUTH_INVALID_REQUEST"
 	case developerApplicationHTTPPath(r.URL.Path):
@@ -430,7 +442,7 @@ func authHTTPErrorEncoder(w http.ResponseWriter, r *http.Request, err error) {
 	switch converted.Reason {
 	case "DEVELOPER_WITHDRAWAL_REQUEST_TOO_LARGE", "DEVELOPER_APPLICATION_REQUEST_TOO_LARGE", "EMAIL_LOGIN_REQUEST_TOO_LARGE", "EMAIL_REQUEST_TOO_LARGE", "REGISTRATION_INPUT_TOO_LARGE", "AUTHENTICATION_INPUT_TOO_LARGE", profiledomain.ErrLimit.Error():
 		converted.Code = http.StatusRequestEntityTooLarge
-	case "DEVELOPER_RESTORE_BLOCKED", "DEVELOPER_REVISION_EXHAUSTED", "ACCOUNT_REVISION_EXHAUSTED", "PLATFORM_ADMIN_GRANT_BLOCKED", "LAST_PLATFORM_ADMIN_REQUIRED", "PERMISSION_REVISION_EXHAUSTED":
+	case "DEVELOPER_RESTORE_BLOCKED", "DEVELOPER_REVISION_EXHAUSTED", "ACCOUNT_REVISION_EXHAUSTED", "PLATFORM_ADMIN_GRANT_BLOCKED", "APPLICATION_OPERATIONS_PERMISSION_GRANT_BLOCKED", "LAST_PLATFORM_ADMIN_REQUIRED", "PERMISSION_REVISION_EXHAUSTED":
 		converted.Code = http.StatusConflict
 	case "DEVELOPER_HANDLE_CHANGE_NOT_ALLOWED", "DEVELOPER_EMAIL_REQUIRED", "EMAIL_FLOW_MISMATCH", profiledomain.ErrExhausted.Error():
 		converted.Code = http.StatusConflict

@@ -77,7 +77,7 @@ func Project(s Snapshot, audience, jti string, now time.Time, ttl time.Duration)
 	}
 	allowed := []string{"auth.account.manage", "auth.developer.manage", "auth.platform-admin.manage", "auth.reviewer.manage"}
 	if audience == AppAudience {
-		allowed = []string{"app.profile.review", "app.version.review"}
+		allowed = []string{"app.application.restore", "app.application.suspend", "app.profile.review", "app.version.review"}
 		c.DeveloperStatus = s.DeveloperStatus
 	}
 	for _, p := range s.Permissions {

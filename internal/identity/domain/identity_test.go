@@ -20,3 +20,16 @@ func TestIndependentReviewPermissionProjection(t *testing.T) {
 		}
 	}
 }
+
+func TestApplicationOperationsPermissionsProjectOnlyToAppAudience(t *testing.T) {
+	now := time.Now()
+	snapshot := Snapshot{AccountRevision: 1, AuthID: "operator", PermissionRevision: 2, SessionExpiresAt: now.Add(time.Hour), Permissions: []string{"app.application.suspend", "app.application.restore", "auth.platform-admin.manage"}}
+	app, err := Project(snapshot, AppAudience, "app-jti", now, time.Minute)
+	if err != nil || !reflect.DeepEqual(app.Permissions, []string{"app.application.restore", "app.application.suspend"}) {
+		t.Fatal(app, err)
+	}
+	auth, err := Project(snapshot, AuthAudience, "auth-jti", now, time.Minute)
+	if err != nil || !reflect.DeepEqual(auth.Permissions, []string{"auth.platform-admin.manage"}) {
+		t.Fatal(auth, err)
+	}
+}

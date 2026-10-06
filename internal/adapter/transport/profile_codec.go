@@ -23,6 +23,12 @@ func NewProfileStrictCodec(limits ...int) encoding.Codec {
 	return profileStrictCodec{encoding.GetCodec("proto"), n}
 }
 func (c profileStrictCodec) Unmarshal(data []byte, v any) error {
+	if err := applicationOperationsPermissionWire(data, v); err != nil {
+		message := v.(proto.Message)
+		proto.Reset(message)
+		message.ProtoReflect().SetUnknown(protowire.AppendVarint(protowire.AppendTag(nil, 127, protowire.VarintType), 1))
+		return nil
+	}
 	if err := sessionManagementWire(data, v); err != nil {
 		// grpc-go maps codec errors to INTERNAL. Preserve rejection as an
 		// unknown-field marker so the handler applies admission, no-store and

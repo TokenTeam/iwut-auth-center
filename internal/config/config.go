@@ -32,27 +32,28 @@ var ErrInvalidConfiguration = errors.New("invalid auth center configuration")
 type LookupEnv func(key string) (value string, found bool)
 
 type Config struct {
-	ApplicationClosure       *ApplicationClosure
-	ApplicationCloseReauth   *ApplicationCloseReauth
-	SessionManagement        *SessionManagement
-	AccountClosure           *AccountClosure
-	DeveloperManagement      *DeveloperManagement
-	OwnerExit                *OwnerExit
-	AccountManagement        *AccountManagement
-	OAuth                    *OAuth
-	PlatformAdministrator    *PlatformAdministrator
-	DeveloperApplication     *DeveloperApplication
-	EmailBinding             *EmailBinding
-	EmailLogin               *EmailBinding
-	IdentityIssuance         *IdentityIssuance
-	UserEndpoints            *UserEndpoints
-	HTTPAddr                 string
-	GRPCAddr                 string
-	MongoURI                 string
-	MongoDatabase            string
-	ServiceCallers           []ServiceCallerRegistration
-	ServiceIdentityMaxTTL    time.Duration
-	ServiceIdentityClockSkew time.Duration
+	ApplicationOperationsPermission *ApplicationOperationsPermission
+	ApplicationClosure              *ApplicationClosure
+	ApplicationCloseReauth          *ApplicationCloseReauth
+	SessionManagement               *SessionManagement
+	AccountClosure                  *AccountClosure
+	DeveloperManagement             *DeveloperManagement
+	OwnerExit                       *OwnerExit
+	AccountManagement               *AccountManagement
+	OAuth                           *OAuth
+	PlatformAdministrator           *PlatformAdministrator
+	DeveloperApplication            *DeveloperApplication
+	EmailBinding                    *EmailBinding
+	EmailLogin                      *EmailBinding
+	IdentityIssuance                *IdentityIssuance
+	UserEndpoints                   *UserEndpoints
+	HTTPAddr                        string
+	GRPCAddr                        string
+	MongoURI                        string
+	MongoDatabase                   string
+	ServiceCallers                  []ServiceCallerRegistration
+	ServiceIdentityMaxTTL           time.Duration
+	ServiceIdentityClockSkew        time.Duration
 }
 
 type ServiceCallerRegistration struct {
@@ -153,6 +154,10 @@ func Load(lookup LookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	applicationOperationsPermission, err := loadApplicationOperationsPermission(lookup, userEndpoints, issuance)
+	if err != nil {
+		return Config{}, err
+	}
 	applicationClosure, err := loadApplicationClosure(lookup, callers)
 	if err != nil {
 		return Config{}, err
@@ -197,21 +202,22 @@ func Load(lookup LookupEnv) (Config, error) {
 		return Config{}, err
 	}
 	return Config{
-		ApplicationClosure:     applicationClosure,
-		ApplicationCloseReauth: applicationCloseReauth,
-		SessionManagement:      sessionManagement,
-		AccountClosure:         accountClosure,
-		DeveloperManagement:    developerManagement,
-		OwnerExit:              ownerExit,
-		AccountManagement:      accountManagement,
-		PlatformAdministrator:  platformAdministrator,
-		OAuth:                  oauth,
-		DeveloperApplication:   developerApplication,
-		EmailBinding:           emailBinding,
-		EmailLogin:             emailLogin,
-		IdentityIssuance:       issuance,
-		UserEndpoints:          userEndpoints,
-		HTTPAddr:               httpAddress, GRPCAddr: address, MongoURI: mongoURI, MongoDatabase: database,
+		ApplicationOperationsPermission: applicationOperationsPermission,
+		ApplicationClosure:              applicationClosure,
+		ApplicationCloseReauth:          applicationCloseReauth,
+		SessionManagement:               sessionManagement,
+		AccountClosure:                  accountClosure,
+		DeveloperManagement:             developerManagement,
+		OwnerExit:                       ownerExit,
+		AccountManagement:               accountManagement,
+		PlatformAdministrator:           platformAdministrator,
+		OAuth:                           oauth,
+		DeveloperApplication:            developerApplication,
+		EmailBinding:                    emailBinding,
+		EmailLogin:                      emailLogin,
+		IdentityIssuance:                issuance,
+		UserEndpoints:                   userEndpoints,
+		HTTPAddr:                        httpAddress, GRPCAddr: address, MongoURI: mongoURI, MongoDatabase: database,
 		ServiceCallers: callers, ServiceIdentityMaxTTL: maxTTL, ServiceIdentityClockSkew: clockSkew,
 	}, nil
 }
