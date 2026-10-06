@@ -9,6 +9,7 @@ import (
 
 	pb "github.com/TokenTeam/iwut-api-proto/gen/go/app_center/v1/oauth_client"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"iwut-auth-center/internal/adapter/oauthcrypto"
 	d "iwut-auth-center/internal/oauth/domain"
@@ -35,7 +36,7 @@ func (p *channelProvider) ResolveAuthorizationContext(_ context.Context, r *pb.R
 	if r.Channel != p.runtime.Channel {
 		p.t.Fatalf("authorization channel rewritten: %v", r.Channel)
 	}
-	return &pb.ResolveAuthorizationContextResponse{Context: &pb.AuthorizationContext{Runtime: p.runtime, AuthId: r.AuthId, TesterMembershipId: p.membership}}, nil
+	return &pb.ResolveAuthorizationContextResponse{Context: &pb.AuthorizationContext{Runtime: p.runtime, AuthId: r.AuthId, TesterMembershipId: proto.String(p.membership)}}, nil
 }
 func (p *channelProvider) GetApplicationPublishedRedirects(_ context.Context, r *pb.GetApplicationPublishedRedirectsRequest, _ ...grpc.CallOption) (*pb.GetApplicationPublishedRedirectsResponse, error) {
 	return &pb.GetApplicationPublishedRedirectsResponse{Snapshot: &pb.PublishedRedirectSnapshot{ApplicationId: r.ApplicationId, Entries: p.entries, RedirectUris: []string{"https://client.example/cb"}, ObservedAt: p.runtime.ObservedAt, ValidUntil: p.runtime.ValidUntil}}, nil

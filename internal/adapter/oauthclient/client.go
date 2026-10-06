@@ -130,14 +130,14 @@ func (c *Client) Authorize(ctx context.Context, rt d.Runtime, auth string) (d.Ru
 		return d.Runtime{}, providerError(err, d.ErrGrant)
 	}
 	v := r.GetContext()
-	if v == nil || v.AuthId != auth || !d.ValidMembership(rt.Client.Channel, v.TesterMembershipId) {
+	if v == nil || v.AuthId != auth || !d.ValidMembership(rt.Client.Channel, v.GetTesterMembershipId()) {
 		return d.Runtime{}, d.ErrUnavailable
 	}
 	out, err := runtime(v.Runtime, rt.Client, rt.Major)
 	if err != nil {
 		return out, err
 	}
-	out.TesterID = v.TesterMembershipId
+	out.TesterID = v.GetTesterMembershipId()
 	return out, nil
 }
 func (c *Client) Redirects(ctx context.Context, app string) (d.RedirectSnapshot, error) {
