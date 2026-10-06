@@ -18,6 +18,7 @@ import (
 func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 	panic(wire.Build(
 		provideOAuth,
+		provideApplicationClosure,
 		provideOwnerExit,
 		provideAccountClosure,
 		provideScopeCatalog,

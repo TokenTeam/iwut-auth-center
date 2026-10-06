@@ -21,6 +21,10 @@ func (s *Service) PublicOrigin(ctx context.Context, clientID string, major int32
 	if e != nil {
 		return false, e
 	}
+	e = s.transaction(ctx, func(tx port.Tx) error { return applicationOpen(tx, c.ApplicationID) })
+	if e != nil {
+		return false, e
+	}
 	for _, uri := range rt.Redirects {
 		u, e := url.Parse(uri)
 		if e == nil && u.Scheme+"://"+u.Host == origin {
@@ -42,6 +46,9 @@ func (s *Service) AccessClient(ctx context.Context, raw string) (string, error) 
 		f, e := tx.Family(a.FamilyID)
 		if e != nil {
 			return e
+		}
+		if e = applicationOpen(tx, f.ApplicationID); e != nil {
+			return d.ErrToken
 		}
 		id = f.ClientID
 		return nil

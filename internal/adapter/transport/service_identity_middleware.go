@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"errors"
+	applicationclosurepb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/application_closure"
 	identityv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/identity"
 	"strings"
 
@@ -62,6 +63,10 @@ func serviceIdentityMiddleware(verifier *ServiceIdentityVerifier) middleware.Mid
 
 func permissionForOperation(operation string) (string, bool) {
 	switch operation {
+	case applicationclosurepb.ApplicationClosureService_ApplyApplicationClosure_FullMethodName:
+		return PermissionApplicationClosureApply, true
+	case applicationclosurepb.ApplicationClosureService_GetApplicationClosureStatus_FullMethodName:
+		return PermissionApplicationClosureRead, true
 	case "/auth_center.v1.account_owner_exit.AccountOwnerExitDecisionService/GetAccountOwnerExitDecision":
 		return PermissionOwnerExitRead, true
 	case "/auth_center.v1.oauth_delegation.OAuthDelegationService/IssueDelegationContext":
@@ -94,6 +99,9 @@ func serviceIdentityError(err error, operation string) error {
 			reason = ReasonDeveloperStatusReadForbidden
 		case systemprincipalv1.SystemPrincipalDirectory_ResolveSystemPrincipal_FullMethodName:
 			reason = ReasonSystemPrincipalReadForbidden
+		case applicationclosurepb.ApplicationClosureService_ApplyApplicationClosure_FullMethodName,
+			applicationclosurepb.ApplicationClosureService_GetApplicationClosureStatus_FullMethodName:
+			reason = "ERROR_REASON_APPLICATION_CLOSURE_PERMISSION_DENIED"
 		}
 		return transportStatus(codes.PermissionDenied, reason, "service is not allowed to call this operation")
 	}

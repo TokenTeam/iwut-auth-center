@@ -9,10 +9,12 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"iwut-auth-center/internal/adapter/oauthcrypto"
 	d "iwut-auth-center/internal/oauth/domain"
@@ -242,6 +244,47 @@ func TestOAuthMongoLifecycleAndRevocation(t *testing.T) {
 	}
 	if _, e = f.service.UserInfo(ctx, third.AccessToken); !errors.Is(e, d.ErrToken) {
 		t.Fatal(e)
+	}
+}
+
+func TestOAuthMongoApplicationClosureTombstoneBlocksEveryOnlinePath(t *testing.T) {
+	f := newOAuthFixture(t)
+	ctx := t.Context()
+	if err := EnsureApplicationClosureSchema(ctx, f.repo.db); err != nil {
+		t.Fatal(err)
+	}
+	tokens := f.tokens(t, "openid", "offline_access", "data.read")
+	code := f.code(t, []string{"openid"}, "public-client")
+	repository, _ := NewApplicationClosureRepository(f.auth.r)
+	started := time.Now().UTC().Truncate(time.Millisecond)
+	if _, err := repository.Apply(ctx, "app-one", uuid.NewString(), started, uuid.NewString(), "app-center", started); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.Begin(ctx, d.AuthorizationRequest{ClientID: "public-client", RedirectURI: f.app.runtime.Redirects[0], State: strings.Repeat("a", 43), Nonce: strings.Repeat("b", 43), Challenge: f.challenge, ChallengeMethod: "S256", Channel: "TEST", Major: 1, Prompt: "consent", Scopes: []string{"openid"}}, f.session); !errors.Is(err, d.ErrGrant) {
+		t.Fatalf("authorize = %v", err)
+	}
+	if _, err := f.service.Exchange(ctx, d.ClientProof{ClientID: "public-client"}, code, f.app.runtime.Redirects[0], f.verifier); !errors.Is(err, d.ErrGrant) {
+		t.Fatalf("exchange = %v", err)
+	}
+	if _, err := f.service.Refresh(ctx, d.ClientProof{ClientID: "public-client"}, tokens.RefreshToken, nil); !errors.Is(err, d.ErrGrant) {
+		t.Fatalf("refresh = %v", err)
+	}
+	if _, err := f.service.UserInfo(ctx, tokens.AccessToken); !errors.Is(err, d.ErrToken) {
+		t.Fatalf("userinfo = %v", err)
+	}
+	if _, err := f.service.AccessClient(ctx, tokens.AccessToken); !errors.Is(err, d.ErrToken) {
+		t.Fatalf("introspection = %v", err)
+	}
+	route := d.Route{ID: "read", Audience: "data-service", Protocol: "HTTP", Method: "GET", Path: "/data/{id}", Scopes: []string{"data.read"}, Channels: []string{"TEST"}}
+	if _, err := f.service.Delegate(ctx, tokens.AccessToken, d.DelegationRequest{RouteID: "read", PolicyDigest: "digest", Protocol: "HTTP", Method: "GET", TargetPath: "/data/123"}, route, "digest"); !errors.Is(err, d.ErrToken) {
+		t.Fatalf("delegation = %v", err)
+	}
+	grants, err := f.service.ListGrants(ctx, f.session, "", 50)
+	if err != nil || len(grants) != 0 {
+		t.Fatalf("grants = %#v, %v", grants, err)
+	}
+	if err = f.service.RevokeToken(ctx, d.ClientProof{ClientID: "public-client"}, tokens.AccessToken, "access_token"); err != nil {
+		t.Fatalf("revoke = %v", err)
 	}
 }
 func TestOAuthMongoCatalogCeilingAndAtomicity(t *testing.T) {

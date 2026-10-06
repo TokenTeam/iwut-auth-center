@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	d "iwut-auth-center/internal/oauth/domain"
 	"iwut-auth-center/internal/oauth/port"
 )
@@ -16,9 +17,21 @@ func (s *Service) ListGrants(ctx context.Context, session, cursor string, limit 
 		if e != nil {
 			return e
 		}
-		var err error
-		out, err = tx.ListGrants(ss.AuthID, cursor, limit)
-		return err
+		rows, err := tx.ListGrants(ss.AuthID, cursor, limit)
+		if err != nil {
+			return err
+		}
+		out = out[:0]
+		for _, grant := range rows {
+			err := applicationOpen(tx, grant.ApplicationID)
+			if errors.Is(err, d.ErrUnavailable) {
+				return err
+			}
+			if err == nil {
+				out = append(out, grant)
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err

@@ -10,6 +10,9 @@ func (s *Service) current(ctx context.Context, tx port.Tx, f d.Family) (d.Runtim
 	var rt d.Runtime
 	var g d.Grant
 	var c d.Catalog
+	if err := applicationOpen(tx, f.ApplicationID); err != nil {
+		return rt, g, c, d.ErrGrant
+	}
 	if f.Revoked || !f.IdleExpiresAt.After(s.now()) || !f.AbsoluteExpiresAt.After(s.now()) || f.GrantEpoch < 1 || f.ClientEpoch < 1 {
 		return rt, g, c, d.ErrGrant
 	}

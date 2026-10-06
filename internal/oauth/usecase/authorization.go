@@ -48,6 +48,9 @@ func (s *Service) Begin(ctx context.Context, q d.AuthorizationRequest, session s
 	}
 	err = s.transaction(ctx, func(tx port.Tx) error {
 		out = d.AuthorizationView{}
+		if err := applicationOpen(tx, rt.Client.ApplicationID); err != nil {
+			return err
+		}
 		if _, err := s.checkScopes(tx, rt, q.Scopes); err != nil {
 			return err
 		}
@@ -87,6 +90,9 @@ func (s *Service) View(ctx context.Context, id, csrf, session string) (d.Authori
 		out = d.AuthorizationView{}
 		i, err := tx.Interaction(id)
 		if err != nil {
+			return err
+		}
+		if err := applicationOpen(tx, i.Runtime.Client.ApplicationID); err != nil {
 			return err
 		}
 		if i.Status != "PENDING" || !i.ExpiresAt.After(s.now()) {
@@ -192,6 +198,9 @@ func (s *Service) Confirm(ctx context.Context, id, csrf, session string, selecte
 	return redirect, nil
 }
 func (s *Service) confirm(ctx context.Context, tx port.Tx, i d.Interaction, ss d.Session, selected []string, approve bool) (string, error) {
+	if err := applicationOpen(tx, i.Runtime.Client.ApplicationID); err != nil {
+		return "", err
+	}
 	if i.Status != "PENDING" || !i.ExpiresAt.After(s.now()) || i.AccountRevision != ss.AccountRevision || i.AuthID != ss.AuthID || i.SessionID != ss.ID {
 		return "", d.ErrConflict
 	}

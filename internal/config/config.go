@@ -32,6 +32,8 @@ var ErrInvalidConfiguration = errors.New("invalid auth center configuration")
 type LookupEnv func(key string) (value string, found bool)
 
 type Config struct {
+	ApplicationClosure       *ApplicationClosure
+	ApplicationCloseReauth   *ApplicationCloseReauth
 	SessionManagement        *SessionManagement
 	AccountClosure           *AccountClosure
 	DeveloperManagement      *DeveloperManagement
@@ -151,6 +153,14 @@ func Load(lookup LookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	applicationClosure, err := loadApplicationClosure(lookup, callers)
+	if err != nil {
+		return Config{}, err
+	}
+	applicationCloseReauth, err := loadApplicationCloseReauth(lookup, userEndpoints, issuance)
+	if err != nil {
+		return Config{}, err
+	}
 	developerApplication, err := loadDeveloperApplication(lookup, userEndpoints)
 	if err != nil {
 		return Config{}, err
@@ -187,19 +197,21 @@ func Load(lookup LookupEnv) (Config, error) {
 		return Config{}, err
 	}
 	return Config{
-		SessionManagement:     sessionManagement,
-		AccountClosure:        accountClosure,
-		DeveloperManagement:   developerManagement,
-		OwnerExit:             ownerExit,
-		AccountManagement:     accountManagement,
-		PlatformAdministrator: platformAdministrator,
-		OAuth:                 oauth,
-		DeveloperApplication:  developerApplication,
-		EmailBinding:          emailBinding,
-		EmailLogin:            emailLogin,
-		IdentityIssuance:      issuance,
-		UserEndpoints:         userEndpoints,
-		HTTPAddr:              httpAddress, GRPCAddr: address, MongoURI: mongoURI, MongoDatabase: database,
+		ApplicationClosure:     applicationClosure,
+		ApplicationCloseReauth: applicationCloseReauth,
+		SessionManagement:      sessionManagement,
+		AccountClosure:         accountClosure,
+		DeveloperManagement:    developerManagement,
+		OwnerExit:              ownerExit,
+		AccountManagement:      accountManagement,
+		PlatformAdministrator:  platformAdministrator,
+		OAuth:                  oauth,
+		DeveloperApplication:   developerApplication,
+		EmailBinding:           emailBinding,
+		EmailLogin:             emailLogin,
+		IdentityIssuance:       issuance,
+		UserEndpoints:          userEndpoints,
+		HTTPAddr:               httpAddress, GRPCAddr: address, MongoURI: mongoURI, MongoDatabase: database,
 		ServiceCallers: callers, ServiceIdentityMaxTTL: maxTTL, ServiceIdentityClockSkew: clockSkew,
 	}, nil
 }

@@ -20,6 +20,8 @@ import (
 	closurepb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/account_closure"
 	accountpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/account_management"
 	ownerpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/account_owner_exit"
+	closurereauthpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/application_close_reauth"
+	applicationclosurepb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/application_closure"
 	authv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 	developerapplicationpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_application"
 	developermanagementpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_management"
@@ -40,15 +42,17 @@ import (
 )
 
 type ServerConfig struct {
-	AccountClosure      *AccountClosureService
-	OwnerExitDecision   *OwnerExitDecisionService
-	DeveloperWithdrawal *DeveloperWithdrawalService
-	OAuthGrant          *OAuthGrantService
-	OAuthDelegation     *OAuthDelegationService
-	OAuth               *OAuthHTTP
-	HTTPAddr            string
-	GRPCAddr            string
-	UserEndpoints       *UserEndpoints
+	ApplicationClosure     *ApplicationClosureService
+	ApplicationCloseReauth *ApplicationCloseReauthService
+	AccountClosure         *AccountClosureService
+	OwnerExitDecision      *OwnerExitDecisionService
+	DeveloperWithdrawal    *DeveloperWithdrawalService
+	OAuthGrant             *OAuthGrantService
+	OAuthDelegation        *OAuthDelegationService
+	OAuth                  *OAuthHTTP
+	HTTPAddr               string
+	GRPCAddr               string
+	UserEndpoints          *UserEndpoints
 }
 
 // UserEndpoints is an optional, fully validated runtime assembled before listening.
@@ -132,6 +136,12 @@ func newGRPCServer(
 		options = append(options, kgrpc.Middleware(userEndpointAuthenticationMiddleware(verifier, nil, nil, false)))
 	}
 	server := kgrpc.NewServer(options...)
+	if configuration.ApplicationClosure != nil {
+		applicationclosurepb.RegisterApplicationClosureServiceServer(server, configuration.ApplicationClosure)
+	}
+	if configuration.ApplicationCloseReauth != nil {
+		closurereauthpb.RegisterApplicationCloseReauthServiceServer(server, configuration.ApplicationCloseReauth)
+	}
 	if configuration.AccountClosure != nil {
 		closurepb.RegisterAccountClosureServiceServer(server, configuration.AccountClosure)
 	}
@@ -214,6 +224,9 @@ func newHTTPServer(configuration ServerConfig, verifier *ServiceIdentityVerifier
 		)
 	}
 	server := khttp.NewServer(options...)
+	if configuration.ApplicationCloseReauth != nil {
+		closurereauthpb.RegisterApplicationCloseReauthServiceHTTPServer(server, configuration.ApplicationCloseReauth)
+	}
 	if configuration.AccountClosure != nil {
 		closurepb.RegisterAccountClosureServiceHTTPServer(server, configuration.AccountClosure)
 	}

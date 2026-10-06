@@ -51,7 +51,14 @@ func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 		cleanup()
 		return nil, nil, err
 	}
-	serverConfig := provideServerConfig(configuration, userEndpoints, mainOauthRuntime, mainOwnerExitRuntime, mainAccountClosureRuntime)
+	mainApplicationClosureRuntime, err := provideApplicationClosure(configuration, database)
+	if err != nil {
+		cleanup3()
+		cleanup2()
+		cleanup()
+		return nil, nil, err
+	}
+	serverConfig := provideServerConfig(configuration, userEndpoints, mainOauthRuntime, mainOwnerExitRuntime, mainAccountClosureRuntime, mainApplicationClosureRuntime)
 	serviceIdentityVerifier, err := transport.NewServiceIdentityVerifier(configuration)
 	if err != nil {
 		cleanup3()

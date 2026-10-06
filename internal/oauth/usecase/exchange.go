@@ -50,6 +50,9 @@ func (s *Service) Exchange(ctx context.Context, proof d.ClientProof, raw, redire
 		if err != nil {
 			return err
 		}
+		if err := applicationOpen(tx, code.Runtime.Client.ApplicationID); err != nil {
+			return d.ErrGrant
+		}
 		if code.ClientID != client.ID || code.Runtime.Client.ApplicationID != client.ApplicationID || code.RedirectURI != redirect || code.Challenge != "" && !s.crypto.VerifyPKCE(code.Challenge, verifier) || code.Challenge == "" && verifier != "" || client.Type == "PUBLIC_PKCE" && code.Challenge == "" {
 			return d.ErrGrant
 		}

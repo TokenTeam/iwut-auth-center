@@ -46,6 +46,16 @@ func New(store port.Store, app port.App, crypto port.Crypto, cfg Config) (*Servi
 func (s *Service) transaction(ctx context.Context, fn func(port.Tx) error) error {
 	return s.store.Transaction(ctx, fn)
 }
+func applicationOpen(tx port.Tx, applicationID string) error {
+	open, err := tx.ApplicationOpen(applicationID)
+	if err != nil {
+		return err
+	}
+	if !open {
+		return d.ErrGrant
+	}
+	return nil
+}
 func (s *Service) user(tx port.Tx, authID string, rt d.Runtime) (d.User, error) {
 	if !d.ValidMembership(rt.Client.Channel, rt.TesterID) {
 		return d.User{}, d.ErrUnavailable

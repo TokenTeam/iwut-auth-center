@@ -43,6 +43,15 @@ type oauthTx struct {
 	ctx context.Context
 	r   *OAuthRepository
 }
+
+func (tx *oauthTx) ApplicationOpen(applicationID string) (bool, error) {
+	closed, err := (&ApplicationClosureRepository{auth: tx.r.auth}).IsClosedTx(tx.ctx, applicationID)
+	if err != nil {
+		return false, d.ErrUnavailable
+	}
+	return !closed, nil
+}
+
 type oauthDocument[T any] struct {
 	RetainUntil   time.Time `bson:"retainUntil,omitempty"`
 	ID            string    `bson:"_id"`

@@ -17,6 +17,7 @@ type Store interface {
 	Transaction(context.Context, func(Tx) error) error
 }
 type Tx interface {
+	ApplicationOpen(string) (bool, error)
 	Registrations(string, string) ([]d.Registration, error)
 	SaveRegistration(d.Registration) error
 	Session(string, time.Time) (d.Session, error)
