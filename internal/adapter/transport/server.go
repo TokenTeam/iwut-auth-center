@@ -220,6 +220,10 @@ func newHTTPServer(configuration ServerConfig, verifier *ServiceIdentityVerifier
 		}),
 		khttp.ResponseEncoder(authHTTPResponseEncoder),
 		khttp.ErrorEncoder(authHTTPErrorEncoder),
+		khttp.NotFoundHandler(http.NotFoundHandler()),
+		khttp.MethodNotAllowedHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+		})),
 	}
 	endpoints := configuration.UserEndpoints
 	if endpoints != nil {

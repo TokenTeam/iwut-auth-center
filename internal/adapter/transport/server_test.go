@@ -2,15 +2,21 @@ package transport
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	kerrors "github.com/go-kratos/kratos/v2/errors"
+	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	auth "iwut-auth-center/internal/authentication/domain"
 	profiledomain "iwut-auth-center/internal/profile/domain"
 )
+
+var defaultServeMuxProbeSequence atomic.Uint64
 
 type httpRegistration struct {
 	source string
@@ -68,6 +74,41 @@ func TestHTTPDisabledEndpointsAndInvalidServerConfiguration(t *testing.T) {
 	}
 	if _, err := NewServers(ServerConfig{}, nil, nil, nil, nil); err == nil {
 		t.Fatal("missing HTTP address accepted")
+	}
+}
+
+func TestHTTPFallbacksDoNotUseDefaultServeMux(t *testing.T) {
+	server := newHTTPServer(ServerConfig{HTTPAddr: "127.0.0.1:0"}, nil)
+	probeID := defaultServeMuxProbeSequence.Add(1)
+	notFoundPath := fmt.Sprintf("/__default_mux_not_found_probe_%d", probeID)
+	methodNotAllowedPath := fmt.Sprintf("/__default_mux_method_probe_%d", probeID)
+	const defaultMuxStatus = http.StatusTeapot
+
+	http.DefaultServeMux.HandleFunc(notFoundPath, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(defaultMuxStatus)
+	})
+	http.DefaultServeMux.HandleFunc(methodNotAllowedPath, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(defaultMuxStatus)
+	})
+	server.Route("/").POST(methodNotAllowedPath, func(khttp.Context) error { return nil })
+
+	tests := []struct {
+		name       string
+		method     string
+		path       string
+		wantStatus int
+	}{
+		{name: "unmatched path", method: http.MethodGet, path: notFoundPath, wantStatus: http.StatusNotFound},
+		{name: "unsupported method", method: http.MethodGet, path: methodNotAllowedPath, wantStatus: http.StatusMethodNotAllowed},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			server.ServeHTTP(recorder, httptest.NewRequest(test.method, test.path, nil))
+			if recorder.Code != test.wantStatus {
+				t.Fatalf("response status = %d, want %d; DefaultServeMux fallback status is %d", recorder.Code, test.wantStatus, defaultMuxStatus)
+			}
+		})
 	}
 }
 
