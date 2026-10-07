@@ -314,13 +314,18 @@ and migration state without sending probe mail.
 | `AUTH_SMTP_ADDR` | Required SMTP `host:port`, with a certificate valid for that host |
 | `AUTH_SMTP_FROM` | Required single lowercase platform sender address |
 | `AUTH_SMTP_TLS_MODE` | Required `implicit_tls` or `starttls`; verified TLS is mandatory |
-| `AUTH_SMTP_USERNAME`, `AUTH_SMTP_PASSWORD` | Both supplied or both empty |
+| `AUTH_SMTP_USERNAME`, `AUTH_SMTP_PASSWORD` | Both supplied or both empty; authenticated SMTP negotiates advertised `PLAIN` or `LOGIN` after verified TLS |
 | `AUTH_SMTP_CA_FILE` | Optional trusted CA PEM file; otherwise system roots |
 | `AUTH_SMTP_TIMEOUT` | Positive duration, default `10s`, bounds the whole send |
 | `AUTH_EMAIL_OWNER_HOURLY` | Positive sliding hourly account/public-key send quota, default `5` |
 | `AUTH_EMAIL_ADDRESS_HOURLY` | Positive sliding hourly target-email send quota, default `5` |
 | `AUTH_EMAIL_SOURCE_HOURLY` | Positive sliding hourly direct network peer send quota, default `20` |
 | `AUTH_EMAIL_MAX_BUCKETS` | Positive total persistent quota bucket capacity, default `10000`; live buckets are never evicted |
+
+Authenticated SMTP selects `PLAIN` when advertised and otherwise falls back to
+advertised `LOGIN`; credentials are never sent before verified TLS is active. A
+server offering only unsupported mechanisms such as `XOAUTH2` fails closed with
+`EMAIL_DELIVERY_UNAVAILABLE`. OAuth-based SMTP authentication is not implemented.
 
 The three exact `auth_center.v1.email_binding.EmailBindingService` methods are
 `BeginSetEmail`, `CompleteSetEmail` and `GetOwnEmailBinding`, mapped respectively to

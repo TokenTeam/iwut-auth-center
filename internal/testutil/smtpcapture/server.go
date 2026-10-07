@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/pem"
 	"fmt"
 	"math/big"
@@ -32,7 +33,7 @@ type Server struct {
 	mode     string
 }
 
-// mode: implicit_tls, starttls, reject, timeout, or lost_ack.
+// mode: implicit_tls, starttls, auth_login, reject, timeout, or lost_ack.
 func New(t testing.TB, mode string) *Server {
 	t.Helper()
 	key, e := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -89,6 +90,8 @@ func (s *Server) serve(raw net.Conn) {
 	send := func(line string) { fmt.Fprint(conn, line+"\r\n") }
 	send("220 capture ESMTP")
 	recipient := ""
+	authStep := 0
+	authenticated := false
 	for {
 		line, e := reader.ReadString('\n')
 		if e != nil {
@@ -99,6 +102,8 @@ func (s *Server) serve(raw net.Conn) {
 		case strings.HasPrefix(line, "EHLO"), strings.HasPrefix(line, "HELO"):
 			if s.mode == "starttls" {
 				send("250-capture\r\n250 STARTTLS")
+			} else if s.mode == "auth_login" {
+				send("250-capture\r\n250 AUTH LOGIN")
 			} else {
 				send("250 capture")
 			}
@@ -110,8 +115,32 @@ func (s *Server) serve(raw net.Conn) {
 			}
 			conn = secure
 			reader = bufio.NewReader(conn)
+		case s.mode == "auth_login" && line == "AUTH LOGIN":
+			authStep = 1
+			send("334 " + base64.StdEncoding.EncodeToString([]byte("Username:")))
+		case s.mode == "auth_login" && authStep == 1:
+			value, err := base64.StdEncoding.DecodeString(line)
+			if err != nil || string(value) != "user" {
+				send("535 authentication failed")
+				return
+			}
+			authStep = 2
+			send("334 " + base64.StdEncoding.EncodeToString([]byte("Password:")))
+		case s.mode == "auth_login" && authStep == 2:
+			value, err := base64.StdEncoding.DecodeString(line)
+			if err != nil || string(value) != "password" {
+				send("535 authentication failed")
+				return
+			}
+			authStep = 0
+			authenticated = true
+			send("235 authenticated")
 		case strings.HasPrefix(line, "MAIL FROM:"):
-			send("250 OK")
+			if s.mode == "auth_login" && !authenticated {
+				send("530 authentication required")
+			} else {
+				send("250 OK")
+			}
 		case strings.HasPrefix(line, "RCPT TO:"):
 			recipient = strings.TrimPrefix(line, "RCPT TO:")
 			if s.mode == "reject" {

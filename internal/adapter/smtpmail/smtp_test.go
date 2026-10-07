@@ -5,6 +5,7 @@ import (
 	d "iwut-auth-center/internal/emailbinding/domain"
 	login "iwut-auth-center/internal/emaillogin/domain"
 	"iwut-auth-center/internal/testutil/smtpcapture"
+	"net/smtp"
 	"strings"
 	"testing"
 	"time"
@@ -81,5 +82,63 @@ func TestEmailLoginSMTPPurposeAndFailure(t *testing.T) {
 				t.Fatal("login template")
 			}
 		})
+	}
+}
+
+func TestSMTPAuthenticationNegotiation(t *testing.T) {
+	plain, err := smtpAuthentication("smtp.example.test", "LOGIN PLAIN", "user", "password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mechanism, initial, err := plain.Start(&smtp.ServerInfo{Name: "smtp.example.test", TLS: true, Auth: []string{"LOGIN", "PLAIN"}})
+	if err != nil || mechanism != "PLAIN" || len(initial) == 0 {
+		t.Fatalf("PLAIN negotiation = %q, %x, %v", mechanism, initial, err)
+	}
+
+	selected, err := smtpAuthentication("smtp.example.test", "LOGIN XOAUTH2", "user", "password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth, ok := selected.(*loginAuth)
+	if !ok {
+		t.Fatalf("LOGIN negotiation selected %T", selected)
+	}
+	mechanism, initial, err = auth.Start(&smtp.ServerInfo{Name: "smtp.example.test", TLS: true, Auth: []string{"LOGIN", "XOAUTH2"}})
+	if err != nil || mechanism != "LOGIN" || initial != nil {
+		t.Fatalf("LOGIN start = %q, %x, %v", mechanism, initial, err)
+	}
+	username, err := auth.Next([]byte("Username:"), true)
+	if err != nil || string(username) != "user" {
+		t.Fatalf("LOGIN username = %q, %v", username, err)
+	}
+	password, err := auth.Next([]byte("Password:"), true)
+	if err != nil || string(password) != "password" {
+		t.Fatalf("LOGIN password = %q, %v", password, err)
+	}
+	if final, err := auth.Next(nil, false); err != nil || final != nil {
+		t.Fatalf("LOGIN completion = %x, %v", final, err)
+	}
+
+	if _, err := smtpAuthentication("smtp.example.test", "XOAUTH2", "user", "password"); err == nil {
+		t.Fatal("unsupported authentication mechanism accepted")
+	}
+	insecure := &loginAuth{username: "user", password: "password"}
+	if _, _, err := insecure.Start(&smtp.ServerInfo{Name: "smtp.example.test", Auth: []string{"LOGIN"}}); err == nil {
+		t.Fatal("LOGIN credentials allowed without TLS")
+	}
+}
+
+func TestSMTPLoginDelivery(t *testing.T) {
+	capture := smtpcapture.New(t, "auth_login")
+	sender, err := New(Config{Address: capture.Address, From: "auth@example.test", TLSMode: "implicit_tls", Username: "user", Password: "password", Roots: capture.Roots, Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sender.Send(t.Context(), "recipient@example.test", d.BindingPurpose, "00001234", time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	message := capture.Next(t)
+	if message.Recipient != "<recipient@example.test>" || !strings.Contains(message.Body, "00001234") {
+		t.Fatalf("authenticated message = %#v", message)
 	}
 }

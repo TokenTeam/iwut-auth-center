@@ -26,6 +26,12 @@ type Sender struct {
 	host string
 }
 
+type loginAuth struct {
+	username string
+	password string
+	step     int
+}
+
 var errDelivery = errors.New("email delivery unavailable")
 
 func New(c Config) (*Sender, error) {
@@ -78,7 +84,12 @@ func (s *Sender) Send(ctx context.Context, to, purpose, code string, expires tim
 		}
 	}
 	if s.c.Username != "" {
-		if client.Auth(smtp.PlainAuth("", s.c.Username, s.c.Password, s.host)) != nil {
+		ok, mechanisms := client.Extension("AUTH")
+		if !ok {
+			return errDelivery
+		}
+		auth, e := smtpAuthentication(s.host, mechanisms, s.c.Username, s.c.Password)
+		if e != nil || client.Auth(auth) != nil {
 			return errDelivery
 		}
 	}
@@ -108,4 +119,43 @@ func (s *Sender) Send(ctx context.Context, to, purpose, code string, expires tim
 		return errDelivery
 	}
 	return nil
+}
+
+func smtpAuthentication(host, advertised, username, password string) (smtp.Auth, error) {
+	mechanisms := strings.Fields(strings.ToUpper(advertised))
+	for _, mechanism := range mechanisms {
+		if mechanism == "PLAIN" {
+			return smtp.PlainAuth("", username, password, host), nil
+		}
+	}
+	for _, mechanism := range mechanisms {
+		if mechanism == "LOGIN" {
+			return &loginAuth{username: username, password: password}, nil
+		}
+	}
+	return nil, errDelivery
+}
+
+func (a *loginAuth) Start(server *smtp.ServerInfo) (string, []byte, error) {
+	if server == nil || !server.TLS {
+		return "", nil, errDelivery
+	}
+	a.step = 0
+	return "LOGIN", nil, nil
+}
+
+func (a *loginAuth) Next(_ []byte, more bool) ([]byte, error) {
+	if !more {
+		return nil, nil
+	}
+	switch a.step {
+	case 0:
+		a.step++
+		return []byte(a.username), nil
+	case 1:
+		a.step++
+		return []byte(a.password), nil
+	default:
+		return nil, errDelivery
+	}
 }
