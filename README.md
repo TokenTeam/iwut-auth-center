@@ -578,6 +578,16 @@ The manifest selects the persistent Mongo scope catalog, real App019 provider,
 independent OIDC/delegation/service keys, official portal login URL and route policy.
 Without it, existing endpoints retain their previous configuration.
 
+OAuth scope entries use `Kind=PROTOCOL`, `RESOURCE`, or `USERINFO_PROFILE`.
+A `USERINFO_PROFILE` entry must have an empty `Audience`, set `ProfileField` to an
+existing UC005 field key, and use the exact name `profile.<ProfileField>`. Startup
+cross-checks the complete profile catalog, derives and persists the field value type,
+and rejects missing, duplicate or remapped fields. Operators must not configure
+`ProfileValueType`; it is trusted only after derivation. Each enabled mapping becomes
+an independently reviewed/consented scope and projects its current value under the
+fixed UserInfo `iwut_profile` object. The example scope manifest deliberately contains
+no production profile mapping; test fields are not a production collection list.
+
 The backend provides authorization code consent, PUBLIC_PKCE and confidential
 client exchange, opaque access/rotating refresh credentials, OIDC discovery/JWKS
 and UserInfo, Session-authenticated grant management, and internal delegation

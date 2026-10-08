@@ -85,11 +85,11 @@ func TestOAuthE2E_ProductionWireActualAppProvider(t *testing.T) {
 	keysJSON, _ := json.Marshal(map[string]string{"identity-k1": publicFile})
 	dbName := "oauth_e2e_" + uuid.NewString()
 	authHTTP, authGRPC, appGRPC := reserveAddress(t), reserveAddress(t), reserveAddress(t)
-	env := map[string]string{config.UserEndpointsEnabledEnv: "true", config.IdentityIssuanceEnabledEnv: "true", config.MongoURIEnv: uri, config.MongoDatabaseEnv: dbName, config.ServiceCallersEnv: callers, config.HTTPAddrEnv: authHTTP, config.GRPCAddrEnv: authGRPC, "AUTH_AUTHENTICATION_SERVICE_ID": "iwut-auth-center:test", "AUTH_SESSION_TTL": "24h", "AUTH_ASSOC_KEY_VERSION": "v1", "AUTH_ASSOC_ENCRYPT_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32)), "AUTH_ASSOC_LOOKUP_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, 32)), "AUTH_PROFILE_CATALOG_FILE": write("profile.json", []byte(`{"definitions":[]}`)), "AUTH_USER_IDENTITY_ISSUER": "identity-test", "AUTH_USER_IDENTITY_PUBLIC_KEYS_JSON": string(keysJSON), "AUTH_USER_IDENTITY_SIGNING_KID": "identity-k1", "AUTH_USER_IDENTITY_PRIVATE_KEY_PEM_B64": base64.StdEncoding.EncodeToString(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(identityKey)}))}
+	env := map[string]string{config.UserEndpointsEnabledEnv: "true", config.IdentityIssuanceEnabledEnv: "true", config.MongoURIEnv: uri, config.MongoDatabaseEnv: dbName, config.ServiceCallersEnv: callers, config.HTTPAddrEnv: authHTTP, config.GRPCAddrEnv: authGRPC, "AUTH_AUTHENTICATION_SERVICE_ID": "iwut-auth-center:test", "AUTH_SESSION_TTL": "24h", "AUTH_ASSOC_KEY_VERSION": "v1", "AUTH_ASSOC_ENCRYPT_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32)), "AUTH_ASSOC_LOOKUP_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, 32)), "AUTH_PROFILE_CATALOG_FILE": write("profile.json", []byte(`{"definitions":[{"key":"basic.name","label":"Name","description":"User-provided display name","valueType":"STRING","constraints":{"maxLength":80}}]}`)), "AUTH_USER_IDENTITY_ISSUER": "identity-test", "AUTH_USER_IDENTITY_PUBLIC_KEYS_JSON": string(keysJSON), "AUTH_USER_IDENTITY_SIGNING_KID": "identity-k1", "AUTH_USER_IDENTITY_PRIVATE_KEY_PEM_B64": base64.StdEncoding.EncodeToString(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(identityKey)}))}
 	route := d.Route{ID: "resource-read", Audience: "resource-service", Protocol: "HTTP", Method: "GET", Path: "/items/{id}", Scopes: []string{"items.read"}, Channels: []string{"TEST", "STABLE", "GREY"}}
 	policy := writeJSON("routes.json", map[string]any{"version": 1, "routes": []oauthRouteJSON{{ID: route.ID, Audience: route.Audience, Protocol: route.Protocol, Method: route.Method, Path: route.Path, Scopes: route.Scopes, Channels: route.Channels}, {ID: "stable-only", Audience: route.Audience, Protocol: "HTTP", Method: "GET", Path: "/stable/{id}", Scopes: route.Scopes, Channels: []string{"STABLE"}}}, "callers": map[string]any{"gateway": map[string]any{"routes": []string{route.ID, "stable-only"}, "audiences": []string{route.Audience}}}})
 	clockFile := writeJSON("clock.json", map[string]any{"observedAt": time.Now().UTC(), "offsetMillis": 0})
-	cfg := config.OAuth{ClockObservationFile: clockFile, ResourceScopesReady: true, Issuer: "https://auth.example.test/oidc", PortalOrigin: "https://auth.example.test", PortalLoginURL: "https://auth.example.test/login", SectorSuffix: "sectors.example.test", CatalogFile: writeJSON("scopes.json", []d.Scope{{Name: "openid", Label: "Login", Description: "Identify account", Kind: "PROTOCOL", Enabled: true}, {Name: "email", Label: "Email", Description: "Verified email", Kind: "PROTOCOL", Enabled: true}, {Name: "offline_access", Label: "Background", Description: "Refresh access", Kind: "PROTOCOL", Enabled: true}, {Name: "items.read", Label: "Items", Description: "Read items", Kind: "RESOURCE", Audience: "resource-service", Enabled: true}}), AppTarget: appGRPC, AppPlaintextLoopback: true, ServiceKeyID: "auth-service", ServiceKeyFile: keyFile("service.pem", serviceKey), OIDCKeyID: "oidc", OIDCKeyFile: keyFile("oidc.pem", oidcKey), DelegationKeyID: "delegation", DelegationKeyFile: keyFile("delegation.pem", delegationKey), RoutePolicyFile: policy, PublicEnabled: true, PortalReady: true, GatewayReady: true, RefreshEnabled: true}
+	cfg := config.OAuth{ClockObservationFile: clockFile, ResourceScopesReady: true, Issuer: "https://auth.example.test/oidc", PortalOrigin: "https://auth.example.test", PortalLoginURL: "https://auth.example.test/login", SectorSuffix: "sectors.example.test", CatalogFile: writeJSON("scopes.json", []d.Scope{{Name: "openid", Label: "Login", Description: "Identify account", Kind: "PROTOCOL", Enabled: true}, {Name: "email", Label: "Email", Description: "Verified email", Kind: "PROTOCOL", Enabled: true}, {Name: "offline_access", Label: "Background", Description: "Refresh access", Kind: "PROTOCOL", Enabled: true}, {Name: "items.read", Label: "Items", Description: "Read items", Kind: "RESOURCE", Audience: "resource-service", Enabled: true}, {Name: "profile.basic.name", Label: "Name", Description: "Read user-provided name", Kind: "USERINFO_PROFILE", ProfileField: "basic.name", Enabled: true}}), AppTarget: appGRPC, AppPlaintextLoopback: true, ServiceKeyID: "auth-service", ServiceKeyFile: keyFile("service.pem", serviceKey), OIDCKeyID: "oidc", OIDCKeyFile: keyFile("oidc.pem", oidcKey), DelegationKeyID: "delegation", DelegationKeyFile: keyFile("delegation.pem", delegationKey), RoutePolicyFile: policy, PublicEnabled: true, PortalReady: true, GatewayReady: true, RefreshEnabled: true}
 	env["AUTH_CENTER_OAUTH_CONFIG_FILE"] = writeJSON("oauth.json", cfg)
 	configuration, e := config.Load(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
 	if e != nil {
@@ -121,6 +121,9 @@ func TestOAuthE2E_ProductionWireActualAppProvider(t *testing.T) {
 		t.Fatal(e)
 	}
 	if _, e = db.Collection(ma.EmailBindingCollection).InsertOne(ctx, bson.M{"authId": user.AuthId, "email": "student@example.test", "revision": int64(1), "verifiedAt": time.Now()}); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = db.Collection(ma.PrincipalCollection).UpdateOne(ctx, bson.M{"authId": user.AuthId}, bson.M{"$set": bson.M{"profile.entries": bson.A{bson.M{"key": "basic.name", "valueType": "STRING", "value": "OAuth Alice"}}, "profile.revision": int64(2), "profile.updatedAt": time.Now()}}); e != nil {
 		t.Fatal(e)
 	}
 	if _, e = db.Collection(ma.PrincipalCollection).UpdateOne(ctx, bson.M{"authId": reviewer.AuthId}, bson.M{"$set": bson.M{"permissions": []string{"app.profile.review", "app.version.review"}, "permissionRevision": int64(1)}}); e != nil {
@@ -177,7 +180,7 @@ func TestOAuthE2E_ProductionWireActualAppProvider(t *testing.T) {
 	reviewID := submitted["review"].(map[string]any)["profileReviewId"].(string)
 	appCall("POST", prefix+"/profile-revisions/"+profileID+"/reviews/"+reviewID+"/decision", reviewToken, map[string]any{"expectedProfileRevisionRevision": "2", "expectedCurrentPublishedProfileRevisionId": nil, "expectedPolicyVersion": "app-profile-review-v1", "outcome": "APPROVE", "confirmedCheckIds": []string{"content-policy-reviewed", "icon-content-reviewed"}})
 	callback := "https://www.whut.edu.cn/oauth-callback"
-	version := appCall("POST", prefix+"/versions", ownerToken, map[string]any{"versionLabel": "1.0", "launchUrl": "https://www.whut.edu.cn/", "rpcApiMinVersion": 1, "rpcApiMaxVersionExclusive": 2, "requiredCapabilities": []string{}, "requiredScopes": []string{"openid"}, "optionalScopes": []string{"email", "offline_access", "items.read"}, "oauthRedirects": map[string]any{"pkceRedirectUris": []string{callback}, "confidentialRedirectUris": []string{callback + "-confidential"}}})
+	version := appCall("POST", prefix+"/versions", ownerToken, map[string]any{"versionLabel": "1.0", "launchUrl": "https://www.whut.edu.cn/", "rpcApiMinVersion": 1, "rpcApiMaxVersionExclusive": 2, "requiredCapabilities": []string{}, "requiredScopes": []string{"openid"}, "optionalScopes": []string{"email", "offline_access", "items.read", "profile.basic.name"}, "oauthRedirects": map[string]any{"pkceRedirectUris": []string{callback}, "confidentialRedirectUris": []string{callback + "-confidential"}}})
 	versionID := version["versionId"].(string)
 	vr := appCall("POST", prefix+"/versions/"+versionID+"/reviews", ownerToken, map[string]any{"expectedRevision": "1"})
 	vrID := vr["review"].(map[string]any)["reviewId"].(string)
@@ -265,7 +268,7 @@ func TestOAuthE2E_ProductionWireActualAppProvider(t *testing.T) {
 		if _, confidential := clientSecrets[client]; confidential {
 			redirect += "-confidential"
 		}
-		return url.Values{"response_type": {"code"}, "client_id": {client}, "redirect_uri": {redirect}, "scope": {"openid email offline_access items.read"}, "state": {state}, "nonce": {nonce}, "code_challenge": {challenge}, "code_challenge_method": {"S256"}, "iwut_channel": {clientChannels[client]}, "iwut_rpc_api_major": {"1"}, "prompt": {"consent"}}
+		return url.Values{"response_type": {"code"}, "client_id": {client}, "redirect_uri": {redirect}, "scope": {"openid email offline_access items.read profile.basic.name"}, "state": {state}, "nonce": {nonce}, "code_challenge": {challenge}, "code_challenge_method": {"S256"}, "iwut_channel": {clientChannels[client]}, "iwut_rpc_api_major": {"1"}, "prompt": {"consent"}}
 	}
 	for _, wrongChannel := range []string{"STABLE", "GREY", "UNKNOWN"} {
 		q := authorizeQuery(clientID)
@@ -290,7 +293,7 @@ func TestOAuthE2E_ProductionWireActualAppProvider(t *testing.T) {
 			return string(m[1])
 		}
 		id, csrf := field("interaction"), field("csrf")
-		v := url.Values{"interaction": {id}, "csrf": {csrf}, "decision": {"approve"}, "scope": {"openid", "email", "offline_access", "items.read"}}
+		v := url.Values{"interaction": {id}, "csrf": {csrf}, "decision": {"approve"}, "scope": {"openid", "email", "offline_access", "items.read", "profile.basic.name"}}
 		status, h, b := request("POST", "/portal/interactions/"+id+"/confirm", v.Encode(), "application/x-www-form-urlencoded", http.Header{"Cookie": []string{cookie}, "Origin": []string{cfg.PortalOrigin}})
 		if status != 303 {
 			t.Fatal("confirm", status, string(b))
@@ -362,7 +365,7 @@ func TestOAuthE2E_ProductionWireActualAppProvider(t *testing.T) {
 		t.Fatal("at_hash")
 	}
 	code, _, body = request("GET", "/userinfo", "", "", http.Header{"Authorization": []string{"Bearer " + access}})
-	if code != 200 || !bytes.Contains(body, []byte("student@example.test")) || bytes.Contains(body, []byte(user.AuthId)) {
+	if code != 200 || !bytes.Contains(body, []byte("student@example.test")) || !bytes.Contains(body, []byte(`"iwut_profile":{"basic.name":"OAuth Alice"}`)) || bytes.Contains(body, []byte(user.AuthId)) {
 		t.Fatal("userinfo", code, string(body))
 	}
 	code, _, body = request("GET", "/userinfo?access_token="+access, "", "", nil)

@@ -244,5 +244,22 @@ func (h *OAuthHTTP) userinfo(w http.ResponseWriter, r *http.Request) {
 		response["email"] = out.Email
 		response["email_verified"] = true
 	}
+	if len(out.Profile) > 0 {
+		profile := map[string]any{}
+		for _, entry := range out.Profile {
+			switch entry.Value.Type {
+			case "STRING", "DATE":
+				profile[entry.Key] = entry.Value.Text
+			case "INTEGER":
+				profile[entry.Key] = entry.Value.Integer
+			case "BOOLEAN":
+				profile[entry.Key] = entry.Value.Boolean
+			default:
+				oauthError(w, d.ErrUnavailable)
+				return
+			}
+		}
+		response["iwut_profile"] = profile
+	}
 	oauthJSON(w, 200, response)
 }

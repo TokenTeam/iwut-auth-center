@@ -358,6 +358,80 @@ func TestOAuthMongoCatalogCeilingAndAtomicity(t *testing.T) {
 		t.Fatal("partial audit commit")
 	}
 }
+func TestOAuthMongoUserInfoProfileProjection(t *testing.T) {
+	f := newOAuthFixture(t)
+	ctx := t.Context()
+	profileScopes := []d.Scope{
+		{Name: "profile.basic.name", Label: "Name", Description: "Read name", Kind: "USERINFO_PROFILE", ProfileField: "basic.name", ProfileValueType: "STRING", Enabled: true},
+		{Name: "profile.education.year", Label: "Year", Description: "Read year", Kind: "USERINFO_PROFILE", ProfileField: "education.year", ProfileValueType: "INTEGER", Enabled: true},
+		{Name: "profile.preferences.public", Label: "Public", Description: "Read preference", Kind: "USERINFO_PROFILE", ProfileField: "preferences.public", ProfileValueType: "BOOLEAN", Enabled: true},
+		{Name: "profile.personal.birthday", Label: "Birthday", Description: "Read birthday", Kind: "USERINFO_PROFILE", ProfileField: "personal.birthday", ProfileValueType: "DATE", Enabled: true},
+	}
+	f.seed = append(f.seed, profileScopes...)
+	if err := f.repo.SeedCatalog(ctx, f.seed); err != nil {
+		t.Fatal(err)
+	}
+	f.app.mu.Lock()
+	for _, scope := range profileScopes {
+		f.app.runtime.Optional = append(f.app.runtime.Optional, scope.Name)
+	}
+	f.app.mu.Unlock()
+	entries := bson.A{
+		bson.M{"key": "basic.name", "valueType": "STRING", "value": "Alice"},
+		bson.M{"key": "education.year", "valueType": "INTEGER", "value": int32(2024)},
+		bson.M{"key": "personal.birthday", "valueType": "DATE", "value": "2000-02-29"},
+		bson.M{"key": "preferences.public", "valueType": "BOOLEAN", "value": false},
+	}
+	if _, err := f.repo.db.Collection(PrincipalCollection).UpdateOne(ctx, bson.M{"authId": f.auth.c.AuthID}, bson.M{"$set": bson.M{"profile.entries": entries, "profile.revision": int64(2), "profile.updatedAt": time.Now()}}); err != nil {
+		t.Fatal(err)
+	}
+	scopes := []string{"openid"}
+	for _, scope := range profileScopes {
+		scopes = append(scopes, scope.Name)
+	}
+	tokens := f.tokens(t, scopes...)
+	info, err := f.service.UserInfo(ctx, tokens.AccessToken)
+	if err != nil || len(info.Profile) != 4 {
+		t.Fatalf("profile = %#v, %v", info.Profile, err)
+	}
+	if info.Profile[0].Key != "basic.name" || info.Profile[0].Value.Text != "Alice" || info.Profile[1].Value.Integer != 2024 || info.Profile[2].Value.Text != "2000-02-29" || info.Profile[3].Value.Boolean {
+		t.Fatalf("typed projection = %#v", info.Profile)
+	}
+	if _, err = f.repo.db.Collection(PrincipalCollection).UpdateOne(ctx, bson.M{"authId": f.auth.c.AuthID}, bson.M{"$set": bson.M{"profile.entries.0.value": "Alice 2", "profile.revision": int64(3), "profile.updatedAt": time.Now()}}); err != nil {
+		t.Fatal(err)
+	}
+	info, err = f.service.UserInfo(ctx, tokens.AccessToken)
+	if err != nil || info.Profile[0].Value.Text != "Alice 2" {
+		t.Fatal("current value not projected", err)
+	}
+	for index := range f.seed {
+		if f.seed[index].Kind == "USERINFO_PROFILE" {
+			f.seed[index].Enabled = false
+		}
+	}
+	if err = f.repo.SeedCatalog(ctx, f.seed); err != nil {
+		t.Fatal(err)
+	}
+	duplicate := bson.A{bson.M{"key": "basic.name", "valueType": "STRING", "value": "a"}, bson.M{"key": "basic.name", "valueType": "STRING", "value": "b"}}
+	if _, err = f.repo.db.Collection(PrincipalCollection).UpdateOne(ctx, bson.M{"authId": f.auth.c.AuthID}, bson.M{"$set": bson.M{"profile.entries": duplicate, "profile.revision": int64(4), "profile.updatedAt": time.Now()}}); err != nil {
+		t.Fatal(err)
+	}
+	info, err = f.service.UserInfo(ctx, tokens.AccessToken)
+	if err != nil || len(info.Profile) != 0 {
+		t.Fatal("disabled profile scope read profile", err)
+	}
+	for index := range f.seed {
+		if f.seed[index].Name == "profile.basic.name" {
+			f.seed[index].Enabled = true
+		}
+	}
+	if err = f.repo.SeedCatalog(ctx, f.seed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.service.UserInfo(ctx, tokens.AccessToken); !errors.Is(err, d.ErrUnavailable) {
+		t.Fatal("corrupt profile did not fail closed", err)
+	}
+}
 func TestOAuthMongoConcurrentCodeAndRefresh(t *testing.T) {
 	f := newOAuthFixture(t)
 	code := f.code(t, []string{"openid", "offline_access"}, "public-client")

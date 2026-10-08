@@ -19,14 +19,22 @@ type OAuthCatalog struct{ repository *OAuthRepository }
 func NewOAuthCatalog(r *OAuthRepository) *OAuthCatalog { return &OAuthCatalog{r} }
 func (r *OAuthRepository) SeedCatalog(ctx context.Context, scopes []d.Scope) error {
 	names := []string{}
+	profileFields := map[string]bool{}
 	for _, s := range scopes {
 		names = append(names, s.Name)
 		protocol := d.Contains([]string{"openid", "email", "offline_access"}, s.Name)
-		if protocol != (s.Kind == "PROTOCOL") || protocol && s.Audience != "" {
+		profile := s.Kind == "USERINFO_PROFILE"
+		if protocol != (s.Kind == "PROTOCOL") || protocol && (s.Audience != "" || s.ProfileField != "" || s.ProfileValueType != "") {
 			return d.ErrScope
 		}
-		if s.Label == "" || s.Description == "" || s.Kind != "PROTOCOL" && s.Kind != "RESOURCE" || s.Kind == "RESOURCE" && s.Audience == "" || s.Kind == "PROTOCOL" && s.Name != "openid" && s.Name != "email" && s.Name != "offline_access" {
+		if s.Label == "" || s.Description == "" || s.Kind != "PROTOCOL" && s.Kind != "RESOURCE" && !profile || s.Kind == "RESOURCE" && (s.Audience == "" || s.ProfileField != "" || s.ProfileValueType != "") || s.Kind == "PROTOCOL" && !protocol || profile && (s.Audience != "" || s.ProfileField == "" || s.Name != "profile."+s.ProfileField || !d.ValidProfileValueType(s.ProfileValueType)) {
 			return d.ErrScope
+		}
+		if profile {
+			if profileFields[s.ProfileField] {
+				return d.ErrScope
+			}
+			profileFields[s.ProfileField] = true
 		}
 	}
 	if !d.ValidScopes(names) {
@@ -49,7 +57,7 @@ func (r *OAuthRepository) SeedCatalog(ctx context.Context, scopes []d.Scope) err
 				return d.ErrScope
 			}
 			for _, b := range scopes {
-				if a.Name == b.Name && (a.Kind != b.Kind || a.Audience != b.Audience) {
+				if a.Name == b.Name && (a.Kind != b.Kind || a.Audience != b.Audience || a.ProfileField != b.ProfileField || a.ProfileValueType != b.ProfileValueType) {
 					return d.ErrScope
 				}
 			}

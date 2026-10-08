@@ -27,6 +27,7 @@ import (
 	"iwut-auth-center/internal/config"
 	d "iwut-auth-center/internal/oauth/domain"
 	"iwut-auth-center/internal/oauth/usecase"
+	profiledomain "iwut-auth-center/internal/profile/domain"
 	sp "iwut-auth-center/internal/scope/port"
 )
 
@@ -171,7 +172,19 @@ func newOAuthRuntime(configuration config.Config, db *m.Database, endpoints *tra
 	if e != nil || tail != io.EOF {
 		return fail()
 	}
-	for _, scope := range seed {
+	profileCatalog, e := catalog.NewProfileCatalog(configuration.UserEndpoints.Profile)
+	if e != nil {
+		return fail()
+	}
+	profileDefinitions, e := profileCatalog.Snapshot(ctx)
+	if e != nil {
+		return fail()
+	}
+	if bindUserInfoProfileScopes(seed, profileDefinitions) != nil {
+		return fail()
+	}
+	for index := range seed {
+		scope := &seed[index]
 		if scope.Kind == "RESOURCE" && scope.Enabled && !c.ResourceScopesReady {
 			return fail()
 		}
@@ -211,3 +224,27 @@ func newOAuthRuntime(configuration config.Config, db *m.Database, endpoints *tra
 	return &oauthRuntime{HTTP: http, Catalog: ma.NewOAuthCatalog(repo), Grant: &transport.OAuthGrantService{Service: uc}, Delegation: delegationService}, cleanup, nil
 }
 func provideScopeCatalog(runtime *oauthRuntime) sp.Catalog { return runtime.Catalog }
+
+func bindUserInfoProfileScopes(scopes []d.Scope, definitions []profiledomain.Definition) error {
+	profileTypes := map[string]string{}
+	for _, definition := range definitions {
+		profileTypes[definition.Key] = string(definition.ValueType)
+	}
+	seen := map[string]bool{}
+	for index := range scopes {
+		scope := &scopes[index]
+		if scope.Kind != "USERINFO_PROFILE" {
+			if scope.ProfileField != "" || scope.ProfileValueType != "" {
+				return d.ErrScope
+			}
+			continue
+		}
+		valueType, ok := profileTypes[scope.ProfileField]
+		if !ok || scope.ProfileValueType != "" || scope.Name != "profile."+scope.ProfileField || scope.Audience != "" || seen[scope.ProfileField] {
+			return d.ErrScope
+		}
+		seen[scope.ProfileField] = true
+		scope.ProfileValueType = valueType
+	}
+	return nil
+}

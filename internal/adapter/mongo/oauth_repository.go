@@ -174,6 +174,25 @@ func (tx *oauthTx) User(id string) (d.User, error) {
 	}
 	return user, nil
 }
+func (tx *oauthTx) Profile(id string) (d.Profile, error) {
+	var raw bson.Raw
+	err := tx.r.db.Collection(PrincipalCollection).FindOne(tx.ctx, bson.M{"authId": id, "principalType": "USER", "accountStatus": "ACTIVE"}).Decode(&raw)
+	if errors.Is(err, m.ErrNoDocuments) {
+		return d.Profile{}, d.ErrGrant
+	}
+	if err != nil {
+		return d.Profile{}, d.ErrUnavailable
+	}
+	principal, err := decodeProfilePrincipal(raw)
+	if err != nil || principal.AuthID != id || principal.Type != "USER" || principal.AccountStatus != "ACTIVE" {
+		return d.Profile{}, d.ErrUnavailable
+	}
+	out := d.Profile{Revision: principal.Profile.Revision, UpdatedAt: principal.Profile.UpdatedAt, Entries: make([]d.ProfileEntry, 0, len(principal.Profile.Entries))}
+	for _, entry := range principal.Profile.Entries {
+		out.Entries = append(out.Entries, d.ProfileEntry{Key: entry.Key, Value: d.ProfileValue{Type: string(entry.Value.Type), Text: entry.Value.Text, Integer: entry.Value.Integer, Boolean: entry.Value.Boolean}})
+	}
+	return out, nil
+}
 func (tx *oauthTx) Catalog() (d.Catalog, error) {
 	return oauthGet[d.Catalog](tx, "catalog", bson.M{"_id": "current"})
 }

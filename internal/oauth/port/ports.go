@@ -22,6 +22,7 @@ type Tx interface {
 	SaveRegistration(d.Registration) error
 	Session(string, time.Time) (d.Session, error)
 	User(string) (d.User, error)
+	Profile(string) (d.Profile, error)
 	Catalog() (d.Catalog, error)
 	Interaction(string) (d.Interaction, error)
 	SaveInteraction(d.Interaction) error

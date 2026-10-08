@@ -75,6 +75,39 @@ func (s *Service) UserInfo(ctx context.Context, raw string) (d.UserInfo, error) 
 				out.EmailVerified = true
 			}
 		}
+		catalog, err := s.catalog(tx)
+		if err != nil {
+			return err
+		}
+		definitions := make([]d.Scope, 0)
+		for _, definition := range catalog.Scopes {
+			if definition.Kind == "USERINFO_PROFILE" && d.Contains(scopes, definition.Name) {
+				if definition.Name != "profile."+definition.ProfileField || !d.ValidProfileValueType(definition.ProfileValueType) {
+					return d.ErrUnavailable
+				}
+				definitions = append(definitions, definition)
+			}
+		}
+		if len(definitions) > 0 {
+			profile, err := tx.Profile(f.AuthID)
+			if err != nil {
+				return err
+			}
+			values := map[string]d.ProfileValue{}
+			for _, entry := range profile.Entries {
+				values[entry.Key] = entry.Value
+			}
+			for _, definition := range definitions {
+				value, exists := values[definition.ProfileField]
+				if !exists {
+					continue
+				}
+				if value.Type != definition.ProfileValueType {
+					return d.ErrUnavailable
+				}
+				out.Profile = append(out.Profile, d.ProfileEntry{Key: definition.ProfileField, Value: value})
+			}
+		}
 		return s.fresh(rt)
 	})
 	if err != nil {

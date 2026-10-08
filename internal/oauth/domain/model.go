@@ -26,6 +26,8 @@ var (
 
 type Scope struct {
 	Name, Label, Description, Kind, Audience string
+	ProfileField                             string `json:",omitempty"`
+	ProfileValueType                         string `json:"-"`
 	Enabled                                  bool
 }
 type Catalog struct {
@@ -37,7 +39,7 @@ type Catalog struct {
 func (c Catalog) Enabled(refresh bool) []string {
 	var out []string
 	for _, s := range c.Scopes {
-		if s.Enabled && (s.Kind == "RESOURCE" && s.Audience != "" || s.Kind == "PROTOCOL" && (s.Name == "openid" || s.Name == "email" || s.Name == "offline_access" && refresh)) {
+		if s.Enabled && (s.Kind == "RESOURCE" && s.Audience != "" || s.Kind == "USERINFO_PROFILE" && s.Audience == "" || s.Kind == "PROTOCOL" && (s.Name == "openid" || s.Name == "email" || s.Name == "offline_access" && refresh)) {
 			out = append(out, s.Name)
 		}
 	}
@@ -93,6 +95,21 @@ type User struct {
 	AccountRevision                  int64
 	AuthID, Email, DeveloperHandle   string
 	EmailVerified, DeveloperApproved bool
+}
+type ProfileValue struct {
+	Type    string
+	Text    string
+	Integer int32
+	Boolean bool
+}
+type ProfileEntry struct {
+	Key   string
+	Value ProfileValue
+}
+type Profile struct {
+	Entries   []ProfileEntry
+	Revision  int64
+	UpdatedAt time.Time
 }
 type AuthorizationRequest struct {
 	ClientID, RedirectURI, State, Nonce, Challenge, ChallengeMethod, Channel, Prompt string
@@ -171,6 +188,7 @@ type TokenResponse struct {
 type UserInfo struct {
 	Subject, Email string
 	EmailVerified  bool
+	Profile        []ProfileEntry
 }
 type ClientProof struct {
 	ClientID, Secret string
@@ -203,6 +221,9 @@ func ValidScopes(xs []string) bool {
 		}
 	}
 	return true
+}
+func ValidProfileValueType(value string) bool {
+	return value == "STRING" || value == "INTEGER" || value == "BOOLEAN" || value == "DATE"
 }
 func Contains(xs []string, s string) bool { return slices.Contains(xs, s) }
 func Subset(a, b []string) bool {
