@@ -1,0 +1,18 @@
+master:
+  push:
+    - name: build and publish iwut-auth-center
+      git:
+        submodules: true
+      services:
+        - docker
+      stages:
+        - name: build image
+          script: |
+            docker build \
+              --tag "${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${CNB_COMMIT_SHORT}" \
+              --tag "${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest" \
+              .
+        - name: push commit image
+          script: docker push "${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${CNB_COMMIT_SHORT}"
+        - name: push latest image
+          script: docker push "${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest"
