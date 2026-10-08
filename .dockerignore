@@ -1,0 +1,15 @@
+.git
+.gitmodules
+.artifacts
+.idea
+.vscode
+
+Dockerfile*
+README.md
+AGENTS.md
+Makefile
+
+scripts
+**/*_test.go
+**/*.log
+**/.DS_Store

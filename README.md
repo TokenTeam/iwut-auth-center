@@ -32,6 +32,37 @@ make run
 User HTTP routes require the user-endpoint switch below. Gateway/Traefik owns
 the public service prefix and gRPC-Web mapping.
 
+## Container image
+
+Build the production image from the repository root:
+
+```bash
+docker build -t iwut-auth-center .
+```
+
+The Dockerfile uses an Alpine Go builder and a separate Alpine runtime.
+`CGO_ENABLED=0` produces a static executable, so it depends on neither glibc nor
+musl at runtime. The runtime installs CA certificates for MongoDB, SMTP, App
+Center and OTLP TLS connections, runs as the unprivileged UID/GID `10001`, and
+exposes the default HTTP and gRPC ports `8000` and `9000`.
+
+Start the service with its environment and mounted configuration, key and CA
+files. Account closure deployments must also mount a writable durable directory
+and point their configured ledger path at it; `/var/lib/iwut-auth-center` is
+created for that purpose.
+
+```bash
+docker run --rm --env-file auth-center.env \
+  -p 8000:8000 -p 9000:9000 \
+  iwut-auth-center
+```
+
+The image entrypoint is `auth-center`; no argument starts the service. Explicit
+maintenance commands remain available, for example
+`iwut-auth-center bootstrap-platform-admin ...` and
+`iwut-auth-center reconcile-account-closures`. Health probes should call HTTP
+`GET /livez` and `GET /readyz`, or the standard gRPC health service.
+
 ## Environment
 
 | Variable | Required | Default | Meaning |
