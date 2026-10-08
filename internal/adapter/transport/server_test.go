@@ -4,14 +4,20 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	kerrors "github.com/go-kratos/kratos/v2/errors"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/test/bufconn"
 	auth "iwut-auth-center/internal/authentication/domain"
 	profiledomain "iwut-auth-center/internal/profile/domain"
 )
@@ -77,6 +83,31 @@ func TestHTTPDisabledEndpointsAndInvalidServerConfiguration(t *testing.T) {
 	}
 }
 
+func TestGRPCStandardHealthIsServing(t *testing.T) {
+	server := newGRPCServer(
+		ServerConfig{GRPCAddr: "127.0.0.1:0"},
+		nil,
+		NewScopeCatalogService(nil),
+		NewDeveloperStatusService(nil),
+		NewSystemPrincipalService(nil),
+	)
+	listener := bufconn.Listen(1 << 20)
+	go func() { _ = server.Server.Serve(listener) }()
+	t.Cleanup(server.Server.Stop)
+	connection, err := grpc.DialContext(t.Context(), "bufnet",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("dial health server: %v", err)
+	}
+	t.Cleanup(func() { _ = connection.Close() })
+	response, err := healthpb.NewHealthClient(connection).Check(t.Context(), &healthpb.HealthCheckRequest{})
+	if err != nil || response.GetStatus() != healthpb.HealthCheckResponse_SERVING {
+		t.Fatalf("gRPC health = %v, %v", response, err)
+	}
+}
+
 func TestHTTPFallbacksDoNotUseDefaultServeMux(t *testing.T) {
 	server := newHTTPServer(ServerConfig{HTTPAddr: "127.0.0.1:0"}, nil)
 	probeID := defaultServeMuxProbeSequence.Add(1)
@@ -109,6 +140,67 @@ func TestHTTPFallbacksDoNotUseDefaultServeMux(t *testing.T) {
 				t.Fatalf("response status = %d, want %d; DefaultServeMux fallback status is %d", recorder.Code, test.wantStatus, defaultMuxStatus)
 			}
 		})
+	}
+}
+
+func TestHTTPRoutesUseConfiguredObservabilityBoundaries(t *testing.T) {
+	observed := make(chan string, 4)
+	wrap := func(operation string, next http.Handler) http.Handler {
+		return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			observed <- operation
+			next.ServeHTTP(writer, request)
+		})
+	}
+	server := newHTTPServer(ServerConfig{
+		HTTPAddr:             "127.0.0.1:0",
+		OAuth:                &OAuthHTTP{Issuer: "https://auth.example.test", Enabled: false},
+		DirectHTTPMiddleware: wrap,
+		ReadinessCheck:       func(context.Context) error { return nil },
+		ReadinessTimeout:     time.Second,
+	}, nil)
+
+	for _, test := range []struct {
+		method, path, operation string
+		status                  int
+	}{
+		{http.MethodPost, "/token", "oauth.token", http.StatusNotFound},
+		{http.MethodGet, "/livez", "http.health.livez", http.StatusOK},
+		{http.MethodGet, "/readyz", "http.health.readyz", http.StatusOK},
+	} {
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, httptest.NewRequest(test.method, test.path, nil))
+		if recorder.Code != test.status {
+			t.Fatalf("%s status = %d, want %d", test.path, recorder.Code, test.status)
+		}
+		select {
+		case operation := <-observed:
+			if operation != test.operation {
+				t.Fatalf("%s operation = %q, want %q", test.path, operation, test.operation)
+			}
+		default:
+			t.Fatalf("%s bypassed direct observability", test.path)
+		}
+	}
+}
+
+func TestHTTPUsesConfiguredFallbackHandlers(t *testing.T) {
+	notFoundCalls, methodCalls := 0, 0
+	server := newHTTPServer(ServerConfig{
+		HTTPAddr: "127.0.0.1:0",
+		HTTPNotFoundHandler: http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			notFoundCalls++
+			writer.WriteHeader(http.StatusNotFound)
+		}),
+		HTTPMethodNotAllowedHandler: http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			methodCalls++
+			writer.WriteHeader(http.StatusMethodNotAllowed)
+		}),
+	}, nil)
+	server.Route("/").POST("/method-only", func(khttp.Context) error { return nil })
+	server.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/missing-sensitive-id", nil))
+	server.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/method-only", nil))
+	if notFoundCalls != 1 || methodCalls != 1 {
+		t.Fatalf("fallback calls = notFound %d, method %d", notFoundCalls, methodCalls)
 	}
 }
 

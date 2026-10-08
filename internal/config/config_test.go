@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"testing"
+	"time"
 )
 
 var testServiceCallers = base64.StdEncoding.EncodeToString([]byte(`{"iwut-app-center":{"status":"ACTIVE","keys":{"kid-1":{"publicKeyPemB64":"cGVt"}},"permissions":["auth.scope-catalog.read"],"systemPrincipalPurposes":[]}}`))
@@ -33,6 +34,26 @@ func TestLoadUsesDefaults(t *testing.T) {
 	}
 	if configuration.MongoDatabase != DefaultMongoDatabase {
 		t.Fatalf("MongoDatabase = %q, want %q", configuration.MongoDatabase, DefaultMongoDatabase)
+	}
+	if configuration.LogLevel != DefaultLogLevel || configuration.TraceSampleRatio != DefaultTraceSampleRatio || configuration.MetricExportInterval != DefaultMetricExportInterval {
+		t.Fatalf("observability defaults = (%q, %v, %v)", configuration.LogLevel, configuration.TraceSampleRatio, configuration.MetricExportInterval)
+	}
+}
+
+func TestLoadObservabilityConfiguration(t *testing.T) {
+	configuration, err := Load(withRequiredServiceCallers(func(key string) (string, bool) {
+		values := map[string]string{
+			LogLevelEnv: " debug ", OTLPGRPCEndpointEnv: "127.0.0.1:4317", OTLPInsecureEnv: "true",
+			TraceSampleRatioEnv: "0.75", MetricExportIntervalEnv: "5s",
+		}
+		value, found := values[key]
+		return value, found
+	}))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if configuration.LogLevel != "DEBUG" || configuration.OTLPGRPCEndpoint != "127.0.0.1:4317" || !configuration.OTLPInsecure || configuration.TraceSampleRatio != 0.75 || configuration.MetricExportInterval != 5*time.Second {
+		t.Fatalf("observability config = %+v", configuration)
 	}
 }
 
@@ -95,6 +116,12 @@ func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 			}
 			return "", false
 		})},
+		{name: "invalid log level", lookup: observabilityLookup(LogLevelEnv, "trace")},
+		{name: "invalid OTLP endpoint", lookup: observabilityLookup(OTLPGRPCEndpointEnv, "https://collector:4317")},
+		{name: "insecure without endpoint", lookup: observabilityLookup(OTLPInsecureEnv, "true")},
+		{name: "invalid insecure", lookup: observabilityLookup(OTLPInsecureEnv, "TRUE")},
+		{name: "invalid sample ratio", lookup: observabilityLookup(TraceSampleRatioEnv, "1.01")},
+		{name: "short export interval", lookup: observabilityLookup(MetricExportIntervalEnv, "999ms")},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -104,6 +131,15 @@ func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 			}
 		})
 	}
+}
+
+func observabilityLookup(key, value string) LookupEnv {
+	return withRequiredServiceCallers(func(candidate string) (string, bool) {
+		if candidate == key {
+			return value, true
+		}
+		return "", false
+	})
 }
 
 func TestLoadHTTPAddress(t *testing.T) {

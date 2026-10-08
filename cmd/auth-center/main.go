@@ -2,15 +2,17 @@ package main
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 
 	"iwut-auth-center/internal/config"
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)).With("service.name", serviceName))
 	if err := run(); err != nil {
-		log.Fatalf("auth-center: %v", err)
+		slog.Error("auth-center failed", "error.type", "startup")
+		os.Exit(1)
 	}
 }
 

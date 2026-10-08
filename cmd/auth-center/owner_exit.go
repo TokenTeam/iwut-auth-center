@@ -34,6 +34,14 @@ type ownerExitRuntime struct {
 }
 
 func provideOwnerExit(configuration config.Config, db *m.Database, endpoints *transport.UserEndpoints) (*ownerExitRuntime, func(), error) {
+	return newOwnerExitRuntime(configuration, db, endpoints, nil)
+}
+
+func provideOwnerExitWithObservability(configuration config.Config, db *m.Database, endpoints *transport.UserEndpoints, observability *observabilityRuntime) (*ownerExitRuntime, func(), error) {
+	return newOwnerExitRuntime(configuration, db, endpoints, observability.clientInterceptor)
+}
+
+func newOwnerExitRuntime(configuration config.Config, db *m.Database, endpoints *transport.UserEndpoints, tracing grpc.UnaryClientInterceptor) (*ownerExitRuntime, func(), error) {
 	cleanup := func() {}
 	c := configuration.OwnerExit
 	if c == nil {
@@ -90,7 +98,11 @@ func provideOwnerExit(configuration config.Config, db *m.Database, endpoints *tr
 		}
 		creds = credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots, ServerName: c.AppServerName})
 	}
-	conn, e := grpc.NewClient(c.AppTarget, grpc.WithTransportCredentials(creds))
+	clientOptions := []grpc.DialOption{grpc.WithTransportCredentials(creds)}
+	if tracing != nil {
+		clientOptions = append(clientOptions, grpc.WithChainUnaryInterceptor(tracing))
+	}
+	conn, e := grpc.NewClient(c.AppTarget, clientOptions...)
 	if e != nil {
 		return fail()
 	}

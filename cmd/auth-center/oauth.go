@@ -38,6 +38,14 @@ type oauthRuntime struct {
 }
 
 func provideOAuth(configuration config.Config, db *m.Database, endpoints *transport.UserEndpoints) (*oauthRuntime, func(), error) {
+	return newOAuthRuntime(configuration, db, endpoints, nil)
+}
+
+func provideOAuthWithObservability(configuration config.Config, db *m.Database, endpoints *transport.UserEndpoints, observability *observabilityRuntime) (*oauthRuntime, func(), error) {
+	return newOAuthRuntime(configuration, db, endpoints, observability.clientInterceptor)
+}
+
+func newOAuthRuntime(configuration config.Config, db *m.Database, endpoints *transport.UserEndpoints, tracing grpc.UnaryClientInterceptor) (*oauthRuntime, func(), error) {
 	cleanup := func() {}
 	c := configuration.OAuth
 	if c == nil {
@@ -131,7 +139,11 @@ func provideOAuth(configuration config.Config, db *m.Database, endpoints *transp
 		}
 		creds = credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots, ServerName: c.AppServerName})
 	}
-	conn, e := grpc.NewClient(c.AppTarget, grpc.WithTransportCredentials(creds))
+	clientOptions := []grpc.DialOption{grpc.WithTransportCredentials(creds)}
+	if tracing != nil {
+		clientOptions = append(clientOptions, grpc.WithChainUnaryInterceptor(tracing))
+	}
+	conn, e := grpc.NewClient(c.AppTarget, clientOptions...)
 	if e != nil {
 		return fail()
 	}

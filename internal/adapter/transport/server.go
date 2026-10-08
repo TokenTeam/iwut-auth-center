@@ -2,12 +2,14 @@ package transport
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"mime"
 	"net/http"
 	"strings"
+	"time"
 
 	kerrors "github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/middleware"
@@ -43,17 +45,24 @@ import (
 )
 
 type ServerConfig struct {
-	ApplicationClosure     *ApplicationClosureService
-	ApplicationCloseReauth *ApplicationCloseReauthService
-	AccountClosure         *AccountClosureService
-	OwnerExitDecision      *OwnerExitDecisionService
-	DeveloperWithdrawal    *DeveloperWithdrawalService
-	OAuthGrant             *OAuthGrantService
-	OAuthDelegation        *OAuthDelegationService
-	OAuth                  *OAuthHTTP
-	HTTPAddr               string
-	GRPCAddr               string
-	UserEndpoints          *UserEndpoints
+	ApplicationClosure           *ApplicationClosureService
+	ApplicationCloseReauth       *ApplicationCloseReauthService
+	AccountClosure               *AccountClosureService
+	OwnerExitDecision            *OwnerExitDecisionService
+	DeveloperWithdrawal          *DeveloperWithdrawalService
+	OAuthGrant                   *OAuthGrantService
+	OAuthDelegation              *OAuthDelegationService
+	OAuth                        *OAuthHTTP
+	HTTPAddr                     string
+	GRPCAddr                     string
+	UserEndpoints                *UserEndpoints
+	ObservabilityMiddleware      middleware.Middleware
+	DirectHTTPMiddleware         func(operation string, next http.Handler) http.Handler
+	HTTPNotFoundHandler          http.Handler
+	HTTPMethodNotAllowedHandler  http.Handler
+	ReadinessCheck               func(context.Context) error
+	ReadinessTimeout             time.Duration
+	RegisterObservableOperations func(kind string, operations []string)
 }
 
 // UserEndpoints is an optional, fully validated runtime assembled before listening.
@@ -115,10 +124,10 @@ func NewServers(
 		}
 	}
 
-	return &Servers{
-		HTTP: newHTTPServer(configuration, verifier),
-		GRPC: newGRPCServer(configuration, verifier, service, developerStatusService, systemPrincipalService),
-	}, nil
+	httpServer := newHTTPServer(configuration, verifier)
+	grpcServer := newGRPCServer(configuration, verifier, service, developerStatusService, systemPrincipalService)
+	registerObservableOperations(configuration.RegisterObservableOperations, httpServer, grpcServer)
+	return &Servers{HTTP: httpServer, GRPC: grpcServer}, nil
 }
 
 func newGRPCServer(
@@ -129,14 +138,19 @@ func newGRPCServer(
 	systemPrincipalService *SystemPrincipalService,
 ) *kgrpc.Server {
 	options := []kgrpc.ServerOption{kgrpc.Address(configuration.GRPCAddr)}
+	serverMiddleware := make([]middleware.Middleware, 0, 2)
+	if configuration.ObservabilityMiddleware != nil {
+		serverMiddleware = append(serverMiddleware, configuration.ObservabilityMiddleware)
+	}
 	if endpoints := configuration.UserEndpoints; endpoints != nil {
+		serverMiddleware = append(serverMiddleware, userEndpointAuthenticationMiddleware(verifier, endpoints.ProfileIdentity, endpoints.SessionIdentity, true, endpoints.MaxAuthenticationMessageBytes))
 		options = append(options,
-			kgrpc.Middleware(userEndpointAuthenticationMiddleware(verifier, endpoints.ProfileIdentity, endpoints.SessionIdentity, true, endpoints.MaxAuthenticationMessageBytes)),
 			kgrpc.Options(grpc.ForceServerCodec(NewProfileStrictCodec(endpoints.MaxAuthenticationMessageBytes)), grpc.MaxRecvMsgSize(max(profiledomain.MaxMessageBytes, endpoints.MaxAuthenticationMessageBytes))),
 		)
 	} else {
-		options = append(options, kgrpc.Middleware(userEndpointAuthenticationMiddleware(verifier, nil, nil, false)))
+		serverMiddleware = append(serverMiddleware, userEndpointAuthenticationMiddleware(verifier, nil, nil, false))
 	}
+	options = append(options, kgrpc.Middleware(serverMiddleware...))
 	server := kgrpc.NewServer(options...)
 	if configuration.ApplicationClosure != nil {
 		applicationclosurepb.RegisterApplicationClosureServiceServer(server, configuration.ApplicationClosure)
@@ -206,13 +220,27 @@ func newGRPCServer(
 // Only user entry points get HTTP bindings. Internal service methods (including
 // Session-to-JWS issuance) deliberately have no HTTP registration.
 func newHTTPServer(configuration ServerConfig, verifier *ServiceIdentityVerifier) *khttp.Server {
+	notFoundHandler := configuration.HTTPNotFoundHandler
+	if notFoundHandler == nil {
+		notFoundHandler = http.NotFoundHandler()
+	}
+	methodNotAllowedHandler := configuration.HTTPMethodNotAllowedHandler
+	if methodNotAllowedHandler == nil {
+		methodNotAllowedHandler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+		})
+	}
 	options := []khttp.ServerOption{
 		khttp.Address(configuration.HTTPAddr),
 		khttp.Filter(func(next http.Handler) http.Handler {
 			ordinary := authHTTPFilter(next)
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if configuration.OAuth != nil && configuration.OAuth.Handles(r) {
-					configuration.OAuth.ServeHTTP(w, r)
+					handler := http.Handler(configuration.OAuth)
+					if configuration.DirectHTTPMiddleware != nil {
+						handler = configuration.DirectHTTPMiddleware(configuration.OAuth.ObservableOperation(r), handler)
+					}
+					handler.ServeHTTP(w, r)
 					return
 				}
 				ordinary.ServeHTTP(w, r)
@@ -220,19 +248,25 @@ func newHTTPServer(configuration ServerConfig, verifier *ServiceIdentityVerifier
 		}),
 		khttp.ResponseEncoder(authHTTPResponseEncoder),
 		khttp.ErrorEncoder(authHTTPErrorEncoder),
-		khttp.NotFoundHandler(http.NotFoundHandler()),
-		khttp.MethodNotAllowedHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
-		})),
+		khttp.NotFoundHandler(notFoundHandler),
+		khttp.MethodNotAllowedHandler(methodNotAllowedHandler),
 	}
 	endpoints := configuration.UserEndpoints
+	httpMiddleware := make([]middleware.Middleware, 0, 2)
+	if configuration.ObservabilityMiddleware != nil {
+		httpMiddleware = append(httpMiddleware, configuration.ObservabilityMiddleware)
+	}
 	if endpoints != nil {
+		httpMiddleware = append(httpMiddleware, userEndpointAuthenticationMiddleware(verifier, endpoints.ProfileIdentity, endpoints.SessionIdentity, true, endpoints.MaxAuthenticationMessageBytes))
 		options = append(options,
 			khttp.RequestDecoder(authHTTPDecoder(endpoints.MaxAuthenticationMessageBytes)),
-			khttp.Middleware(userEndpointAuthenticationMiddleware(verifier, endpoints.ProfileIdentity, endpoints.SessionIdentity, true, endpoints.MaxAuthenticationMessageBytes)),
 		)
 	}
+	if len(httpMiddleware) != 0 {
+		options = append(options, khttp.Middleware(httpMiddleware...))
+	}
 	server := khttp.NewServer(options...)
+	registerHTTPHealth(server, configuration.ReadinessCheck, configuration.ReadinessTimeout, configuration.DirectHTTPMiddleware)
 	if configuration.ApplicationCloseReauth != nil {
 		closurereauthpb.RegisterApplicationCloseReauthServiceHTTPServer(server, configuration.ApplicationCloseReauth)
 	}

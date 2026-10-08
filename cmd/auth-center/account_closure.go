@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -81,7 +81,7 @@ func provideAccountClosure(configuration config.Config, db *m.Database, endpoint
 		return nil, err
 	}
 	worker, err := closureworker.New(service, c.WorkerInterval, func(err error) {
-		log.Printf("account closure cleanup requires attention: %v", err)
+		slog.Error("account closure cleanup requires attention", "error.type", "account_closure_cleanup")
 	})
 	if err != nil {
 		return nil, err

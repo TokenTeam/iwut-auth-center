@@ -54,6 +54,39 @@ func (h *OAuthHTTP) Handles(r *http.Request) bool {
 	return false
 }
 
+// ObservableOperation returns a bounded operation name for every request that
+// Handles accepts. It deliberately never returns the request path, host,
+// interaction id, client id or any other caller-controlled value.
+func (h *OAuthHTTP) ObservableOperation(r *http.Request) string {
+	if r.URL.Path == "/redirect-uris.json" && strings.HasSuffix(r.Host, "."+h.SectorSuffix) {
+		return "oauth.redirect_uris"
+	}
+	u, _ := url.Parse(h.Issuer)
+	path := strings.TrimPrefix(r.URL.Path, u.Path)
+	switch path {
+	case "/authorize":
+		return "oauth.authorize"
+	case "/token":
+		return "oauth.token"
+	case "/revoke":
+		return "oauth.revoke"
+	case "/userinfo":
+		return "oauth.userinfo"
+	case "/jwks":
+		return "oauth.jwks"
+	case "/.well-known/openid-configuration":
+		return "oauth.discovery"
+	case "/portal/session":
+		return "oauth.portal.session"
+	case "/portal/interaction":
+		return "oauth.portal.interaction"
+	}
+	if strings.HasPrefix(path, "/portal/interactions/") && strings.HasSuffix(path, "/confirm") {
+		return "oauth.portal.confirm"
+	}
+	return "oauth.unmatched"
+}
+
 func (h *OAuthHTTP) rate(key string, limit int) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()

@@ -6,25 +6,35 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
 
 const (
-	HTTPAddrEnv          = "AUTH_CENTER_HTTP_ADDR"
-	GRPCAddrEnv          = "AUTH_CENTER_GRPC_ADDR"
-	MongoURIEnv          = "AUTH_CENTER_MONGO_URI"
-	MongoDatabaseEnv     = "AUTH_CENTER_MONGO_DATABASE"
-	ServiceCallersEnv    = "AUTH_CENTER_SERVICE_CALLERS_B64"
-	ServiceMaxTTLEnv     = "AUTH_CENTER_SERVICE_IDENTITY_MAX_TTL"
-	ServiceClockSkewEnv  = "AUTH_CENTER_SERVICE_IDENTITY_CLOCK_SKEW"
-	DefaultHTTPAddr      = ":8000"
-	DefaultGRPCAddr      = ":9000"
-	DefaultMongoURI      = "mongodb://127.0.0.1:27017"
-	DefaultMongoDatabase = "iwut_auth_center"
-	DefaultServiceMaxTTL = 2 * time.Minute
-	DefaultServiceSkew   = 30 * time.Second
+	HTTPAddrEnv                 = "AUTH_CENTER_HTTP_ADDR"
+	GRPCAddrEnv                 = "AUTH_CENTER_GRPC_ADDR"
+	MongoURIEnv                 = "AUTH_CENTER_MONGO_URI"
+	MongoDatabaseEnv            = "AUTH_CENTER_MONGO_DATABASE"
+	ServiceCallersEnv           = "AUTH_CENTER_SERVICE_CALLERS_B64"
+	ServiceMaxTTLEnv            = "AUTH_CENTER_SERVICE_IDENTITY_MAX_TTL"
+	ServiceClockSkewEnv         = "AUTH_CENTER_SERVICE_IDENTITY_CLOCK_SKEW"
+	LogLevelEnv                 = "AUTH_CENTER_LOG_LEVEL"
+	OTLPGRPCEndpointEnv         = "AUTH_CENTER_OTLP_GRPC_ENDPOINT"
+	OTLPInsecureEnv             = "AUTH_CENTER_OTLP_INSECURE"
+	TraceSampleRatioEnv         = "AUTH_CENTER_TRACE_SAMPLE_RATIO"
+	MetricExportIntervalEnv     = "AUTH_CENTER_METRIC_EXPORT_INTERVAL"
+	DefaultHTTPAddr             = ":8000"
+	DefaultGRPCAddr             = ":9000"
+	DefaultMongoURI             = "mongodb://127.0.0.1:27017"
+	DefaultMongoDatabase        = "iwut_auth_center"
+	DefaultServiceMaxTTL        = 2 * time.Minute
+	DefaultServiceSkew          = 30 * time.Second
+	DefaultLogLevel             = "INFO"
+	DefaultTraceSampleRatio     = 0.1
+	DefaultMetricExportInterval = 30 * time.Second
 )
 
 var ErrInvalidConfiguration = errors.New("invalid auth center configuration")
@@ -49,6 +59,11 @@ type Config struct {
 	UserEndpoints                   *UserEndpoints
 	HTTPAddr                        string
 	GRPCAddr                        string
+	LogLevel                        string
+	OTLPGRPCEndpoint                string
+	OTLPInsecure                    bool
+	TraceSampleRatio                float64
+	MetricExportInterval            time.Duration
 	MongoURI                        string
 	MongoDatabase                   string
 	ServiceCallers                  []ServiceCallerRegistration
@@ -98,6 +113,49 @@ func Load(lookup LookupEnv) (Config, error) {
 		if httpAddress == "" {
 			return Config{}, fmt.Errorf("%w: %s must not be empty when set", ErrInvalidConfiguration, HTTPAddrEnv)
 		}
+	}
+	logLevel := DefaultLogLevel
+	if raw, found := lookup(LogLevelEnv); found {
+		logLevel = strings.ToUpper(strings.TrimSpace(raw))
+		switch logLevel {
+		case "DEBUG", "INFO", "WARN", "ERROR":
+		default:
+			return Config{}, fmt.Errorf("%w: %s must be DEBUG, INFO, WARN or ERROR", ErrInvalidConfiguration, LogLevelEnv)
+		}
+	}
+	otlpEndpoint := ""
+	if raw, found := lookup(OTLPGRPCEndpointEnv); found {
+		otlpEndpoint = strings.TrimSpace(raw)
+		if !validHostPort(otlpEndpoint) {
+			return Config{}, fmt.Errorf("%w: %s must be host:port with a numeric port from 1 through 65535", ErrInvalidConfiguration, OTLPGRPCEndpointEnv)
+		}
+	}
+	otlpInsecure := false
+	if raw, found := lookup(OTLPInsecureEnv); found {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed != "true" && trimmed != "false" {
+			return Config{}, fmt.Errorf("%w: %s must be true or false", ErrInvalidConfiguration, OTLPInsecureEnv)
+		}
+		otlpInsecure = trimmed == "true"
+		if otlpEndpoint == "" {
+			return Config{}, fmt.Errorf("%w: %s requires %s", ErrInvalidConfiguration, OTLPInsecureEnv, OTLPGRPCEndpointEnv)
+		}
+	}
+	traceSampleRatio := DefaultTraceSampleRatio
+	if raw, found := lookup(TraceSampleRatioEnv); found {
+		parsed, parseErr := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+		if parseErr != nil || parsed < 0 || parsed > 1 {
+			return Config{}, fmt.Errorf("%w: %s must be a number from 0 through 1", ErrInvalidConfiguration, TraceSampleRatioEnv)
+		}
+		traceSampleRatio = parsed
+	}
+	metricExportInterval := DefaultMetricExportInterval
+	if raw, found := lookup(MetricExportIntervalEnv); found {
+		parsed, parseErr := time.ParseDuration(strings.TrimSpace(raw))
+		if parseErr != nil || parsed < time.Second {
+			return Config{}, fmt.Errorf("%w: %s must be a Go duration of at least 1s", ErrInvalidConfiguration, MetricExportIntervalEnv)
+		}
+		metricExportInterval = parsed
 	}
 	mongoURI := DefaultMongoURI
 	if raw, found := lookup(MongoURIEnv); found {
@@ -217,9 +275,23 @@ func Load(lookup LookupEnv) (Config, error) {
 		EmailLogin:                      emailLogin,
 		IdentityIssuance:                issuance,
 		UserEndpoints:                   userEndpoints,
-		HTTPAddr:                        httpAddress, GRPCAddr: address, MongoURI: mongoURI, MongoDatabase: database,
+		HTTPAddr:                        httpAddress, GRPCAddr: address, LogLevel: logLevel,
+		OTLPGRPCEndpoint: otlpEndpoint, OTLPInsecure: otlpInsecure, TraceSampleRatio: traceSampleRatio, MetricExportInterval: metricExportInterval,
+		MongoURI: mongoURI, MongoDatabase: database,
 		ServiceCallers: callers, ServiceIdentityMaxTTL: maxTTL, ServiceIdentityClockSkew: clockSkew,
 	}, nil
+}
+
+func validHostPort(raw string) bool {
+	if raw == "" || strings.ContainsAny(raw, " \t\r\n/?#") {
+		return false
+	}
+	host, port, err := net.SplitHostPort(raw)
+	if err != nil || host == "" || port == "" {
+		return false
+	}
+	number, err := strconv.Atoi(port)
+	return err == nil && number >= 1 && number <= 65535
 }
 
 func parseServiceCallers(raw string) ([]ServiceCallerRegistration, error) {

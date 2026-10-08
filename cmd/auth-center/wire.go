@@ -17,9 +17,9 @@ import (
 
 func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 	panic(wire.Build(
-		provideOAuth,
+		provideOAuthWithObservability,
 		provideApplicationClosure,
-		provideOwnerExit,
+		provideOwnerExitWithObservability,
 		provideAccountClosure,
 		provideScopeCatalog,
 		mongo.ProviderSet,
@@ -31,9 +31,11 @@ func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 		wire.Bind(new(transport.BatchGetDeveloperStatusesHandler), new(*developerusecase.BatchGetDeveloperStatusesHandler)),
 		wire.Bind(new(transport.ResolveSystemPrincipalHandler), new(*systemprincipalusecase.ResolveSystemPrincipalHandler)),
 		provideMongoClient,
-		provideMongoDatabase,
+		provideReadinessState,
+		provideMongoDatabaseWithReadiness,
+		provideObservability,
 		provideUserEndpoints,
-		provideServerConfig,
+		provideServerConfigWithObservability,
 		provideApp,
 	))
 }

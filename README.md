@@ -43,6 +43,18 @@ the public service prefix and gRPC-Web mapping.
 | `AUTH_CENTER_SERVICE_CALLERS_B64` | yes | — | strict standard Base64 of the trusted-service-identity-v1 caller registry JSON |
 | `AUTH_CENTER_SERVICE_IDENTITY_MAX_TTL` | no | `2m` | maximum accepted `exp - iat` |
 | `AUTH_CENTER_SERVICE_IDENTITY_CLOCK_SKEW` | no | `30s` | accepted clock skew |
+| `AUTH_CENTER_LOG_LEVEL` | no | `INFO` | JSON log level: `DEBUG`, `INFO`, `WARN` or `ERROR` |
+| `AUTH_CENTER_OTLP_GRPC_ENDPOINT` | no | — | OTLP gRPC collector in strict `host:port` form; exporters stay disabled when omitted |
+| `AUTH_CENTER_OTLP_INSECURE` | no | `false` | use plaintext OTLP gRPC; valid only with an endpoint |
+| `AUTH_CENTER_TRACE_SAMPLE_RATIO` | no | `0.1` | parent-based root trace sampling ratio from `0` through `1` |
+| `AUTH_CENTER_METRIC_EXPORT_INTERVAL` | no | `30s` | OTLP metric export interval, at least `1s` |
+
+HTTP `GET`/`HEAD /livez` reports process liveness. `GET`/`HEAD /readyz`
+dynamically pings MongoDB and returns 503 until the dependency is available.
+Native gRPC exposes the standard unauthenticated health service. Shutdown has a
+five-second telemetry flush budget. Request telemetry uses fixed route/RPC
+operations and stable result labels; it never records headers, paths, request or
+response bodies, OAuth material, cookies, email addresses or profile values.
 
 ## Temporary implementation boundary
 

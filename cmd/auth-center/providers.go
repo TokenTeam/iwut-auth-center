@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-kratos/kratos/v2"
@@ -51,8 +52,43 @@ func provideMongoDatabase(client *drivermongo.Client, configuration config.Confi
 	return database, nil
 }
 
+type readinessState struct {
+	database atomic.Pointer[drivermongo.Database]
+}
+
+func provideReadinessState() *readinessState { return &readinessState{} }
+
+func provideMongoDatabaseWithReadiness(client *drivermongo.Client, configuration config.Config, readiness *readinessState) (*drivermongo.Database, error) {
+	database, err := provideMongoDatabase(client, configuration)
+	if err != nil {
+		return nil, err
+	}
+	readiness.database.Store(database)
+	return database, nil
+}
+
+func (state *readinessState) check(ctx context.Context) error {
+	database := state.database.Load()
+	if database == nil {
+		return fmt.Errorf("mongo deployment is not initialized")
+	}
+	return database.Client().Ping(ctx, nil)
+}
+
 func provideServerConfig(configuration config.Config, endpoints *transport.UserEndpoints, oauth *oauthRuntime, owner *ownerExitRuntime, closure *accountClosureRuntime, applicationClosure *applicationClosureRuntime) transport.ServerConfig {
 	return transport.ServerConfig{ApplicationClosure: applicationClosure.Closure, ApplicationCloseReauth: applicationClosure.Reauth, AccountClosure: closure.Service, OwnerExitDecision: owner.Decision, DeveloperWithdrawal: owner.Withdrawal, HTTPAddr: configuration.HTTPAddr, GRPCAddr: configuration.GRPCAddr, UserEndpoints: endpoints, OAuth: oauth.HTTP, OAuthGrant: oauth.Grant, OAuthDelegation: oauth.Delegation}
+}
+
+func provideServerConfigWithObservability(configuration config.Config, endpoints *transport.UserEndpoints, oauth *oauthRuntime, owner *ownerExitRuntime, closure *accountClosureRuntime, applicationClosure *applicationClosureRuntime, observability *observabilityRuntime, readiness *readinessState) transport.ServerConfig {
+	serverConfig := provideServerConfig(configuration, endpoints, oauth, owner, closure, applicationClosure)
+	serverConfig.ObservabilityMiddleware = observability.serverMiddleware
+	serverConfig.DirectHTTPMiddleware = observability.directHTTPMiddleware
+	serverConfig.HTTPNotFoundHandler = observability.httpNotFoundHandler
+	serverConfig.HTTPMethodNotAllowedHandler = observability.httpMethodNotAllowedHandler
+	serverConfig.ReadinessCheck = readiness.check
+	serverConfig.ReadinessTimeout = 2 * time.Second
+	serverConfig.RegisterObservableOperations = observability.operations.register
+	return serverConfig
 }
 
 func provideApp(servers *transport.Servers, owner *ownerExitRuntime, closure *accountClosureRuntime) *kratos.App {

@@ -23,7 +23,8 @@ func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	database, err := provideMongoDatabase(client, configuration)
+	mainReadinessState := provideReadinessState()
+	database, err := provideMongoDatabaseWithReadiness(client, configuration, mainReadinessState)
 	if err != nil {
 		cleanup()
 		return nil, nil, err
@@ -33,19 +34,27 @@ func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 		cleanup()
 		return nil, nil, err
 	}
-	mainOauthRuntime, cleanup2, err := provideOAuth(configuration, database, userEndpoints)
+	mainObservabilityRuntime, cleanup2, err := provideObservability(configuration)
 	if err != nil {
 		cleanup()
 		return nil, nil, err
 	}
-	mainOwnerExitRuntime, cleanup3, err := provideOwnerExit(configuration, database, userEndpoints)
+	mainOauthRuntime, cleanup3, err := provideOAuthWithObservability(configuration, database, userEndpoints, mainObservabilityRuntime)
 	if err != nil {
+		cleanup2()
+		cleanup()
+		return nil, nil, err
+	}
+	mainOwnerExitRuntime, cleanup4, err := provideOwnerExitWithObservability(configuration, database, userEndpoints, mainObservabilityRuntime)
+	if err != nil {
+		cleanup3()
 		cleanup2()
 		cleanup()
 		return nil, nil, err
 	}
 	mainAccountClosureRuntime, err := provideAccountClosure(configuration, database, userEndpoints, mainOwnerExitRuntime)
 	if err != nil {
+		cleanup4()
 		cleanup3()
 		cleanup2()
 		cleanup()
@@ -53,14 +62,16 @@ func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 	}
 	mainApplicationClosureRuntime, err := provideApplicationClosure(configuration, database)
 	if err != nil {
+		cleanup4()
 		cleanup3()
 		cleanup2()
 		cleanup()
 		return nil, nil, err
 	}
-	serverConfig := provideServerConfig(configuration, userEndpoints, mainOauthRuntime, mainOwnerExitRuntime, mainAccountClosureRuntime, mainApplicationClosureRuntime)
+	serverConfig := provideServerConfigWithObservability(configuration, userEndpoints, mainOauthRuntime, mainOwnerExitRuntime, mainAccountClosureRuntime, mainApplicationClosureRuntime, mainObservabilityRuntime, mainReadinessState)
 	serviceIdentityVerifier, err := transport.NewServiceIdentityVerifier(configuration)
 	if err != nil {
+		cleanup4()
 		cleanup3()
 		cleanup2()
 		cleanup()
@@ -71,6 +82,7 @@ func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 	scopeCatalogService := transport.NewScopeCatalogService(getScopeCatalogSnapshotHandler)
 	principalRepository, err := mongo.NewPrincipalRepository(database)
 	if err != nil {
+		cleanup4()
 		cleanup3()
 		cleanup2()
 		cleanup()
@@ -80,6 +92,7 @@ func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 	developerStatusService := transport.NewDeveloperStatusService(batchGetDeveloperStatusesHandler)
 	systemPrincipalRepository, err := mongo.NewSystemPrincipalRepository(database)
 	if err != nil {
+		cleanup4()
 		cleanup3()
 		cleanup2()
 		cleanup()
@@ -89,6 +102,7 @@ func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 	systemPrincipalService := transport.NewSystemPrincipalService(resolveSystemPrincipalHandler)
 	servers, err := transport.NewServers(serverConfig, serviceIdentityVerifier, scopeCatalogService, developerStatusService, systemPrincipalService)
 	if err != nil {
+		cleanup4()
 		cleanup3()
 		cleanup2()
 		cleanup()
@@ -96,6 +110,7 @@ func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 	}
 	app := provideApp(servers, mainOwnerExitRuntime, mainAccountClosureRuntime)
 	return app, func() {
+		cleanup4()
 		cleanup3()
 		cleanup2()
 		cleanup()

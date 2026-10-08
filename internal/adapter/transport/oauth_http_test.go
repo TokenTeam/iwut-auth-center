@@ -48,3 +48,34 @@ func TestOAuthDefaultClosedAndPathIsolation(t *testing.T) {
 		t.Fatal(w.Code)
 	}
 }
+
+func TestOAuthHTTPObservableOperationIsBounded(t *testing.T) {
+	handler := &OAuthHTTP{Issuer: "https://auth.example.test/oidc", SectorSuffix: "sectors.example.test"}
+	tests := []struct {
+		path, host, want string
+	}{
+		{"/oidc/authorize", "auth.example.test", "oauth.authorize"},
+		{"/oidc/token", "auth.example.test", "oauth.token"},
+		{"/oidc/revoke", "auth.example.test", "oauth.revoke"},
+		{"/oidc/userinfo", "auth.example.test", "oauth.userinfo"},
+		{"/oidc/jwks", "auth.example.test", "oauth.jwks"},
+		{"/oidc/.well-known/openid-configuration", "auth.example.test", "oauth.discovery"},
+		{"/oidc/portal/session", "auth.example.test", "oauth.portal.session"},
+		{"/oidc/portal/interaction", "auth.example.test", "oauth.portal.interaction"},
+		{"/oidc/portal/interactions/attacker-controlled/confirm", "auth.example.test", "oauth.portal.confirm"},
+		{"/oidc/attacker-controlled", "auth.example.test", "oauth.unmatched"},
+		{"/redirect-uris.json", "client.sectors.example.test", "oauth.redirect_uris"},
+	}
+	for _, test := range tests {
+		request := httptest.NewRequest(http.MethodGet, test.path, nil)
+		request.Host = test.host
+		if !handler.Handles(request) {
+			t.Fatalf("%s was not handled", test.path)
+		}
+		if got := handler.ObservableOperation(request); got != test.want {
+			t.Fatalf("%s operation = %q, want %q", test.path, got, test.want)
+		} else if strings.Contains(got, "attacker-controlled") {
+			t.Fatalf("operation leaked path: %q", got)
+		}
+	}
+}
