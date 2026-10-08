@@ -39,6 +39,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -386,48 +387,69 @@ func TestE2E_DeveloperApplication_ProductionWireAndAppCenter(t *testing.T) {
 	}
 }
 
-// Build and run the actual sibling App Center, including its production Wire
-// composition and Mongo migrations. No App source files or stubs are installed.
-func startActualApp(t *testing.T, uri, keyFile, authTarget string, serviceKey *rsa.PrivateKey, overrides ...map[string]string) (*grpc.ClientConn, string, *drivermongo.Database) {
-	source := os.Getenv("APP_CENTER_SOURCE_DIR")
-	if source == "" {
-		source = filepath.Join("..", "..", "..", "iwut-app-center-ddd")
+const (
+	defaultAppCenterImage       = "docker.cnb.cool/tokenteam/iwut-app-center:latest"
+	appCenterIdentityKeyPath    = "/run/iwut-e2e/identity-public.pem"
+	appCenterOAuthFixtureHostIP = "www.whut.edu.cn:93.184.216.34"
+)
+
+type appCenterImagePull struct {
+	once   sync.Once
+	output []byte
+	err    error
+}
+
+var appCenterImagePulls sync.Map
+
+func pullAppCenterImage(t *testing.T, image string) {
+	t.Helper()
+	entry, _ := appCenterImagePulls.LoadOrStore(image, &appCenterImagePull{})
+	pull := entry.(*appCenterImagePull)
+	pull.once.Do(func() {
+		pull.output, pull.err = exec.CommandContext(t.Context(), "docker", "pull", image).CombinedOutput()
+	})
+	if pull.err != nil {
+		t.Fatalf("pull App Center image %q: %v\n%s", image, pull.err, pull.output)
 	}
-	source, e := filepath.Abs(source)
+}
+
+func writeDockerEnvFile(t *testing.T, path string, values map[string]string) {
+	t.Helper()
+	file, e := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e = os.Stat(filepath.Join(source, "go.mod")); e != nil {
-		t.Skip("actual App Center checkout unavailable; set APP_CENTER_SOURCE_DIR")
-	}
-	dir := t.TempDir()
-	binary := filepath.Join(dir, "app-center")
-	buildArgs := []string{"build", "-o", binary}
-	// A test-only overlay changes DNS transport, not App policy or repositories.
-	// It is never written to the App checkout or compiled by production builds.
-	for _, override := range overrides {
-		if override["AUTH_E2E_DNS_ADDR"] != "" {
-			fixture := filepath.Join(dir, "oauth_dns_fixture.go")
-			code := []byte(`package main
-import("context";"net";"os")
-func init(){net.DefaultResolver=&net.Resolver{PreferGo:true,Dial:func(ctx context.Context,network,address string)(net.Conn,error){return (&net.Dialer{}).DialContext(ctx,network,os.Getenv("AUTH_E2E_DNS_ADDR"))}}}
-`)
-			if e := os.WriteFile(fixture, code, 0600); e != nil {
-				t.Fatal(e)
-			}
-			overlay, _ := json.Marshal(map[string]any{"Replace": map[string]string{filepath.Join(source, "cmd/app-center/oauth_dns_fixture.go"): fixture}})
-			path := filepath.Join(dir, "overlay.json")
-			if e := os.WriteFile(path, overlay, 0600); e != nil {
-				t.Fatal(e)
-			}
-			buildArgs = append(buildArgs, "-overlay", path)
+	for key, value := range values {
+		if key == "" || strings.ContainsAny(key, "=\r\n") || strings.ContainsAny(value, "\r\n") {
+			_ = file.Close()
+			t.Fatalf("App Center environment cannot be represented in a Docker env file: %q", key)
+		}
+		if _, e = file.WriteString(key + "=" + value + "\n"); e != nil {
+			_ = file.Close()
+			t.Fatal(e)
 		}
 	}
-	buildArgs = append(buildArgs, "./cmd/app-center")
-	build := exec.CommandContext(t.Context(), "go", buildArgs...)
-	build.Dir = source
-	if output, e := build.CombinedOutput(); e != nil {
-		t.Fatalf("build actual App Center: %v\n%s", e, output)
+	if e = file.Close(); e != nil {
+		t.Fatal(e)
+	}
+}
+
+// Pull and run the published App Center image, including its production Wire
+// composition and Mongo migrations. The test never reads App Center source.
+func startActualApp(t *testing.T, uri, keyFile, authTarget string, serviceKey *rsa.PrivateKey, overrides ...map[string]string) (*grpc.ClientConn, string, *drivermongo.Database) {
+	image := strings.TrimSpace(os.Getenv("APP_CENTER_IMAGE"))
+	if image == "" {
+		image = defaultAppCenterImage
+	}
+	pullAppCenterImage(t, image)
+	dir := t.TempDir()
+	publicKey, e := os.ReadFile(keyFile)
+	if e != nil {
+		t.Fatal(e)
+	}
+	containerKeyFile := filepath.Join(dir, "identity-public.pem")
+	if e = os.WriteFile(containerKeyFile, publicKey, 0444); e != nil {
+		t.Fatal(e)
 	}
 	database := "auth_app_integration_" + uuid.NewString()
 	client, e := mongo.NewClient(uri)
@@ -435,14 +457,8 @@ func init(){net.DefaultResolver=&net.Resolver{PreferGo:true,Dial:func(ctx contex
 		t.Fatal(e)
 	}
 	t.Cleanup(func() { client.Database(database).Drop(context.Background()); client.Disconnect(context.Background()) })
-	env := []string{}
-	for _, v := range os.Environ() {
-		if !strings.HasPrefix(v, "APP_CENTER_") {
-			env = append(env, v)
-		}
-	}
 	httpAddr, grpcAddr := reserveAddress(t), reserveAddress(t)
-	values := map[string]string{"APP_CENTER_MONGO_URI": uri, "APP_CENTER_MONGO_DATABASE": database, "APP_CENTER_HTTP_ADDR": httpAddr, "APP_CENTER_GRPC_ADDR": grpcAddr, "APP_CENTER_IDENTITY_ISSUER": "identity-test", "APP_CENTER_IDENTITY_PUBLIC_KEYS": "identity-k1=" + keyFile, "APP_CENTER_AUTH_SCOPE_CATALOG_GRPC_TARGET": authTarget, "APP_CENTER_SERVICE_IDENTITY_ID": "app-center", "APP_CENTER_SERVICE_IDENTITY_KID": "app-center-2026-01", "APP_CENTER_SERVICE_IDENTITY_PRIVATE_KEY_PEM_B64": base64.StdEncoding.EncodeToString(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(serviceKey)})), "APP_CENTER_INITIAL_APPLICATION_QUOTA": "1"}
+	values := map[string]string{"APP_CENTER_MONGO_URI": uri, "APP_CENTER_MONGO_DATABASE": database, "APP_CENTER_HTTP_ADDR": httpAddr, "APP_CENTER_GRPC_ADDR": grpcAddr, "APP_CENTER_IDENTITY_ISSUER": "identity-test", "APP_CENTER_IDENTITY_PUBLIC_KEYS": "identity-k1=" + appCenterIdentityKeyPath, "APP_CENTER_AUTH_SCOPE_CATALOG_GRPC_TARGET": authTarget, "APP_CENTER_SERVICE_IDENTITY_ID": "app-center", "APP_CENTER_SERVICE_IDENTITY_KID": "app-center-2026-01", "APP_CENTER_SERVICE_IDENTITY_PRIVATE_KEY_PEM_B64": base64.StdEncoding.EncodeToString(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(serviceKey)})), "APP_CENTER_INITIAL_APPLICATION_QUOTA": "1"}
 	publicDER, e := x509.MarshalPKIXPublicKey(&serviceKey.PublicKey)
 	if e != nil {
 		t.Fatal(e)
@@ -456,11 +472,10 @@ func init(){net.DefaultResolver=&net.Resolver{PreferGo:true,Dial:func(ctx contex
 	}
 	grpcAddr = values["APP_CENTER_GRPC_ADDR"]
 	httpAddr = values["APP_CENTER_HTTP_ADDR"]
-	for k, v := range values {
-		env = append(env, k+"="+v)
-	}
-	migration := exec.CommandContext(t.Context(), binary, "migrate")
-	migration.Env = env
+	envFile := filepath.Join(dir, "app-center.env")
+	writeDockerEnvFile(t, envFile, values)
+	dockerArgs := []string{"run", "--rm", "--network", "host", "--add-host", appCenterOAuthFixtureHostIP, "--mount", "type=bind,src=" + containerKeyFile + ",dst=" + appCenterIdentityKeyPath + ",readonly", "--env-file", envFile}
+	migration := exec.CommandContext(t.Context(), "docker", append(dockerArgs, image, "migrate")...)
 	if output, e := migration.CombinedOutput(); e != nil {
 		t.Fatalf("App migrations: %v\n%s", e, output)
 	}
@@ -469,20 +484,22 @@ func init(){net.DefaultResolver=&net.Resolver{PreferGo:true,Dial:func(ctx contex
 		t.Fatal(e)
 	}
 	t.Cleanup(func() { _ = logFile.Close() })
-	process := exec.CommandContext(t.Context(), binary, "serve")
-	process.Env = env
+	containerName := "iwut-auth-app-e2e-" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	serveArgs := append(append([]string{}, dockerArgs...), "--name", containerName, image, "serve")
+	process := exec.Command("docker", serveArgs...)
 	process.Stdout = logFile
 	process.Stderr = logFile
 	if e = process.Start(); e != nil {
 		t.Fatal(e)
 	}
 	t.Cleanup(func() {
-		_ = process.Process.Signal(os.Interrupt)
+		_ = exec.Command("docker", "stop", "--time", "10", containerName).Run()
 		done := make(chan error, 1)
 		go func() { done <- process.Wait() }()
 		select {
 		case <-done:
 		case <-time.After(10 * time.Second):
+			_ = exec.Command("docker", "kill", containerName).Run()
 			_ = process.Process.Kill()
 			<-done
 		}

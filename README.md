@@ -337,11 +337,12 @@ continue to their natural expiry. Unknown commit outcomes never return a success
 result. Real Mongo tests cover rollback on audit failure, concurrent CAS, durable
 bootstrap and issuance synchronization; production Wire tests exercise native
 gRPC and generated HTTP clients plus real cryptographic identity issuance.
-The UC010 E2E also starts the actual App Center from `APP_CENTER_SOURCE_DIR`
-(default: sibling `iwut-app-center-ddd`) and checks both review handlers against
-all four permission combinations. When that checkout is under active development,
-use an isolated committed App/API snapshot for reproducible cross-service checks.
-No existing account receives profile-review permission automatically.
+The UC010 E2E pulls and starts the published App Center image from
+`APP_CENTER_IMAGE` (default:
+`docker.cnb.cool/tokenteam/iwut-app-center:latest`) and checks both review handlers
+against all four permission combinations. Pin `APP_CENTER_IMAGE` to an immutable
+digest when reproducing a historical cross-service result. No existing account
+receives profile-review permission automatically.
 
 ## Email registration and binding (UC011)
 
@@ -561,12 +562,12 @@ headers are not trusted, so configure source limits for Gateway aggregate traffi
 through local TLS capture, case-equivalent cross-account name races, same-account
 name conflicts, legacy claim/index upgrade, corrupt ownership detection, atomic
 Mongo concurrency/audit failures/unknown commits,
-and same-Session UC010/UC002 verification. When the sibling App Center checkout is
-available, it also builds and starts its actual production binary and migrations
-in a separate database, checks application creation with the newly issued JWS,
-and verifies its quota and reviewer permission gates. Set `APP_CENTER_SOURCE_DIR`
-to override the sibling path; that subtest explicitly skips if no checkout exists.
-No App source is modified. Gateway routes and mobile UX remain separate delivery.
+and same-Session UC010/UC002 verification. It pulls `APP_CENTER_IMAGE` (default:
+`docker.cnb.cool/tokenteam/iwut-app-center:latest`), runs that image's migrations
+and production server in a separate database, checks application creation with the
+newly issued JWS, and verifies its quota and reviewer permission gates. Docker and
+registry access are therefore required; override the image with a tag or digest
+when needed. Gateway routes and mobile UX remain separate delivery.
 
 ## OAuth / OIDC (UC014–019)
 

@@ -139,7 +139,7 @@ func TestOAuthE2E_ProductionWireActualAppProvider(t *testing.T) {
 		return r.IdentityJws
 	}
 	appRegistry, _ := json.Marshal(map[string]any{"iwut-auth-center": map[string]any{"status": "ACTIVE", "keys": map[string]any{"auth-service": map[string]string{"publicKeyPemB64": base64.StdEncoding.EncodeToString(servicePEM)}}, "permissions": []string{"app.oauth.client.read", "app.oauth.client.verify", "app.oauth.runtime.resolve", "app.oauth.context.resolve", "app.oauth.redirects.read"}}})
-	_, appURL, _ := startActualApp(t, uri, publicFile, authGRPC, serviceKey, map[string]string{"AUTH_E2E_DNS_ADDR": oauthTestDNS(t), "APP_CENTER_GRPC_ADDR": appGRPC, "APP_CENTER_SERVICE_CALLERS_B64": base64.StdEncoding.EncodeToString(appRegistry)})
+	_, appURL, _ := startActualApp(t, uri, publicFile, authGRPC, serviceKey, map[string]string{"APP_CENTER_GRPC_ADDR": appGRPC, "APP_CENTER_SERVICE_CALLERS_B64": base64.StdEncoding.EncodeToString(appRegistry)})
 	appCall := func(method, path, token string, body any) map[string]any {
 		t.Helper()
 		var b []byte
