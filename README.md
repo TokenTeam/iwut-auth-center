@@ -1,7 +1,7 @@
 # iWUT Auth Center
 
 This orphan-branch implementation bootstraps Auth Center from the authoritative
-design in `../../docs/auth-center/`. It exposes the full scope catalog snapshot
+design in [`TokenTeam/iwut-docs`](https://github.com/TokenTeam/iwut-docs/tree/main/auth-center). It exposes the full scope catalog snapshot
 the current Developer status projection and Auth-owned SYSTEM principals to
 authorized internal services through native gRPC.
 
@@ -12,7 +12,7 @@ allowlist. The optional UC005–009 user endpoints add profile editing, app-mana
 device registration/login, Session revocation and credential revocation over both
 HTTP/JSON and native gRPC. Their
 authentication is selected by exact full method, following
-`../../docs/platform/contracts/auth-device-session-v1.md`.
+[`auth-device-session-v1`](https://github.com/TokenTeam/iwut-docs/blob/main/platform/contracts/auth-device-session-v1.md).
 
 ## Prerequisites and build
 
@@ -148,7 +148,7 @@ and authentication dispatch. Set `AUTH_CENTER_HTTP_ADDR` (default `:8000`) and
 leaves the HTTP user routes unregistered. Internal scope, developer, SYSTEM and
 Session-to-JWS APIs remain native gRPC only.
 
-The authoritative route mapping is [Auth API routing](../../docs/platform/contracts/auth-center-api-routing.md).
+The authoritative route mapping is [Auth API routing](https://github.com/TokenTeam/iwut-docs/blob/main/platform/contracts/auth-center-api-routing.md).
 Proto HTTP annotations use service-local `/v1/...` paths, like App Center;
 `/auth-center` belongs to Gateway prefix stripping and is not accepted by Auth.
 Gateway routing is a separate delivery.
@@ -573,7 +573,7 @@ when needed. Gateway routes and mobile UX remain separate delivery.
 
 Set `AUTH_CENTER_OAUTH_CONFIG_FILE` to an explicit JSON deployment manifest;
 see `configs/oauth.example.json` and
-[`oauth-runtime-implementation.md`](../../docs/auth-center/design-notes/oauth-runtime-implementation.md).
+[`oauth-runtime-implementation.md`](https://github.com/TokenTeam/iwut-docs/blob/main/auth-center/design-notes/oauth-runtime-implementation.md).
 The manifest selects the persistent Mongo scope catalog, real App019 provider,
 independent OIDC/delegation/service keys, official portal login URL and route policy.
 Without it, existing endpoints retain their previous configuration.

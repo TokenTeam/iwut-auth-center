@@ -4,19 +4,22 @@
 
 This orphan branch is the new Auth Center implementation. It does not preserve
 the old repository architecture or API behavior unless an accepted design says
-so. Authoritative design lives outside this repository at `../../docs/`.
+so. Authoritative design lives in
+[`TokenTeam/iwut-docs`](https://github.com/TokenTeam/iwut-docs).
 
 ## Current work package
 
-**UC-AUTH-028 — disclose user profile fields to applications.** Read `../../docs/auth-center/briefs/UC-AUTH-028.md` as the active work-package input, then preserve the implemented authentication, OAuth, Session and governance behavior referenced by that brief. Extend the Auth-owned persistent OAuth catalog with immutable one-field-one-scope `USERINFO_PROFILE` metadata, cross-check it against the UC005 profile field catalog at startup, and project only currently authorized/currently stored values into the fixed `iwut_profile` UserInfo claim. Preserve openid/email behavior and the Scope Catalog v1 wire shape. Do not add a Proto or endpoint, do not migrate old Auth `scope_keys`, do not implement ApplicationUserStorage, and do not treat test mappings as the production field list. Keep all commits local.
+**UC-AUTH-028 — disclose user profile fields to applications.** Read the
+[`UC-AUTH-028` brief](https://github.com/TokenTeam/iwut-docs/blob/main/auth-center/briefs/UC-AUTH-028.md)
+as the active work-package input, then preserve the implemented authentication, OAuth, Session and governance behavior referenced by that brief. Extend the Auth-owned persistent OAuth catalog with immutable one-field-one-scope `USERINFO_PROFILE` metadata, cross-check it against the UC005 profile field catalog at startup, and project only currently authorized/currently stored values into the fixed `iwut_profile` UserInfo claim. Preserve openid/email behavior and the Scope Catalog v1 wire shape. Do not add a Proto or endpoint, do not migrate old Auth `scope_keys`, do not implement ApplicationUserStorage, and do not treat test mappings as the production field list. Keep all commits local.
 
 Preserve existing capabilities using the following lookup order only when the active brief requires their implementation details:
 
-1. `../../docs/auth-center/briefs/UC-AUTH-013.md` and `../../docs/platform/contracts/auth-developer-application-v1.md`, then `../../docs/auth-center/briefs/UC-AUTH-012.md` and `../../docs/platform/contracts/auth-email-login-v1.md`, then `../../docs/auth-center/briefs/UC-AUTH-011.md`, `../../docs/platform/contracts/auth-email-binding-v1.md` and its public vectors; preserve UC004–010 behavior.
-2. `../../docs/auth-center/briefs/UC-AUTH-004.md` and the corresponding `../../docs/auth-center/briefs/UC-AUTH-005.md` through `UC-AUTH-010.md`.
-3. `../../docs/platform/contracts/auth-device-session-v1.md` and its test vectors.
-4. `../../docs/platform/contracts/trusted-identity-v1.md` for profile user authentication.
-5. `../../docs/platform/contracts/trusted-service-identity-v1.md` for existing internal methods.
+1. `auth-center/briefs/UC-AUTH-013.md` and `platform/contracts/auth-developer-application-v1.md`, then `auth-center/briefs/UC-AUTH-012.md` and `platform/contracts/auth-email-login-v1.md`, then `auth-center/briefs/UC-AUTH-011.md`, `platform/contracts/auth-email-binding-v1.md` and its public vectors in [`TokenTeam/iwut-docs`](https://github.com/TokenTeam/iwut-docs); preserve UC004–010 behavior.
+2. `auth-center/briefs/UC-AUTH-004.md` and the corresponding `UC-AUTH-005.md` through `UC-AUTH-010.md` in the same repository.
+3. `platform/contracts/auth-device-session-v1.md` and its test vectors in the same repository.
+4. `platform/contracts/trusted-identity-v1.md` in the same repository for profile user authentication.
+5. `platform/contracts/trusted-service-identity-v1.md` in the same repository for existing internal methods.
 
 Scope:
 
@@ -24,16 +27,16 @@ Scope:
 - select authentication by exact full method; no anonymous package wildcard;
 - HTTP/JSON and native gRPC user profile and device authentication methods;
 - internal service methods remain native gRPC only; HTTP routing follows
-  `../../docs/platform/contracts/auth-center-api-routing.md`;
+  [`auth-center-api-routing`](https://github.com/TokenTeam/iwut-docs/blob/main/platform/contracts/auth-center-api-routing.md);
 - Kratos lifecycle and `github.com/goforj/wire` composition root;
 - Auth-owned MongoDB profile, credential, operation, Session and student association state;
 - real MongoDB replica-set transactions and real-listener E2E through generated clients.
 
-UC010 additionally follows `../../docs/platform/contracts/auth-session-identity-issuance-v1.md`.
+UC010 additionally follows [`auth-session-identity-issuance-v1`](https://github.com/TokenTeam/iwut-docs/blob/main/platform/contracts/auth-session-identity-issuance-v1.md).
 
-Governance work follows `../../docs/auth-center/briefs/UC-AUTH-021.md` through
+Governance work follows [`UC-AUTH-021`](https://github.com/TokenTeam/iwut-docs/blob/main/auth-center/briefs/UC-AUTH-021.md) through
 `UC-AUTH-025.md`, the matching authoritative use cases, and
-`../../docs/platform/contracts/account-owner-exit-v1.md`. Preserve the explicit
+[`account-owner-exit-v1`](https://github.com/TokenTeam/iwut-docs/blob/main/platform/contracts/account-owner-exit-v1.md). Preserve the explicit
 UC021 bootstrap consumption marker; there is no legacy bootstrap migration or
 startup grant. Full administrator membership is the fixed four-permission bundle,
 independent of reviewer permissions and Developer qualification.
@@ -61,7 +64,7 @@ readiness flags remain explicit operator declarations, not automatic guarantees.
 Gateway routes and mobile secure-storage/UI delivery remain
 separate work packages. Backend verification must not claim their completion.
 
-UC020 follows `../../docs/auth-center/briefs/UC-AUTH-020.md`. Both exact DIRECT
+UC020 follows [`UC-AUTH-020`](https://github.com/TokenTeam/iwut-docs/blob/main/auth-center/briefs/UC-AUTH-020.md). Both exact DIRECT
 methods authenticate with the current Session without refreshing LRU. Recheck at
 the final authentication transaction, keep targets restricted to that authId,
 and preserve explicit-target retry semantics. Candidate scans are bounded and
@@ -70,7 +73,7 @@ Never revoke a credential or OAuth family as a side effect.
 
 ## Code boundaries
 
-UC014–019 additionally follow `../../docs/auth-center/briefs/UC-AUTH-014.md`
+UC014–019 additionally follow [`UC-AUTH-014`](https://github.com/TokenTeam/iwut-docs/blob/main/auth-center/briefs/UC-AUTH-014.md)
 through `UC-AUTH-019.md`, and the OAuth/OIDC, App OAuth client, delegation and
 route-policy contracts selected by those briefs. OAuth Domain/Port/UseCase live
 under `internal/oauth/`; concrete storage, cryptography, clock and App provider
