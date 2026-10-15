@@ -39,13 +39,10 @@ func runPlatformAdministratorFlow(t *testing.T, env map[string]string, conn *grp
 		}
 	}
 	observed, err := client.GetPlatformAdministrator(ctx, query)
-	if err != nil || observed.Membership != pb.Membership_NONE || len(observed.GrantBlockers) != 1 || observed.GrantBlockers[0] != pb.GrantBlocker_EMAIL_REQUIRED {
+	if err != nil || observed.Membership != pb.Membership_NONE || len(observed.GrantBlockers) != 0 {
 		t.Fatal(observed, err)
 	}
 	grant := &pb.ManagePlatformAdministratorRequest{SubjectAuthId: subject.AuthId, Action: pb.Action_GRANT, ExpectedPermissionRevision: proto.Int64(observed.PermissionRevision), Reason: "  platform onboarding  "}
-	if _, err = client.ManagePlatformAdministrator(ctx, grant); status.Code(err) != codes.FailedPrecondition {
-		t.Fatal(err)
-	}
 	bind(subject, "second-admin@example.test")
 	httpTransport, err := khttp.NewClient(t.Context(), khttp.WithEndpoint("http://"+env[config.HTTPAddrEnv]), khttp.WithTimeout(5*time.Second))
 	if err != nil {

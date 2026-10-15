@@ -31,7 +31,7 @@ func runAccountManagementFlow(t *testing.T, env map[string]string, conn *grpc.Cl
 	auth := authpb.NewAuthenticationServiceClient(conn)
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	association := sha256.Sum256([]byte("account-lifecycle"))
-	user, _ := registerUser(t, auth, key, association[:])
+	user, _ := registerUser(t, conn, key, association[:])
 	adminToken := issue(admin, "iwut-auth-center")
 	ctx := metadata.NewOutgoingContext(t.Context(), metadata.Pairs("x-iwut-identity", adminToken))
 	userToken := issue(user, "iwut-auth-center")

@@ -167,7 +167,7 @@ func (s *Service) issue(tx port.Tx, f d.Family, g d.Grant, rt d.Runtime, scopes 
 	aud := []string{}
 	for _, scope := range catalog.Scopes {
 		if d.Contains(scopes, scope.Name) && scope.Enabled {
-			if scope.Name == "openid" || scope.Name == "email" {
+			if scope.Name == "openid" || scope.Name == "email" || scope.Kind == "USERINFO_PROFILE" || scope.Kind == "USERINFO_CAMPUS" {
 				aud = append(aud, s.cfg.Issuer+"/userinfo")
 			}
 			if scope.Kind == "RESOURCE" && scope.Audience != "" {
@@ -222,5 +222,5 @@ func (s *Service) Discovery(ctx context.Context) (map[string]any, error) {
 	if s.cfg.RefreshEnabled {
 		grants = append(grants, "refresh_token")
 	}
-	return map[string]any{"issuer": s.cfg.Issuer, "authorization_endpoint": s.cfg.Issuer + "/authorize", "token_endpoint": s.cfg.Issuer + "/token", "userinfo_endpoint": s.cfg.Issuer + "/userinfo", "revocation_endpoint": s.cfg.Issuer + "/revoke", "jwks_uri": s.cfg.Issuer + "/jwks", "response_types_supported": []string{"code"}, "response_modes_supported": []string{"query"}, "revocation_endpoint_auth_methods_supported": []string{"none", "client_secret_basic"}, "grant_types_supported": grants, "subject_types_supported": []string{"pairwise"}, "id_token_signing_alg_values_supported": []string{"RS256"}, "token_endpoint_auth_methods_supported": []string{"none", "client_secret_basic"}, "code_challenge_methods_supported": []string{"S256"}, "scopes_supported": scopes, "claims_supported": []string{"iss", "sub", "aud", "iat", "exp", "auth_time", "nonce", "at_hash", "email", "email_verified", "iwut_profile"}, "authorization_response_iss_parameter_supported": true}, nil
+	return map[string]any{"issuer": s.cfg.Issuer, "authorization_endpoint": s.cfg.Issuer + "/authorize", "token_endpoint": s.cfg.Issuer + "/token", "userinfo_endpoint": s.cfg.Issuer + "/userinfo", "revocation_endpoint": s.cfg.Issuer + "/revoke", "jwks_uri": s.cfg.Issuer + "/jwks", "response_types_supported": []string{"code"}, "response_modes_supported": []string{"query"}, "revocation_endpoint_auth_methods_supported": []string{"none", "client_secret_basic"}, "grant_types_supported": grants, "subject_types_supported": []string{"pairwise"}, "id_token_signing_alg_values_supported": []string{"RS256"}, "token_endpoint_auth_methods_supported": []string{"none", "client_secret_basic"}, "code_challenge_methods_supported": []string{"S256"}, "scopes_supported": scopes, "claims_supported": []string{"iss", "sub", "aud", "iat", "exp", "auth_time", "nonce", "at_hash", "email", "email_verified", "iwut_profile", "iwut_campus"}, "authorization_response_iss_parameter_supported": true}, nil
 }

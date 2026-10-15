@@ -12,6 +12,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	drivermongo "go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"iwut-auth-center/internal/authentication/domain"
 	"iwut-auth-center/internal/authentication/port"
 	"iwut-auth-center/internal/authentication/usecase"
@@ -26,7 +27,7 @@ func secondaryCredential(t *testing.T, f authenticationFixture, owner string) au
 	pub := elliptic.Marshal(key.Curve, key.X, key.Y)
 	fp, _ := f.p.Fingerprint(pub)
 	id, _ := f.p.NewID()
-	c := domain.Credential{CredentialID: id, AuthID: owner, ProtocolVersion: domain.ProtocolVersion, PublicKey: pub, Fingerprint: fp, CreatedAt: time.Now().UTC().Truncate(time.Millisecond)}
+	c := domain.Credential{CredentialRevision: 1, CredentialID: id, AuthID: owner, ProtocolVersion: domain.ProtocolVersion, PublicKey: pub, Fingerprint: fp, CreatedAt: time.Now().UTC().Truncate(time.Millisecond)}
 	if err := f.r.WithAuthTransaction(t.Context(), func(ctx context.Context) error { return f.r.InsertCredentialTx(ctx, c) }); err != nil {
 		t.Fatal(err)
 	}
@@ -38,15 +39,20 @@ func TestCredentialRevocationPreservesOwnershipAndFirstTime(t *testing.T) {
 	f := newAuthenticationFixture(t)
 	second := secondaryCredential(t, f, f.c.AuthID)
 	foreign := secondaryCredential(t, f, "other-owner")
+	// Even an undecodable foreign record must not affect the uniform response:
+	// this endpoint decides before reading any non-current target.
+	if _, err := f.r.database.Collection(CredentialCollection).UpdateOne(t.Context(), bson.M{"credentialId": foreign.c.CredentialID}, bson.M{"$set": bson.M{"publicKey": "not-binary"}}, options.UpdateOne().SetBypassDocumentValidation(true)); err != nil {
+		t.Fatal(err)
+	}
 	callerToken, targetToken := f.login(t), second.login(t)
-	caller, err := f.u.Check(t.Context(), callerToken.SessionToken)
+	caller, err := f.u.Check(t.Context(), targetToken.SessionToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	revoke, _ := usecase.NewCredentialRevocation(f.r)
 	unknown, _ := f.p.NewID()
-	for _, id := range []string{unknown, foreign.c.CredentialID} {
-		if err := revoke.Revoke(t.Context(), caller, id); !errors.Is(err, port.ErrNotFound) {
+	for _, id := range []string{unknown, foreign.c.CredentialID, f.c.CredentialID} {
+		if err := revoke.Revoke(t.Context(), caller, id); !errors.Is(err, port.ErrCredentialReauthRequired) {
 			t.Fatalf("foreign/unknown: %v", err)
 		}
 	}
@@ -60,10 +66,16 @@ func TestCredentialRevocationPreservesOwnershipAndFirstTime(t *testing.T) {
 	}
 	wg.Wait()
 	close(failures)
+	successes := 0
 	for err := range failures {
-		if err != nil {
+		if err == nil {
+			successes++
+		} else if !errors.Is(err, port.ErrSessionInvalid) {
 			t.Fatal(err)
 		}
+	}
+	if successes != 1 {
+		t.Fatalf("expected one final authorized self-revocation, got %d", successes)
 	}
 	var first CredentialDocument
 	if err := f.r.database.Collection(CredentialCollection).FindOne(t.Context(), bson.M{"credentialId": second.c.CredentialID}).Decode(&first); err != nil {
@@ -72,8 +84,8 @@ func TestCredentialRevocationPreservesOwnershipAndFirstTime(t *testing.T) {
 	if first.RevokedAt == nil {
 		t.Fatal("missing first revocation timestamp")
 	}
-	if err := revoke.Revoke(t.Context(), caller, second.c.CredentialID); err != nil {
-		t.Fatal(err)
+	if err := revoke.Revoke(t.Context(), caller, second.c.CredentialID); !errors.Is(err, port.ErrSessionInvalid) {
+		t.Fatal("self-revoked authorization survived", err)
 	}
 	var repeated CredentialDocument
 	if err := f.r.database.Collection(CredentialCollection).FindOne(t.Context(), bson.M{"credentialId": second.c.CredentialID}).Decode(&repeated); err != nil {
@@ -126,6 +138,10 @@ func TestCredentialRevocationCurrentLastCredentialAndStaleAuthorization(t *testi
 				if !errors.Is(err, port.ErrSessionInvalid) {
 					t.Fatal("stale auth succeeded", err)
 				}
+				unknown, _ := f.p.NewID()
+				if err = revoke.Revoke(t.Context(), caller, unknown); !errors.Is(err, port.ErrSessionInvalid) {
+					t.Fatal("non-current decision preceded final Session recheck", err)
+				}
 				return
 			}
 			if err != nil {
@@ -143,26 +159,25 @@ func TestCredentialRevocationCurrentLastCredentialAndStaleAuthorization(t *testi
 
 func TestCredentialRevocationConcurrentLoginCannotRemainUsable(t *testing.T) {
 	f := newAuthenticationFixture(t)
-	second := secondaryCredential(t, f, f.c.AuthID)
 	established := f.login(t)
 	caller, err := f.u.Check(t.Context(), established.SessionToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	revoke, _ := usecase.NewCredentialRevocation(f.r)
-	pending := second.begin(t)
-	sig := signAuthentication(t, second.key, pending.SigningPayload)
+	pending := f.begin(t)
+	sig := signAuthentication(t, f.key, pending.SigningPayload)
 	start := make(chan struct{})
 	result := make(chan domain.Established, 1)
 	failure := make(chan error, 1)
 	go func() {
 		<-start
-		s, e := second.u.Complete(t.Context(), pending.OperationID, sig)
+		s, e := f.u.Complete(t.Context(), pending.OperationID, sig)
 		result <- s
 		failure <- e
 	}()
 	close(start)
-	if err := revoke.Revoke(t.Context(), caller, second.c.CredentialID); err != nil {
+	if err := revoke.Revoke(t.Context(), caller, f.c.CredentialID); err != nil {
 		t.Fatal(err)
 	}
 	logged := <-result

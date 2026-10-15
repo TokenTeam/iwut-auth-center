@@ -48,6 +48,10 @@ func (r *AuthenticationRepository) RevokeOwnCredential(ctx context.Context, call
 		} else if err != nil {
 			return err
 		}
+		// Other targets receive the same response without an ownership lookup.
+		if credentialID != session.CredentialID {
+			return port.ErrCredentialReauthRequired
+		}
 		// This write makes concurrent direct session revocation conflict too, rather
 		// than trusting a snapshot whose authorizing Session was already revoked.
 		updated, err := r.database.Collection(SessionCollection).UpdateOne(tx, bson.M{"sessionId": session.SessionID, "revokedAt": nil, "expiresAt": bson.M{"$gt": now}}, bson.M{"$max": bson.M{"lastUsedAt": now}, "$inc": bson.M{"authenticationFence": int64(1)}})
@@ -57,26 +61,32 @@ func (r *AuthenticationRepository) RevokeOwnCredential(ctx context.Context, call
 		if updated.MatchedCount != 1 {
 			return port.ErrSessionInvalid
 		}
-		var target CredentialDocument
-		err = r.database.Collection(CredentialCollection).FindOne(tx, bson.M{"credentialId": credentialID, "authId": session.AuthID}).Decode(&target)
-		if errors.Is(err, drivermongo.ErrNoDocuments) {
-			return port.ErrNotFound
-		}
-		if err != nil {
-			return err
-		}
-		if target.RevokedAt != nil {
-			return nil
-		}
-		result, err := r.database.Collection(CredentialCollection).UpdateOne(tx, bson.M{"credentialId": credentialID, "authId": session.AuthID, "revokedAt": nil}, bson.M{"$set": bson.M{"revokedAt": now}})
-		if err != nil {
-			return err
-		}
-		if result.MatchedCount != 1 {
-			return port.ErrUnavailable
-		}
-		return nil
+		return r.revokeCredentialTargetTx(tx, session.AuthID, credentialID, now)
 	})
+}
+
+// Private target-state primitive, called only inside a final authorizing Auth
+// transaction. It cannot grant authority or become a second public endpoint.
+func (r *AuthenticationRepository) revokeCredentialTargetTx(tx context.Context, owner, credentialID string, now time.Time) error {
+	var target CredentialDocument
+	err := r.database.Collection(CredentialCollection).FindOne(tx, bson.M{"credentialId": credentialID, "authId": owner}).Decode(&target)
+	if errors.Is(err, drivermongo.ErrNoDocuments) {
+		return port.ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if target.RevokedAt != nil {
+		return nil
+	}
+	result, err := r.database.Collection(CredentialCollection).UpdateOne(tx, bson.M{"credentialId": credentialID, "authId": owner, "revokedAt": nil}, bson.M{"$set": bson.M{"revokedAt": now}})
+	if err != nil {
+		return err
+	}
+	if result.MatchedCount != 1 {
+		return port.ErrUnavailable
+	}
+	return nil
 }
 
 var _ port.CredentialRevocationRepository = (*AuthenticationRepository)(nil)

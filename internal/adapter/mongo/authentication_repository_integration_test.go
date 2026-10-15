@@ -66,8 +66,8 @@ func newAuthenticationFixture(t *testing.T) authenticationFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	credential := domain.Credential{CredentialID: id, AuthID: "user-login", ProtocolVersion: domain.ProtocolVersion, PublicKey: publicKey, Fingerprint: fingerprint, CreatedAt: time.Now().UTC().Truncate(time.Millisecond)}
-	if _, err := db.Collection(PrincipalCollection).InsertOne(t.Context(), bson.M{"authId": credential.AuthID, "principalType": "USER", "accountStatus": "ACTIVE", "accountRevision": int64(1), "developerStatus": nil, "developerRevision": int64(0)}); err != nil {
+	credential := domain.Credential{CredentialRevision: 1, CredentialID: id, AuthID: "user-login", ProtocolVersion: domain.ProtocolVersion, PublicKey: publicKey, Fingerprint: fingerprint, CreatedAt: time.Now().UTC().Truncate(time.Millisecond)}
+	if _, err := db.Collection(PrincipalCollection).InsertOne(t.Context(), bson.M{"authId": credential.AuthID, "principalType": "USER", "accountStatus": "ACTIVE", "accountRevision": int64(1), "minimumCredentialRevision": int64(1), "developerStatus": nil, "developerRevision": int64(0)}); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.WithAuthTransaction(t.Context(), func(ctx context.Context) error { return r.InsertCredentialTx(ctx, credential) }); err != nil {

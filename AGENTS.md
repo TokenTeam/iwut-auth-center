@@ -9,13 +9,54 @@ so. Authoritative design lives in
 
 ## Current work package
 
-**UC-AUTH-028 — disclose user profile fields to applications.** Read the
-[`UC-AUTH-028` brief](https://github.com/TokenTeam/iwut-docs/blob/main/auth-center/briefs/UC-AUTH-028.md)
-as the active work-package input, then preserve the implemented authentication, OAuth, Session and governance behavior referenced by that brief. Extend the Auth-owned persistent OAuth catalog with immutable one-field-one-scope `USERINFO_PROFILE` metadata, cross-check it against the UC005 profile field catalog at startup, and project only currently authorized/currently stored values into the fixed `iwut_profile` UserInfo claim. Preserve openid/email behavior and the Scope Catalog v1 wire shape. Do not add a Proto or endpoint, do not migrate old Auth `scope_keys`, do not implement ApplicationUserStorage, and do not treat test mappings as the production field list. Keep all commits local.
+**UC-AUTH-006/011/031 v3 — accepted 2026-10-13, email core backend complete.**
+Read their regenerated briefs and `platform/contracts/auth-email-account-v3.md`.
+The v3 runtime implements verified-email + password registration, a bounded
+unique email directory, password-protected login-role switching, and campus
+membership derived only from current WHUT bindings. Legacy REGISTER/BIND are
+permanently retired and the old campus collection cannot authorize disclosure.
+Preserve all prior dirty work. No production migration, automatic old-data repair,
+commit, push or deployment. Registration never silently synthesizes passwords.
+
+**UC-AUTH-033/034 — accepted password core.** Read their briefs and password v1.
+Password core/change transactions and credential cutoff exist; password login,
+reset, public password services and notification worker remain incomplete. Do
+not declare the combined password model production-ready. UC009/025/026 gate
+revisions were explicitly accepted later on 2026-10-13 and their briefs regenerated
+before implementing current-only revocation and password plus device proof gates.
+These gates are now backend complete: final check/race and real Mongo/Wire race
+passed (Wire 211.879s, Mongo 554.595s). Preserve the explicit 15s bounded request
+timeout and final current-version checks. Public password login/reset/notification
+delivery remains incomplete.
+UC032 was explicitly authorized for completion on 2026-10-13. Read its generated
+brief and auth-credential-management-v1. Implement bounded no-touch listing,
+label CAS and same-Session current-password plus device-proof single-target
+revocation. Preserve current-only UC009, strict credential metadata, shared Auth
+fence and password executor, closure/retention, fixed original signature bytes.
+No batch revocation, scan-to-add, WebAuthn or production migration/deployment.
+Old baseline delivery evidence is historical, not a new-model authorization.
+
+Preserve completed UC030 behavior:
+
+**UC-AUTH-030 — ApplicationUserStorage.** Read
+`auth-center/briefs/UC-AUTH-030.md` when the active UC031 brief requires storage integration details. Deliver the
+Auth-owned bounded string KV namespace keyed by `(authId, applicationId, channel)`,
+the independent `storage.read` and `storage.write` RESOURCE scopes for the
+`iwut-auth-center` audience, and HTTP-only third-party Bearer endpoints. Every
+request rechecks the opaque token, current grant, current approved Version scopes,
+Catalog state, account, channel eligibility and permanent Application tombstone
+inside the shared authentication transaction. Preserve whole-namespace revision
+CAS, exact fixed quotas, no-op stability and PUBLIC-origin/CONFIDENTIAL CORS
+separation. User clearing removes all three channels without implicitly revoking
+OAuth; revocation alone retains data. Account closure and Application closure must
+perform bounded physical cleanup, and the first Application closure Apply commits
+its tombstone, audit and unique cleanup task atomically before returning APPLIED.
+Do not inherit the legacy nested User-document Mongo path implementation. Keep all
+commits local.
 
 Preserve existing capabilities using the following lookup order only when the active brief requires their implementation details:
 
-1. `auth-center/briefs/UC-AUTH-013.md` and `platform/contracts/auth-developer-application-v1.md`, then `auth-center/briefs/UC-AUTH-012.md` and `platform/contracts/auth-email-login-v1.md`, then `auth-center/briefs/UC-AUTH-011.md`, `platform/contracts/auth-email-binding-v1.md` and its public vectors in [`TokenTeam/iwut-docs`](https://github.com/TokenTeam/iwut-docs); preserve UC004–010 behavior.
+1. `auth-center/briefs/UC-AUTH-013.md` and `platform/contracts/auth-developer-application-v1.md`, then `auth-center/briefs/UC-AUTH-012.md` and `platform/contracts/auth-email-login-v1.md`, then the revised `UC-AUTH-006.md`/`UC-AUTH-011.md` briefs and `platform/contracts/auth-email-account-v3.md` in [`TokenTeam/iwut-docs`](https://github.com/TokenTeam/iwut-docs). V3 vectors supplement historical v1/v2 vectors; old registration protocols cannot be used to create new users. Preserve retained UC004–010 behavior, not retired no-email registration.
 2. `auth-center/briefs/UC-AUTH-004.md` and the corresponding `UC-AUTH-005.md` through `UC-AUTH-010.md` in the same repository.
 3. `platform/contracts/auth-device-session-v1.md` and its test vectors in the same repository.
 4. `platform/contracts/trusted-identity-v1.md` in the same repository for profile user authentication.
@@ -29,7 +70,7 @@ Scope:
 - internal service methods remain native gRPC only; HTTP routing follows
   [`auth-center-api-routing`](https://github.com/TokenTeam/iwut-docs/blob/main/platform/contracts/auth-center-api-routing.md);
 - Kratos lifecycle and `github.com/goforj/wire` composition root;
-- Auth-owned MongoDB profile, credential, operation, Session and student association state;
+- Auth-owned MongoDB profile, credential, operation, Session and email state; student association state is retired by the revised UC006;
 - real MongoDB replica-set transactions and real-listener E2E through generated clients.
 
 UC010 additionally follows [`auth-session-identity-issuance-v1`](https://github.com/TokenTeam/iwut-docs/blob/main/platform/contracts/auth-session-identity-issuance-v1.md).
@@ -54,7 +95,7 @@ App owns the corresponding ownership barrier. Cross-service RPCs run outside
 Mongo transaction callbacks. Cancellation may omit an unknown receipt after a lost
 Prepare response; a supplied receipt and every COMMITTED receipt must match.
 Closed-account cleanup never releases a developerHandle or device fingerprint,
-never affects another association member, and never deletes an Application sector.
+never affects another authId, and never deletes an Application sector.
 Use the independent termination ledger before reporting final termination; replay
 and validate it before serving traffic after restoration. Cleanup acknowledgments,
 not elapsed time or an empty dependency stub, determine completion. Production
@@ -132,8 +173,9 @@ fence. Audit insertion and permissions CAS commit together. Bootstrap is an expl
 database-only command with a durable global consumed marker, never a startup grant.
 
 UC011 email operations share the authentication transaction fence. Keep email
-registration atomic with USER, device, association, Session, binding and audit.
-Association migration must include REGISTER_WITH_EMAIL snapshots. SMTP runs only
+registration atomic with USER, device, Session, binding and audit. The revised
+UC006/011 retire association fields, snapshots, writes, config and startup migration;
+do not reintroduce them to satisfy historical tests. SMTP runs only
 after confirmed operation commit, never inside transaction retries. Transport
 must distinguish an absent Session carrier from every invalid supplied carrier.
 UC012 reuses those facilities and extends all Session consumers for EMAIL_CODE_AND_DEVICE.

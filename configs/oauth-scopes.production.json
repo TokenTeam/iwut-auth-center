@@ -1,0 +1,17 @@
+[
+  {"Name":"openid","Label":"登录应用","Description":"允许应用识别你的平台账号；向应用提供独立的用户标识。","Kind":"PROTOCOL","Audience":"","Enabled":true},
+  {"Name":"email","Label":"已验证邮箱","Description":"允许应用读取你当前绑定并验证的邮箱地址。","Kind":"PROTOCOL","Audience":"","Enabled":true},
+  {"Name":"campus.whut","Label":"校园成员认证","Description":"允许应用读取你的永久武理校园成员认证；不提供校园邮箱，也不证明在校学生身份。","Kind":"USERINFO_CAMPUS","Audience":"","Enabled":true},
+  {"Name":"offline_access","Label":"后台访问","Description":"允许应用在你退出平台后续签访问凭据；你可以随时收回授权。","Kind":"PROTOCOL","Audience":"","Enabled":true},
+  {"Name":"storage.read","Label":"读取应用专属数据","Description":"允许应用读取它为你保存的偏好和状态；这不包含你的用户资料。","Kind":"RESOURCE","Audience":"iwut-auth-center","Enabled":true},
+  {"Name":"storage.write","Label":"写入应用专属数据","Description":"允许应用更新或删除它为你保存的偏好和状态；不允许读取其他值。","Kind":"RESOURCE","Audience":"iwut-auth-center","Enabled":true},
+  {"Name":"profile.basic.name","Label":"读取姓名","Description":"允许应用读取你主动填写的姓名；该信息未经学校或平台真实性验证。","Kind":"USERINFO_PROFILE","Audience":"","ProfileField":"basic.name","Enabled":true},
+  {"Name":"profile.basic.gender","Label":"读取性别","Description":"允许应用读取你主动选择的性别；该信息未经学校或平台真实性验证。","Kind":"USERINFO_PROFILE","Audience":"","ProfileField":"basic.gender","Enabled":true},
+  {"Name":"profile.education.campus_areas","Label":"读取活动片区","Description":"允许应用读取你主动选择的校内活动片区；该信息未经学校或平台真实性验证。","Kind":"USERINFO_PROFILE","Audience":"","ProfileField":"education.campus_areas","Enabled":true},
+  {"Name":"profile.education.major","Label":"读取专业","Description":"允许应用读取你主动填写的专业；该信息未经学校或平台真实性验证。","Kind":"USERINFO_PROFILE","Audience":"","ProfileField":"education.major","Enabled":true},
+  {"Name":"profile.personal.birthday","Label":"读取生日","Description":"允许应用读取你主动填写的生日；该信息未经学校或平台真实性验证。","Kind":"USERINFO_PROFILE","Audience":"","ProfileField":"personal.birthday","Enabled":true},
+  {"Name":"profile.education.campus_card_number","Label":"读取一卡通号","Description":"允许应用读取你主动填写的一卡通号；该信息未经学校或平台真实性验证。","Kind":"USERINFO_PROFILE","Audience":"","ProfileField":"education.campus_card_number","Enabled":true},
+  {"Name":"profile.contact.phone","Label":"读取手机号","Description":"允许应用读取你主动填写的手机号；该信息未经学校或平台真实性验证。","Kind":"USERINFO_PROFILE","Audience":"","ProfileField":"contact.phone","Enabled":true},
+  {"Name":"profile.contact.qq","Label":"读取 QQ","Description":"允许应用读取你主动填写的 QQ 号；该信息未经学校或平台真实性验证。","Kind":"USERINFO_PROFILE","Audience":"","ProfileField":"contact.qq","Enabled":true},
+  {"Name":"profile.education.current_grade","Label":"读取当前就读年级","Description":"允许应用读取你主动确认并由系统按学年推算的当前阶段内年级；该信息未经学校或平台真实性验证。","Kind":"USERINFO_PROFILE","Audience":"","ProfileField":"education.current_grade","Enabled":true}
+]

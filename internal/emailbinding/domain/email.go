@@ -11,7 +11,7 @@ const (
 	Bind                = "BIND"
 	RegistrationPurpose = "REGISTER_WITH_EMAIL"
 	BindingPurpose      = "BIND_EMAIL"
-	ProtocolVersion     = "iwut-email-registration-v1"
+	ProtocolVersion     = "iwut-email-registration-v2"
 )
 
 var (
@@ -32,9 +32,9 @@ var (
 var Errors = []error{ErrInvalid, ErrFlow, ErrVerification, ErrRevision, ErrConflict, ErrActive, ErrOccupied, ErrCompleted, ErrCredential, ErrRate, ErrDelivery, ErrUnavailable, ErrSession}
 
 type Begin struct {
-	RequestID, Email, Mode, ProtocolVersion, Scheme, Source string
-	PublicKey, Token                                        []byte
-	Revision                                                *int64
+	RequestID, Email, Mode, ProtocolVersion, Source string
+	PublicKey                                       []byte
+	Revision                                        *int64
 }
 
 func NormalizeEmail(raw string) (string, error) {

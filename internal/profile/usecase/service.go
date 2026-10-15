@@ -10,13 +10,14 @@ import (
 )
 
 type Service struct {
-	repository port.Repository
-	catalog    port.Catalog
-	now        func() time.Time
+	repository   port.Repository
+	catalog      port.Catalog
+	academicYear port.AcademicYearProvider
+	now          func() time.Time
 }
 
-func NewProfileService(repository port.Repository, catalog port.Catalog) *Service {
-	return &Service{repository: repository, catalog: catalog, now: time.Now}
+func NewProfileService(repository port.Repository, catalog port.Catalog, academicYear port.AcademicYearProvider) *Service {
+	return &Service{repository: repository, catalog: catalog, academicYear: academicYear, now: time.Now}
 }
 func (s *Service) read(ctx context.Context, id string) (domain.Principal, error) {
 	p, e := s.repository.Read(ctx, id)
@@ -26,15 +27,58 @@ func (s *Service) read(ctx context.Context, id string) (domain.Principal, error)
 	return p, domain.CheckPrincipal(p)
 }
 func (s *Service) GetOwnProfile(ctx context.Context, id string) (domain.Snapshot, error) {
-	p, e := s.read(ctx, id)
-	domain.Sort(p.Profile.Entries)
-	return p.Profile, e
+	var snapshot domain.Snapshot
+	err := s.repository.Transaction(ctx, func(tx context.Context) error {
+		principal, err := s.read(tx, id)
+		if err != nil {
+			return err
+		}
+		domain.Sort(principal.Profile.Entries)
+		snapshot = principal.Profile
+		return nil
+	})
+	return snapshot, err
 }
-func (s *Service) GetProfileEditingSchema(ctx context.Context, id string) ([]domain.Definition, error) {
+func (s *Service) GetProfileEditingSchema(ctx context.Context, id string) ([]domain.Definition, *int32, error) {
+	var definitions []domain.Definition
+	var academicYear *int32
+	err := s.repository.Transaction(ctx, func(tx context.Context) error {
+		var err error
+		definitions, academicYear, err = s.profileEditingSchema(tx, id)
+		return err
+	})
+	return definitions, academicYear, err
+}
+
+func (s *Service) profileEditingSchema(ctx context.Context, id string) ([]domain.Definition, *int32, error) {
 	if _, e := s.read(ctx, id); e != nil {
-		return nil, e
+		return nil, nil, e
 	}
-	return s.definitions(ctx)
+	defs, err := s.definitions(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, definition := range defs {
+		if definition.ValueType == domain.AcademicGrade {
+			year, err := s.currentAcademicYear(ctx, s.now())
+			if err != nil {
+				return nil, nil, err
+			}
+			return defs, &year, nil
+		}
+	}
+	return defs, nil, nil
+}
+
+func (s *Service) currentAcademicYear(ctx context.Context, now time.Time) (int32, error) {
+	if s.academicYear == nil {
+		return 0, domain.ErrAcademicYear
+	}
+	year, err := s.academicYear.CurrentAcademicYear(ctx, now)
+	if err != nil {
+		return 0, domain.ErrAcademicYear
+	}
+	return year, nil
 }
 func (s *Service) definitions(ctx context.Context) ([]domain.Definition, error) {
 	if s.catalog == nil {
@@ -49,9 +93,19 @@ func (s *Service) definitions(ctx context.Context) ([]domain.Definition, error) 
 	return defs, nil
 }
 func (s *Service) EditOwnProfile(ctx context.Context, id string, c domain.Command) (domain.Result, error) {
-	if e := domain.ValidateCommand(c); e != nil {
-		return domain.Result{}, e
+	if err := domain.ValidateCommand(c); err != nil {
+		return domain.Result{}, err
 	}
+	var result domain.Result
+	err := s.repository.Transaction(ctx, func(tx context.Context) error {
+		var err error
+		result, err = s.editOwnProfile(tx, id, c)
+		return err
+	})
+	return result, err
+}
+
+func (s *Service) editOwnProfile(ctx context.Context, id string, c domain.Command) (domain.Result, error) {
 	p, e := s.read(ctx, id)
 	if e != nil {
 		return domain.Result{}, e
@@ -59,26 +113,54 @@ func (s *Service) EditOwnProfile(ctx context.Context, id string, c domain.Comman
 	if p.Profile.Revision != c.ExpectedRevision {
 		return domain.Result{}, domain.ErrConflict
 	}
+	operationTime := s.now().UTC().Truncate(time.Millisecond)
 	if len(c.Set) > 0 {
 		defs, e := s.definitions(ctx)
 		if e != nil {
 			return domain.Result{}, e
 		}
-		index := map[string]domain.Definition{}
+		definitionsByKey := map[string]domain.Definition{}
 		for _, d := range defs {
-			index[d.Key] = d
+			definitionsByKey[d.Key] = d
 		}
 		assignments := append([]domain.Entry{}, c.Set...)
 		domain.Sort(assignments)
-		for _, a := range assignments {
-			d, ok := index[a.Key]
+		currentValues := map[string]domain.Value{}
+		for _, entry := range p.Profile.Entries {
+			currentValues[entry.Key] = entry.Value
+		}
+		for assignmentIndex, a := range assignments {
+			d, ok := definitionsByKey[a.Key]
 			if !ok {
 				return domain.Result{}, domain.ErrNotDefined
 			}
-			if e := domain.ValidateAssignment(a, d); e != nil {
+			if e := domain.ValidateAssignment(a, d, operationTime); e != nil {
 				return domain.Result{}, e
 			}
+			a.Value = domain.Canonicalize(a.Value)
+			if a.Value.Academic != nil {
+				grade := *a.Value.Academic
+				a.Value.Academic = &grade
+			}
+			if a.Value.Type == domain.AcademicGrade {
+				year, err := s.currentAcademicYear(ctx, operationTime)
+				if err != nil {
+					return domain.Result{}, err
+				}
+				if a.Value.Academic.AcademicYear != year {
+					return domain.Result{}, domain.ErrAcademicYearConflict
+				}
+				stored, exists := currentValues[a.Key]
+				if exists && stored.Type == domain.AcademicGrade && stored.Academic != nil && stored.Academic.Stage == a.Value.Academic.Stage && stored.Academic.Year == a.Value.Academic.Year && stored.Academic.FinalYear == a.Value.Academic.FinalYear && stored.Academic.AcademicYear == a.Value.Academic.AcademicYear {
+					a.Value = stored
+				} else {
+					confirmed := operationTime
+					a.Value.Academic.ConfirmedAt = &confirmed
+				}
+			}
+			assignments[assignmentIndex] = a
 		}
+		c.Set = assignments
 	}
 	values := map[string]domain.Value{}
 	for _, a := range p.Profile.Entries {
@@ -88,7 +170,7 @@ func (s *Service) EditOwnProfile(ctx context.Context, id string, c domain.Comman
 		delete(values, key)
 	}
 	for _, a := range c.Set {
-		values[a.Key] = a.Value
+		values[a.Key] = domain.Canonicalize(a.Value)
 	}
 	candidate := domain.Snapshot{Revision: p.Profile.Revision, UpdatedAt: p.Profile.UpdatedAt, Entries: make([]domain.Entry, 0, len(values))}
 	size := 0
@@ -104,7 +186,7 @@ func (s *Service) EditOwnProfile(ctx context.Context, id string, c domain.Comman
 	same := len(candidate.Entries) == len(p.Profile.Entries)
 	if same {
 		for i, a := range candidate.Entries {
-			if a != p.Profile.Entries[i] {
+			if a.Key != p.Profile.Entries[i].Key || !a.Value.Equal(p.Profile.Entries[i].Value) {
 				same = false
 				break
 			}
@@ -122,7 +204,7 @@ func (s *Service) EditOwnProfile(ctx context.Context, id string, c domain.Comman
 		return domain.Result{}, domain.ErrExhausted
 	}
 	candidate.Revision++
-	candidate.UpdatedAt = s.now().UTC().Truncate(time.Millisecond)
+	candidate.UpdatedAt = operationTime
 	if e := s.repository.Commit(ctx, id, c.ExpectedRevision, candidate); e != nil {
 		return domain.Result{}, e
 	}

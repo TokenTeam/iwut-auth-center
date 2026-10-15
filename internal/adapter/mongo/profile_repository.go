@@ -12,13 +12,40 @@ import (
 	"iwut-auth-center/internal/profile/port"
 )
 
-type ProfileRepository struct{ collection *drivermongo.Collection }
+type ProfileRepository struct {
+	collection     *drivermongo.Collection
+	authentication *AuthenticationRepository
+}
 
-func NewProfileRepository(database *drivermongo.Database) (*ProfileRepository, error) {
+func NewProfileRepository(database *drivermongo.Database, authentication ...*AuthenticationRepository) (*ProfileRepository, error) {
 	if database == nil {
 		return nil, domain.ErrUnavailable
 	}
-	return &ProfileRepository{database.Collection(PrincipalCollection, options.Collection().SetReadPreference(readpref.Primary()))}, nil
+	var auth *AuthenticationRepository
+	if len(authentication) > 0 {
+		auth = authentication[0]
+	}
+	return &ProfileRepository{collection: database.Collection(PrincipalCollection, options.Collection().SetReadPreference(readpref.Primary())), authentication: auth}, nil
+}
+func (r *ProfileRepository) Transaction(ctx context.Context, operation func(context.Context) error) error {
+	if r.authentication == nil {
+		return operation(ctx)
+	}
+	var semantic error
+	err := r.authentication.WithAuthTransaction(ctx, func(tx context.Context) error {
+		semantic = operation(tx)
+		return semantic
+	})
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if err != nil {
+		if semantic != nil {
+			return semantic
+		}
+		return domain.ErrUnavailable
+	}
+	return nil
 }
 func (r *ProfileRepository) Read(ctx context.Context, id string) (domain.Principal, error) {
 	return r.read(ctx, bson.M{"authId": id})
@@ -82,6 +109,15 @@ func (r *ProfileRepository) Commit(ctx context.Context, id string, revision int6
 			v = a.Value.Integer
 		case domain.Boolean:
 			v = a.Value.Boolean
+		case domain.StringSet:
+			v = append([]string(nil), a.Value.Strings...)
+		case domain.AcademicGrade:
+			if a.Value.Academic == nil || a.Value.Academic.ConfirmedAt == nil {
+				return domain.ErrUnavailable
+			}
+			v = bson.M{"stage": a.Value.Academic.Stage, "year": a.Value.Academic.Year, "finalYear": a.Value.Academic.FinalYear, "academicYear": a.Value.Academic.AcademicYear, "confirmedAt": *a.Value.Academic.ConfirmedAt}
+		default:
+			return domain.ErrUnavailable
 		}
 		entries = append(entries, bson.M{"key": a.Key, "valueType": string(a.Value.Type), "value": v})
 	}
@@ -160,6 +196,55 @@ func decodeProfilePrincipal(raw bson.Raw) (domain.Principal, error) {
 			value.Integer, ok = doc.Lookup("value").Int32OK()
 		case domain.Boolean:
 			value.Boolean, ok = doc.Lookup("value").BooleanOK()
+		case domain.StringSet:
+			var array bson.RawArray
+			array, ok = doc.Lookup("value").ArrayOK()
+			if ok {
+				items, err := array.Values()
+				if err != nil {
+					ok = false
+				} else {
+					value.Strings = make([]string, 0, len(items))
+					for _, item := range items {
+						text, textOK := item.StringValueOK()
+						if !textOK {
+							ok = false
+							break
+						}
+						value.Strings = append(value.Strings, text)
+					}
+				}
+			}
+		case domain.AcademicGrade:
+			var gradeDoc bson.Raw
+			gradeDoc, ok = doc.Lookup("value").DocumentOK()
+			if ok {
+				elements, err := gradeDoc.Elements()
+				if err != nil || len(elements) != 5 {
+					ok = false
+				} else {
+					grade := &domain.Grade{}
+					grade.Stage, ok = gradeDoc.Lookup("stage").StringValueOK()
+					if ok {
+						grade.Year, ok = gradeDoc.Lookup("year").Int32OK()
+					}
+					if ok {
+						grade.FinalYear, ok = gradeDoc.Lookup("finalYear").Int32OK()
+					}
+					if ok {
+						grade.AcademicYear, ok = gradeDoc.Lookup("academicYear").Int32OK()
+					}
+					if ok {
+						millis, dateOK := gradeDoc.Lookup("confirmedAt").DateTimeOK()
+						ok = dateOK
+						if dateOK {
+							confirmed := bson.DateTime(millis).Time().UTC()
+							grade.ConfirmedAt = &confirmed
+						}
+					}
+					value.Academic = grade
+				}
+			}
 		default:
 			ok = false
 		}

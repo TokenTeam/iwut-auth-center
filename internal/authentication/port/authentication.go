@@ -8,14 +8,15 @@ import (
 )
 
 var (
-	ErrCredentialRegistered = errors.New("credential already registered")
-	ErrInvalidInput         = errors.New("invalid login input")
-	ErrAuthenticationFailed = errors.New("authentication failed")
-	ErrAlreadyCompleted     = errors.New("login already completed")
-	ErrSessionInvalid       = errors.New("session invalid")
-	ErrLimitExceeded        = errors.New("authentication limit exceeded")
-	ErrUnavailable          = errors.New("authentication unavailable")
-	ErrNotFound             = errors.New("authentication record not found")
+	ErrCredentialRegistered     = errors.New("credential already registered")
+	ErrInvalidInput             = errors.New("invalid login input")
+	ErrAuthenticationFailed     = errors.New("authentication failed")
+	ErrAlreadyCompleted         = errors.New("login already completed")
+	ErrSessionInvalid           = errors.New("session invalid")
+	ErrLimitExceeded            = errors.New("authentication limit exceeded")
+	ErrUnavailable              = errors.New("authentication unavailable")
+	ErrNotFound                 = errors.New("authentication record not found")
+	ErrCredentialReauthRequired = errors.New("credential reauthentication required")
 )
 
 type DeviceProtocol interface {

@@ -23,17 +23,15 @@ import (
 	authv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 	scopev1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/scope_catalog"
 	profilev1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/user_profile"
+	emailpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v3/email_account"
 	"github.com/go-kratos/kratos/v2"
 	"go.mongodb.org/mongo-driver/v2/bson"
-	drivermongo "go.mongodb.org/mongo-driver/v2/mongo"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"iwut-auth-center/internal/adapter/associationcrypto"
 	"iwut-auth-center/internal/adapter/deviceprotocol"
 	mongoadapter "iwut-auth-center/internal/adapter/mongo"
-	authdomain "iwut-auth-center/internal/authentication/domain"
 	"iwut-auth-center/internal/config"
 )
 
@@ -70,6 +68,7 @@ func TestE2E_UserEndpoints_ProductionWireAndColdRotation(t *testing.T) {
 		env["AUTH_ASSOC_LOOKUP_KEY"] = base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{lookup}, 32))
 	}
 	setKeys("v1", 1, 2)
+	capture := enableEmailRegistrationFixture(t, env)
 	load := func() config.Config {
 		t.Helper()
 		c, e := config.Load(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
@@ -102,11 +101,11 @@ func TestE2E_UserEndpoints_ProductionWireAndColdRotation(t *testing.T) {
 		t.Fatal(err)
 	}
 	studentToken := sha256.Sum256(deviceprotocol.Frame([]byte("iwut-student-association-v1"), []byte("0122256789101")))
-	first, proof := registerUser(t, authClient, device, studentToken[:])
+	first, proof := registerUser(t, connection, device, studentToken[:])
 	if first.AuthId == "" || first.CredentialId == "" || first.Session.AuthId != first.AuthId {
 		t.Fatal("registration identity mismatch")
 	}
-	if _, err := authClient.CompleteUserRegistration(t.Context(), proof); status.Code(err) != codes.AlreadyExists {
+	if _, err := emailpb.NewEmailAccountServiceClient(connection).CompleteEmailRegistration(t.Context(), proof); status.Code(err) != codes.AlreadyExists {
 		t.Fatalf("registration replay: %v", err)
 	}
 	sessionContext := sessionCallContext(t.Context(), first.Session.SessionToken)
@@ -155,6 +154,9 @@ func TestE2E_UserEndpoints_ProductionWireAndColdRotation(t *testing.T) {
 	if _, err := authClient.RevokeOwnCredential(sessionContext, &authv1.RevokeOwnCredentialRequest{CredentialId: first.CredentialId}); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("revoked session still authorizes: %v", err)
 	}
+	if _, err := authClient.RevokeOwnCredential(sessionCallContext(t.Context(), login.SessionToken), &authv1.RevokeOwnCredentialRequest{CredentialId: "87654321-1234-4234-8234-123456789abc"}); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("non-current credential bypassed dedicated reauthentication: %v", err)
+	}
 	if _, err := authClient.RevokeOwnCredential(sessionCallContext(t.Context(), login.SessionToken), &authv1.RevokeOwnCredentialRequest{CredentialId: first.CredentialId}); err != nil {
 		t.Fatal(err)
 	}
@@ -168,23 +170,19 @@ func TestE2E_UserEndpoints_ProductionWireAndColdRotation(t *testing.T) {
 	if _, err := authClient.CompleteDeviceLogin(t.Context(), &authv1.CompleteDeviceLoginRequest{OperationId: rejected.OperationId, Proof: &authv1.CredentialProof{Signature: signDevice(t, device, rejected.SigningPayload)}}); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("revoked credential login: %v", err)
 	}
-	before := readAssociationGroup(t, database)
 	stop()
 
-	// Cold update: the real production composition root must finish migration
-	// before we start the new listener, then operate using the new key only.
+	// Retired association ENV are ignored, even malformed leftovers cannot
+	// trigger migration or prevent an otherwise valid startup.
 	for _, suffix := range []string{"KEY_VERSION", "ENCRYPT_KEY", "LOOKUP_KEY"} {
 		env["AUTH_ASSOC_PREVIOUS_"+suffix] = env["AUTH_ASSOC_"+suffix]
 	}
 	setKeys("v2", 3, 4)
 	env[config.GRPCAddrEnv] = reserveAddress(t)
+	rememberRegistrationSMTP(t, env[config.GRPCAddrEnv], capture)
 	rotatedApp, rotatedCleanup, err := wireApp(load())
 	if err != nil {
 		t.Fatal(err)
-	}
-	after := readAssociationGroup(t, database)
-	if before["associationId"] != after["associationId"] || after["keyVersion"] != "v2" {
-		t.Fatalf("rotation changed association identity")
 	}
 	// Construction ran the gate, but no listener was started for this intermediate process.
 	_ = rotatedApp
@@ -202,24 +200,26 @@ func TestE2E_UserEndpoints_ProductionWireAndColdRotation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, _ := registerUser(t, authv1.NewAuthenticationServiceClient(currentConnection), secondDevice, studentToken[:])
+	second, _ := registerUser(t, currentConnection, secondDevice, studentToken[:])
 	if second.AuthId == first.AuthId {
 		t.Fatal("association silently merged accounts")
 	}
 	count, err := database.Collection(mongoadapter.AssociationCollection).CountDocuments(t.Context(), bson.M{})
-	if err != nil || count != 1 {
-		t.Fatalf("association not reused: %d %v", count, err)
+	if err != nil || count != 0 {
+		t.Fatalf("retired association written: %d %v", count, err)
 	}
 	count, err = database.Collection(mongoadapter.AssociationMemberCollection).CountDocuments(t.Context(), bson.M{})
-	if err != nil || count != 2 {
-		t.Fatalf("association members: %d %v", count, err)
+	if err != nil || count != 0 {
+		t.Fatalf("retired association member written: %d %v", count, err)
 	}
-	runHTTPUserFlow(t, "http://"+env[config.HTTPAddrEnv], identityKey)
+	runHTTPUserFlow(t, "http://"+env[config.HTTPAddrEnv], identityKey, capture)
 	currentStop()
 	setKeys("v2", 5, 6)
-	if _, unexpectedCleanup, err := wireApp(load()); err == nil {
-		unexpectedCleanup()
-		t.Fatal("startup accepted incorrect current keys")
+	env["AUTH_ASSOC_ENCRYPT_KEY"] = "malformed-retired-variable"
+	if _, finalCleanup, err := wireApp(load()); err != nil {
+		t.Fatal("retired keys blocked startup", err)
+	} else {
+		finalCleanup()
 	}
 }
 
@@ -264,27 +264,7 @@ func signDevice(t *testing.T, key *ecdsa.PrivateKey, payload []byte) []byte {
 	}
 	return signature
 }
-func registerUser(t *testing.T, client authv1.AuthenticationServiceClient, key *ecdsa.PrivateKey, token []byte) (*authv1.UserRegistrationResult, *authv1.CompleteUserRegistrationRequest) {
-	t.Helper()
-	public := elliptic.Marshal(elliptic.P256(), key.X, key.Y)
-	challenge, err := client.BeginUserRegistration(t.Context(), &authv1.BeginUserRegistrationRequest{CredentialProposal: &authv1.CredentialRegistrationProposal{ProtocolVersion: authdomain.ProtocolVersion, PublicKey: public}, Association: &authv1.StudentAssociationDeclaration{SchemeVersion: "iwut-student-association-v1", AssociationToken: token}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	protocol, _ := deviceprotocol.New("iwut-auth-center:test")
-	fingerprint, _ := protocol.Fingerprint(public)
-	associationDigest, _ := associationcrypto.Digest("iwut-student-association-v1", token)
-	expected, err := protocol.SigningPayload(authdomain.Operation{OperationID: challenge.OperationId, Purpose: authdomain.Register, ProtocolVersion: authdomain.ProtocolVersion, ServiceID: "iwut-auth-center:test", ApplicationID: authdomain.ApplicationID, Challenge: challenge.Challenge, ExpiresAt: time.UnixMilli(challenge.ExpiresAtUnixMs), LocatorKind: authdomain.FingerprintLocator, LocatorValue: fingerprint}, associationDigest)
-	if err != nil || !bytes.Equal(expected, challenge.SigningPayload) {
-		t.Fatal("unexpected registration signing context")
-	}
-	proof := &authv1.CompleteUserRegistrationRequest{OperationId: challenge.OperationId, Proof: &authv1.CredentialProof{Signature: signDevice(t, key, expected)}}
-	result, err := client.CompleteUserRegistration(t.Context(), proof)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return result, proof
-}
+
 func loginUser(t *testing.T, client authv1.AuthenticationServiceClient, key *ecdsa.PrivateKey, credentialID string) *authv1.SessionEstablished {
 	t.Helper()
 	challenge, err := client.BeginDeviceLogin(t.Context(), &authv1.BeginDeviceLoginRequest{CredentialLocator: &authv1.BeginDeviceLoginRequest_CredentialId{CredentialId: credentialID}})
@@ -309,12 +289,4 @@ func userCallContext(t *testing.T, key *rsa.PrivateKey, authID string) context.C
 		t.Fatal(err)
 	}
 	return metadata.NewOutgoingContext(t.Context(), metadata.Pairs("x-iwut-identity", body+"."+base64.RawURLEncoding.EncodeToString(signature)))
-}
-func readAssociationGroup(t *testing.T, db *drivermongo.Database) bson.M {
-	t.Helper()
-	var group bson.M
-	if err := db.Collection(mongoadapter.AssociationCollection).FindOne(t.Context(), bson.M{}).Decode(&group); err != nil {
-		t.Fatal(err)
-	}
-	return group
 }

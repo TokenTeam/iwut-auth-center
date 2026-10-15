@@ -23,6 +23,7 @@ import (
 	reauthuc "iwut-auth-center/internal/applicationclosereauth/usecase"
 	closured "iwut-auth-center/internal/applicationclosure/domain"
 	closureuc "iwut-auth-center/internal/applicationclosure/usecase"
+	pwduc "iwut-auth-center/internal/password/usecase"
 )
 
 func TestApplicationClosureMongoPermanentIdempotentTombstone(t *testing.T) {
@@ -35,6 +36,9 @@ func TestApplicationClosureMongoPermanentIdempotentTombstone(t *testing.T) {
 	applicationID := uuid.NewString()
 	closureID, _ := uuid.NewV7()
 	started := time.Now().UTC().Truncate(time.Millisecond)
+	if _, err := f.r.database.Collection(ApplicationUserStorageCollection).InsertOne(t.Context(), bson.M{"authId": uuid.NewString(), "applicationId": applicationID, "channel": "TEST", "revision": int64(1), "entries": bson.A{}, "updatedAt": started}); err != nil {
+		t.Fatal(err)
+	}
 	first, err := service.Apply(t.Context(), applicationID, closureID.String(), started, "app-center")
 	if err != nil {
 		t.Fatal(err)
@@ -57,6 +61,22 @@ func TestApplicationClosureMongoPermanentIdempotentTombstone(t *testing.T) {
 	if n, _ := f.r.database.Collection(ApplicationClosureAuditCollection).CountDocuments(t.Context(), bson.M{}); n != 1 {
 		t.Fatalf("audit count = %d", n)
 	}
+	if n, _ := f.r.database.Collection(ApplicationUserStorageCleanupTaskCollection).CountDocuments(t.Context(), bson.M{"applicationId": applicationID}); n != 1 {
+		t.Fatalf("storage cleanup task count = %d", n)
+	}
+	if err = repository.Tick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err = repository.Tick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := f.r.database.Collection(ApplicationUserStorageCollection).CountDocuments(t.Context(), bson.M{"applicationId": applicationID}); n != 0 {
+		t.Fatalf("storage rows after cleanup = %d", n)
+	}
+	var task applicationUserStorageCleanupTask
+	if err = f.r.database.Collection(ApplicationUserStorageCleanupTaskCollection).FindOne(t.Context(), bson.M{"applicationId": applicationID}).Decode(&task); err != nil || !task.Complete {
+		t.Fatalf("storage cleanup task = %#v, %v", task, err)
+	}
 	if err = VerifyApplicationClosureConsistency(t.Context(), f.r.database); err != nil {
 		t.Fatalf("restore consistency = %v", err)
 	}
@@ -76,6 +96,21 @@ func TestApplicationClosureMongoRejectsOrphanReceiptOnRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err = VerifyApplicationClosureConsistency(t.Context(), f.r.database); !errors.Is(err, closured.ErrInconsistent) {
+		t.Fatalf("consistency = %v", err)
+	}
+}
+
+func TestApplicationUserStorageCleanupRejectsOrphanTaskOnRestore(t *testing.T) {
+	f := newAuthenticationFixture(t)
+	if err := EnsureApplicationClosureSchema(t.Context(), f.r.database); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	_, err := f.r.database.Collection(ApplicationUserStorageCleanupTaskCollection).InsertOne(t.Context(), applicationUserStorageCleanupTask{ApplicationID: uuid.NewString(), ClosureID: uuid.NewString(), CreatedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = VerifyApplicationUserStorageCleanupConsistency(t.Context(), f.r.database); !errors.Is(err, closured.ErrInconsistent) {
 		t.Fatalf("consistency = %v", err)
 	}
 }
@@ -129,6 +164,11 @@ func TestApplicationClosureMongoConcurrentApplyHasOneReceipt(t *testing.T) {
 
 func TestApplicationCloseReauthMongoSameSessionDeviceAndStableProof(t *testing.T) {
 	f := newAuthenticationFixture(t)
+	pwd := attachPassword(t, f)
+	verifier, err := pwduc.NewReauth(pwd.repository, pwd.engine, pwd.quota)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := EnsureApplicationCloseReauthSchema(t.Context(), f.r.database); err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +180,7 @@ func TestApplicationCloseReauthMongoSameSessionDeviceAndStableProof(t *testing.T
 	repository, _ := NewApplicationCloseReauthRepository(f.r)
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
 	signer, _ := closereauthsigner.New("close-proof-key", key)
-	service, err := reauthuc.New(repository, f.p, signer, "https://auth.example.test")
+	service, err := reauthuc.New(repository, f.p, signer, "https://auth.example.test", verifier)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,11 +194,11 @@ func TestApplicationCloseReauthMongoSameSessionDeviceAndStableProof(t *testing.T
 		t.Fatal(err)
 	}
 	sig := signCloseReauth(t, f.key, payload)
-	proof, err := service.Complete(t.Context(), digest, challenge.OperationID, applicationID, sig)
+	proof, err := service.Complete(t.Context(), digest, challenge.OperationID, applicationID, sig, initialPassword, "127.0.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	retry, err := service.Complete(t.Context(), digest, challenge.OperationID, applicationID, sig)
+	retry, err := service.Complete(t.Context(), digest, challenge.OperationID, applicationID, sig, initialPassword, "127.0.0.1")
 	if err != nil || retry != proof {
 		t.Fatalf("retry = %#v, %v", retry, err)
 	}
@@ -173,7 +213,7 @@ func TestApplicationCloseReauthMongoSameSessionDeviceAndStableProof(t *testing.T
 	if err = f.r.database.Collection(ApplicationCloseReauthOperationCollection).FindOne(t.Context(), bson.M{"operationid": challenge.OperationID}).Decode(&stored); err != nil {
 		t.Fatal(err)
 	}
-	if stored.Lookup("proofjws").Type != 0 || stored.Lookup("signature").Type != 0 || stored.Lookup("signaturedigest").Type != bson.TypeBinary {
+	if stored.Lookup("proofjws").Type != 0 || stored.Lookup("signature").Type != 0 || stored.Lookup("password").Type != 0 || stored.Lookup("currentPassword").Type != 0 || stored.Lookup("passwordrevision").Type != bson.TypeInt64 || stored.Lookup("signaturedigest").Type != bson.TypeBinary {
 		t.Fatal("proof or signature persisted, or signature digest missing")
 	}
 	var audits []bson.M
@@ -182,13 +222,18 @@ func TestApplicationCloseReauthMongoSameSessionDeviceAndStableProof(t *testing.T
 		t.Fatal(err)
 	}
 	encoded, _ := json.Marshal(audits)
-	if strings.Contains(string(encoded), proof.JWS) || strings.Contains(string(encoded), base64.StdEncoding.EncodeToString(challenge.Challenge)) || strings.Contains(string(encoded), base64.StdEncoding.EncodeToString(sig)) {
+	if strings.Contains(string(encoded), initialPassword) || strings.Contains(string(encoded), proof.JWS) || strings.Contains(string(encoded), base64.StdEncoding.EncodeToString(challenge.Challenge)) || strings.Contains(string(encoded), base64.StdEncoding.EncodeToString(sig)) {
 		t.Fatal("secret material entered audit")
 	}
 }
 
 func TestApplicationCloseReauthMongoRejectsDifferentSessionAndRevocation(t *testing.T) {
 	f := newAuthenticationFixture(t)
+	pwd := attachPassword(t, f)
+	verifier, err := pwduc.NewReauth(pwd.repository, pwd.engine, pwd.quota)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := EnsureApplicationCloseReauthSchema(t.Context(), f.r.database); err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +244,7 @@ func TestApplicationCloseReauthMongoRejectsDifferentSessionAndRevocation(t *test
 	repository, _ := NewApplicationCloseReauthRepository(f.r)
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
 	signer, _ := closereauthsigner.New("close-proof-key", key)
-	service, _ := reauthuc.New(repository, f.p, signer, "issuer")
+	service, _ := reauthuc.New(repository, f.p, signer, "issuer", verifier)
 	app := uuid.NewString()
 	challenge, err := service.Begin(t.Context(), firstDigest, app)
 	if err != nil {
@@ -207,19 +252,24 @@ func TestApplicationCloseReauthMongoRejectsDifferentSessionAndRevocation(t *test
 	}
 	payload, _ := reauthuc.SigningPayload(challenge.OperationID, app, challenge.Challenge)
 	sig := signCloseReauth(t, f.key, payload)
-	if _, err = service.Complete(t.Context(), secondDigest, challenge.OperationID, app, sig); !errors.Is(err, reauthd.ErrFailed) {
+	if _, err = service.Complete(t.Context(), secondDigest, challenge.OperationID, app, sig, initialPassword, "127.0.0.1"); !errors.Is(err, reauthd.ErrFailed) {
 		t.Fatalf("different Session = %v", err)
 	}
 	if _, err = f.r.database.Collection(SessionCollection).UpdateOne(t.Context(), bson.M{"sessionId": first.SessionID}, bson.M{"$set": bson.M{"revokedAt": time.Now().UTC()}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = service.Complete(t.Context(), firstDigest, challenge.OperationID, app, sig); !errors.Is(err, reauthd.ErrFailed) {
+	if _, err = service.Complete(t.Context(), firstDigest, challenge.OperationID, app, sig, initialPassword, "127.0.0.1"); !errors.Is(err, reauthd.ErrFailed) {
 		t.Fatalf("revoked Session = %v", err)
 	}
 }
 
 func TestApplicationCloseReauthMongoPersistsBoundedFailureWithoutSecret(t *testing.T) {
 	f := newAuthenticationFixture(t)
+	pwd := attachPassword(t, f)
+	verifier, err := pwduc.NewReauth(pwd.repository, pwd.engine, pwd.quota)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := EnsureApplicationCloseReauthSchema(t.Context(), f.r.database); err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +278,7 @@ func TestApplicationCloseReauthMongoPersistsBoundedFailureWithoutSecret(t *testi
 	repository, _ := NewApplicationCloseReauthRepository(f.r)
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
 	signer, _ := closereauthsigner.New("close-proof-key", key)
-	service, _ := reauthuc.New(repository, f.p, signer, "issuer")
+	service, _ := reauthuc.New(repository, f.p, signer, "issuer", verifier)
 	app := uuid.NewString()
 	challenge, err := service.Begin(t.Context(), digest, app)
 	if err != nil {
@@ -237,7 +287,7 @@ func TestApplicationCloseReauthMongoPersistsBoundedFailureWithoutSecret(t *testi
 	payload, _ := reauthuc.SigningPayload(challenge.OperationID, app, challenge.Challenge)
 	wrongKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	signature := signCloseReauth(t, wrongKey, payload)
-	if _, err = service.Complete(t.Context(), digest, challenge.OperationID, app, signature); !errors.Is(err, reauthd.ErrFailed) {
+	if _, err = service.Complete(t.Context(), digest, challenge.OperationID, app, signature, initialPassword, "127.0.0.1"); !errors.Is(err, reauthd.ErrFailed) {
 		t.Fatalf("invalid signature = %v", err)
 	}
 	var stored closeReauthDocument
@@ -248,7 +298,7 @@ func TestApplicationCloseReauthMongoPersistsBoundedFailureWithoutSecret(t *testi
 		t.Fatalf("failed operation = %#v", stored)
 	}
 	var audit bson.M
-	if err = f.r.database.Collection(ApplicationCloseReauthAuditCollection).FindOne(t.Context(), bson.M{"operationId": challenge.OperationID, "result": "SIGNATURE_REJECTED"}).Decode(&audit); err != nil {
+	if err = f.r.database.Collection(ApplicationCloseReauthAuditCollection).FindOne(t.Context(), bson.M{"operationId": challenge.OperationID, "result": "AUTHENTICATION_REJECTED"}).Decode(&audit); err != nil {
 		t.Fatal(err)
 	}
 	encoded, _ := json.Marshal(audit)

@@ -3,51 +3,23 @@ package transport
 import (
 	"context"
 	"errors"
-	authpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 	pb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_binding"
 	kerrors "github.com/go-kratos/kratos/v2/errors"
-	kt "github.com/go-kratos/kratos/v2/transport"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	accountdomain "iwut-auth-center/internal/emailaccount/domain"
+	accountusecase "iwut-auth-center/internal/emailaccount/usecase"
 	d "iwut-auth-center/internal/emailbinding/domain"
-	"iwut-auth-center/internal/emailbinding/usecase"
 )
 
 type EmailBindingService struct {
 	pb.UnimplementedEmailBindingServiceServer
-	service *usecase.Service
+	account *accountusecase.Service
 }
 
-func NewEmailBindingService(s *usecase.Service) *EmailBindingService {
-	return &EmailBindingService{service: s}
-}
-func (s *EmailBindingService) authorize(ctx context.Context) ([]byte, error) {
-	if s == nil || s.service == nil {
-		return nil, transportStatus(codes.Unimplemented, "UNIMPLEMENTED", "email binding is disabled")
-	}
-	md, _ := metadata.FromIncomingContext(ctx)
-	values, present := md["x-iwut-session"]
-	if tr, ok := kt.FromServerContext(ctx); ok {
-		values = tr.RequestHeader().Values("x-iwut-session")
-		present = false
-		for _, key := range tr.RequestHeader().Keys() {
-			if equalHeader(key, "x-iwut-session") {
-				present = true
-				break
-			}
-		}
-	}
-	var token *string
-	if present {
-		if len(values) != 1 || !canonicalSessionToken(values[0]) {
-			return nil, emailError(d.ErrSession)
-		}
-		token = &values[0]
-	}
-	digest, e := s.service.Authorize(ctx, token)
-	return digest, emailError(e)
+func NewEmailBindingService(s *accountusecase.Service) *EmailBindingService {
+	return &EmailBindingService{account: s}
 }
 func equalHeader(a, b string) bool {
 	if len(a) != len(b) {
@@ -64,83 +36,35 @@ func equalHeader(a, b string) bool {
 	}
 	return true
 }
-func (s *EmailBindingService) BeginSetEmail(ctx context.Context, r *pb.BeginSetEmailRequest) (*pb.EmailVerificationStarted, error) {
-	digest, e := s.authorize(ctx)
-	if e != nil {
-		return nil, e
-	}
-	if e = checkEmailMessage(r); e != nil {
-		return nil, e
-	}
-	b := d.Begin{RequestID: r.GetRequestId(), Email: r.GetEmail(), Source: authenticationPeer(ctx)}
-	switch x := r.GetIntent().(type) {
-	case *pb.BeginSetEmailRequest_Binding:
-		if x.Binding == nil || x.Binding.ExpectedRevision == nil {
-			return nil, emailError(d.ErrInvalid)
-		}
-		b.Mode = d.Bind
-		b.Revision = x.Binding.ExpectedRevision
-	case *pb.BeginSetEmailRequest_Registration:
-		if x.Registration == nil || x.Registration.CredentialProposal == nil || x.Registration.Association == nil {
-			return nil, emailError(d.ErrInvalid)
-		}
-		b.Mode = d.Register
-		b.ProtocolVersion = x.Registration.CredentialProposal.ProtocolVersion
-		b.PublicKey = x.Registration.CredentialProposal.PublicKey
-		b.Scheme = x.Registration.Association.SchemeVersion
-		b.Token = x.Registration.Association.AssociationToken
-	default:
-		return nil, emailError(d.ErrInvalid)
-	}
-	result, e := s.service.Begin(ctx, b, digest)
-	if e != nil {
-		return nil, emailError(e)
-	}
-	o := result.Operation
-	out := &pb.EmailVerificationStarted{OperationId: o.Proof.OperationID, Mode: emailMode(o.Mode), TargetEmail: o.Email, ExpiresAtUnixMs: o.Proof.ExpiresAt.UnixMilli(), ResendAfterUnixMs: o.ResendAfter.UnixMilli()}
-	if o.Mode == d.Register {
-		out.RegistrationChallenge = &pb.EmailRegistrationChallenge{Challenge: o.Proof.Challenge, SigningPayload: result.SigningPayload, ProtocolVersion: d.ProtocolVersion}
-	}
-	return out, nil
+func NewEmailBindingProjection(s *accountusecase.Service) *EmailBindingService {
+	return &EmailBindingService{account: s}
 }
-func (s *EmailBindingService) CompleteSetEmail(ctx context.Context, r *pb.CompleteSetEmailRequest) (*pb.EmailActivated, error) {
-	digest, e := s.authorize(ctx)
-	if e != nil {
-		return nil, e
-	}
-	if e = checkEmailMessage(r); e != nil {
-		return nil, e
-	}
-	result, e := s.service.Complete(ctx, r.GetOperationId(), r.GetCode(), r.GetRegistrationProof().GetSignature(), r.GetRegistrationProof() != nil, digest)
-	if e != nil {
-		return nil, emailError(e)
-	}
-	out := &pb.EmailActivated{OperationId: result.OperationID, Mode: emailMode(result.Mode), Email: result.Email, VerifiedAtUnixMs: result.VerifiedAt.UnixMilli(), Revision: result.Revision}
-	if a := result.Registration; a != nil {
-		out.RegistrationResult = &authpb.UserRegistrationResult{AuthId: a.AuthID, CredentialId: a.CredentialID, Session: &authpb.SessionEstablished{AuthId: a.AuthID, CredentialId: a.CredentialID, SessionId: a.SessionID, SessionToken: a.SessionToken, ExpiresAtUnixMs: a.ExpiresAt.UnixMilli()}}
-	}
-	return out, nil
+func (s *EmailBindingService) BeginSetEmail(context.Context, *pb.BeginSetEmailRequest) (*pb.EmailVerificationStarted, error) {
+	return nil, transportStatus(codes.Unimplemented, "EMAIL_FLOW_RETIRED", "use email account v3")
+}
+func (s *EmailBindingService) CompleteSetEmail(context.Context, *pb.CompleteSetEmailRequest) (*pb.EmailActivated, error) {
+	return nil, transportStatus(codes.Unimplemented, "EMAIL_FLOW_RETIRED", "use email account v3")
 }
 func (s *EmailBindingService) GetOwnEmailBinding(ctx context.Context, r *pb.GetOwnEmailBindingRequest) (*pb.OwnEmailBinding, error) {
-	digest, e := s.authorize(ctx)
-	if e != nil {
-		return nil, e
+	if s == nil || s.account == nil {
+		return nil, transportStatus(codes.Unimplemented, "UNIMPLEMENTED", "email directory is disabled")
 	}
-	if e = checkEmailMessage(r); e != nil {
-		return nil, e
+	token, err := emailAccountCarrier(ctx, true)
+	if err != nil {
+		return nil, err
 	}
-	b, e := s.service.Own(ctx, digest)
-	if e != nil {
-		return nil, emailError(e)
+	if err = checkEmailMessage(r); err != nil {
+		return nil, err
 	}
-	out := &pb.OwnEmailBinding{Revision: b.Revision}
-	if b.Email != "" {
-		out.ActiveEmail = &pb.ActiveEmail{Email: b.Email, VerifiedAtUnixMs: b.VerifiedAt.UnixMilli()}
+	dir, err := s.account.Own(ctx, token, authenticationPeer(ctx))
+	if err != nil {
+		return nil, emailAccountError(err)
 	}
-	if p := b.Pending; p != nil {
-		out.Pending = &pb.PendingEmailBinding{OperationId: p.Proof.OperationID, TargetEmail: p.Email, ExpiresAtUnixMs: p.Proof.ExpiresAt.UnixMilli(), ResendAfterUnixMs: p.ResendAfter.UnixMilli()}
+	b, ok := dir.Primary()
+	if !ok {
+		return nil, emailAccountError(accountdomain.ErrUnavailable)
 	}
-	return out, nil
+	return &pb.OwnEmailBinding{Revision: dir.LoginRoleRevision, ActiveEmail: &pb.ActiveEmail{Email: b.Email, VerifiedAtUnixMs: b.VerifiedAt.UnixMilli()}}, nil
 }
 func emailMode(s string) pb.EmailMode {
 	if s == d.Register {

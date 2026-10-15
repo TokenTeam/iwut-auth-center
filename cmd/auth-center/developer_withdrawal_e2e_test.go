@@ -16,7 +16,6 @@ import (
 	authpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 	devpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_application"
 	pb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_withdrawal"
-	emailpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_binding"
 	identitypb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/identity"
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -37,7 +36,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -111,6 +109,7 @@ func newOwnerExitWireFixture(t *testing.T, overrides ...map[string]string) *owne
 			env[k] = v
 		}
 	}
+	enableEmailRegistrationFixture(t, env, capture)
 	load := func() config.Config {
 		c, e := config.Load(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
 		if e != nil {
@@ -140,23 +139,10 @@ func (f *ownerExitWireFixture) RegisterDeveloper(t *testing.T, handle string) *a
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	association := make([]byte, 32)
 	_, _ = rand.Read(association)
-	user, _ := registerUser(t, authpb.NewAuthenticationServiceClient(f.Conn), key, association)
+	user, _ := registerUser(t, f.Conn, key, association)
 	ctx := sessionCallContext(t.Context(), user.Session.SessionToken)
-	zero := int64(0)
-	email := emailpb.NewEmailBindingServiceClient(f.Conn)
-	challenge, e := email.BeginSetEmail(ctx, &emailpb.BeginSetEmailRequest{RequestId: uuid.NewString(), Email: handle + "@example.test", Intent: &emailpb.BeginSetEmailRequest_Binding{Binding: &emailpb.BindEmailIntent{ExpectedRevision: &zero}}})
-	if e != nil {
-		t.Fatal(e)
-	}
-	mail := f.Capture.Next(t)
-	matches := regexp.MustCompile(`Verification code: ([0-9]{8})`).FindStringSubmatch(mail.Body)
-	if len(matches) != 2 {
-		t.Fatal("missing email code")
-	}
-	if _, e = email.CompleteSetEmail(ctx, &emailpb.CompleteSetEmailRequest{OperationId: challenge.OperationId, Code: matches[1]}); e != nil {
-		t.Fatal(e)
-	}
-	if _, e = devpb.NewDeveloperApplicationServiceClient(f.Conn).ApplyForDeveloper(ctx, &devpb.ApplyForDeveloperRequest{DeveloperHandle: handle}); e != nil {
+	addAndSwitchLoginEmail(t, f.Conn, user.Session.SessionToken, handle+"@example.test")
+	if _, e := devpb.NewDeveloperApplicationServiceClient(f.Conn).ApplyForDeveloper(ctx, &devpb.ApplyForDeveloperRequest{DeveloperHandle: handle}); e != nil {
 		t.Fatal(e)
 	}
 	return user
@@ -238,7 +224,7 @@ func TestDeveloperWithdrawalE2EActualApp(t *testing.T) {
 	if got := identityPayload(t, f.Issue(t, user, "iwut-app-center"))["developer_status"]; got != "WITHDRAWN" {
 		t.Fatal(got)
 	}
-	if _, e = devpb.NewDeveloperApplicationServiceClient(f.Conn).ApplyForDeveloper(ctx, &devpb.ApplyForDeveloperRequest{DeveloperHandle: "withdrawer"}); status.Code(e) != codes.PermissionDenied {
+	if _, e := devpb.NewDeveloperApplicationServiceClient(f.Conn).ApplyForDeveloper(ctx, &devpb.ApplyForDeveloperRequest{DeveloperHandle: "withdrawer"}); status.Code(e) != codes.PermissionDenied {
 		t.Fatal("withdrawn reapplied", e)
 	}
 	decision := ownerpb.NewAccountOwnerExitDecisionServiceClient(f.Conn)

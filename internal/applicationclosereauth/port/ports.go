@@ -10,7 +10,7 @@ import (
 type Repository interface {
 	Begin(context.Context, []byte, string, string, []byte, time.Time, time.Time) (d.Operation, error)
 	ReadForComplete(context.Context, []byte, string, string, time.Time) (d.Operation, error)
-	Complete(context.Context, []byte, string, string, []byte, d.Claims, time.Time) (d.Operation, error)
+	Complete(context.Context, []byte, string, string, []byte, int64, d.Claims, time.Time) (d.Operation, error)
 	Fail(context.Context, string, time.Time) error
 }
 

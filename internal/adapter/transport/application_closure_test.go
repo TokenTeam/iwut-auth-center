@@ -83,7 +83,7 @@ func (h *closeReauthHandlerStub) Begin(_ context.Context, digest []byte, app str
 	h.digest, h.app = append([]byte(nil), digest...), app
 	return reauthd.Challenge{OperationID: uuid.NewString(), Challenge: bytes.Repeat([]byte{0x42}, 32), ExpiresAt: time.Now().UTC().Add(5 * time.Minute)}, nil
 }
-func (h *closeReauthHandlerStub) Complete(context.Context, []byte, string, string, []byte) (reauthd.Proof, error) {
+func (h *closeReauthHandlerStub) Complete(context.Context, []byte, string, string, []byte, string, string) (reauthd.Proof, error) {
 	return reauthd.Proof{JWS: "header.payload.signature", ExpiresAt: time.Now().UTC().Add(5 * time.Minute)}, nil
 }
 

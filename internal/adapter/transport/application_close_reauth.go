@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"time"
+	"unicode/utf8"
 
 	pb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/application_close_reauth"
 	kerrors "github.com/go-kratos/kratos/v2/errors"
@@ -20,7 +21,7 @@ import (
 
 type ApplicationCloseReauthHandler interface {
 	Begin(context.Context, []byte, string) (d.Challenge, error)
-	Complete(context.Context, []byte, string, string, []byte) (d.Proof, error)
+	Complete(context.Context, []byte, string, string, []byte, string, string) (d.Proof, error)
 }
 
 type ApplicationCloseReauthAdmission interface {
@@ -110,7 +111,10 @@ func (s *ApplicationCloseReauthService) CompleteApplicationCloseReauth(ctx conte
 	if !s.limiter.AllowLocator(base64.RawURLEncoding.EncodeToString(digest), time.Now().UTC()) {
 		return nil, closeReauthError(ctx, d.ErrRate)
 	}
-	v, err := s.handler.Complete(ctx, digest, r.OperationId, r.ApplicationId, r.SignatureDer)
+	if r.CurrentPassword == "" || len(r.CurrentPassword) > 1024 || !utf8.ValidString(r.CurrentPassword) {
+		return nil, closeReauthError(ctx, d.ErrInvalid)
+	}
+	v, err := s.handler.Complete(ctx, digest, r.OperationId, r.ApplicationId, r.SignatureDer, r.CurrentPassword, authenticationPeer(ctx))
 	if err != nil {
 		return nil, closeReauthError(ctx, err)
 	}

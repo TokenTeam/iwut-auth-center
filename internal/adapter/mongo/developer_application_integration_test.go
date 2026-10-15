@@ -3,6 +3,7 @@ package mongo
 import (
 	"context"
 	"errors"
+	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	m "go.mongodb.org/mongo-driver/v2/mongo"
 	d "iwut-auth-center/internal/developer/domain"
@@ -18,14 +19,18 @@ func developerFixture(t *testing.T) (*DeveloperApplicationRepository, *m.Databas
 	if err := EnsureDeveloperApplicationSchema(t.Context(), db); err != nil {
 		t.Fatal(err)
 	}
-	if err := EnsureEmailSchema(t.Context(), db); err != nil {
+	if err := EnsureEmailAccountSchema(t.Context(), db); err != nil {
 		t.Fatal(err)
 	}
 	_, err := db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": s.AuthID}, bson.M{"$set": bson.M{"developerStatus": nil, "developerRevision": int64(0), "permissions": bson.A{"future.permission"}, "permissionRevision": int64(5), "profile": bson.M{"field": "kept"}, "associationGroupId": "kept"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.Collection(EmailBindingCollection).InsertOne(t.Context(), bindingDocument{AuthID: s.AuthID, Email: "student@example.test", Revision: 2, VerifiedAt: time.Now().UTC()})
+	bindingID := uuid.NewString()
+	if _, err = db.Collection(EmailDirectoryCollection).InsertOne(t.Context(), emailDirectoryDocument{AuthID: s.AuthID, LoginBindingID: bindingID, Revision: 2, LoginRoleRevision: 2, VerifiedCount: 1}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Collection(EmailBindingCollection).InsertOne(t.Context(), emailBindingDocument{BindingID: bindingID, AuthID: s.AuthID, Email: "student@example.test", VerifiedAt: time.Now().UTC()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +173,7 @@ func TestDeveloperMongoHistoricalAndCorruptState(t *testing.T) {
 	}{
 		{"missing email", EmailBindingCollection, bson.M{"revision": int64(0), "email": nil}, d.ErrApplicationUnavailable},
 		{"unverified", EmailBindingCollection, bson.M{"verifiedAt": nil}, d.ErrApplicationUnavailable},
-		{"wrong revision type", EmailBindingCollection, bson.M{"revision": int32(1)}, d.ErrApplicationUnavailable},
+		{"wrong revision type", EmailDirectoryCollection, bson.M{"revision": int32(1)}, d.ErrApplicationUnavailable},
 		{"unknown status", PrincipalCollection, bson.M{"developerStatus": "UNKNOWN"}, d.ErrApplicationUnavailable},
 		{"status missing type", PrincipalCollection, bson.M{"developerStatus": 12}, d.ErrApplicationUnavailable},
 		{"disabled", PrincipalCollection, bson.M{"accountStatus": "DISABLED"}, d.ErrApplicationSession},
@@ -200,12 +205,12 @@ func TestDeveloperMongoHistoricalAndCorruptState(t *testing.T) {
 			t.Fatal(n, e)
 		}
 	})
-	t.Run("pending only", func(t *testing.T) {
+	t.Run("malformed directory has no login fallback", func(t *testing.T) {
 		r, db, s := developerFixture(t)
 		if _, e := db.Collection(EmailBindingCollection).ReplaceOne(t.Context(), bson.M{"authId": s.AuthID}, bindingDocument{AuthID: s.AuthID, Revision: 0, PendingID: "proposal"}); e != nil {
 			t.Fatal(e)
 		}
-		if _, e := r.Evaluate(t.Context(), s.TokenDigest, developerApply); !errors.Is(e, d.ErrEmailRequired) {
+		if _, e := r.Evaluate(t.Context(), s.TokenDigest, developerApply); !errors.Is(e, d.ErrApplicationUnavailable) {
 			t.Fatal(e)
 		}
 	})
@@ -242,7 +247,11 @@ func TestDeveloperMongoUsesSharedSessionAndEmailFence(t *testing.T) {
 					return
 				}
 				mutation <- r.authentication.WithAuthTransaction(t.Context(), func(tx context.Context) error {
-					_, e := db.Collection(EmailBindingCollection).UpdateOne(tx, bson.M{"authId": s.AuthID}, bson.M{"$set": bson.M{"email": "changed@example.test", "revision": int64(3), "verifiedAt": time.Now()}})
+					_, e := db.Collection(EmailBindingCollection).UpdateOne(tx, bson.M{"authId": s.AuthID}, bson.M{"$set": bson.M{"email": "changed@example.test", "verifiedAt": time.Now()}})
+					if e != nil {
+						return e
+					}
+					_, e = db.Collection(EmailDirectoryCollection).UpdateOne(tx, bson.M{"authId": s.AuthID}, bson.M{"$inc": bson.M{"revision": int64(1), "loginRoleRevision": int64(1)}})
 					return e
 				})
 			}()
@@ -288,6 +297,10 @@ func TestDeveloperMongoUsesSharedSessionAndEmailFence(t *testing.T) {
 		r, db, s := developerFixture(t)
 		if e := r.authentication.WithAuthTransaction(t.Context(), func(tx context.Context) error {
 			_, e := db.Collection(EmailBindingCollection).UpdateOne(tx, bson.M{"authId": s.AuthID}, bson.M{"$set": bson.M{"email": "new@example.test", "revision": int64(3), "verifiedAt": time.Now()}})
+			if e != nil {
+				return e
+			}
+			_, e = db.Collection(EmailDirectoryCollection).UpdateOne(tx, bson.M{"authId": s.AuthID}, bson.M{"$inc": bson.M{"revision": int64(1), "loginRoleRevision": int64(1)}})
 			return e
 		}); e != nil {
 			t.Fatal(e)

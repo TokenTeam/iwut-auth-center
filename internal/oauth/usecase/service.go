@@ -81,6 +81,11 @@ func (s *Service) catalog(tx port.Tx) (d.Catalog, error) {
 	if c.Revision <= 0 || c.GeneratedAt.IsZero() {
 		return c, d.ErrUnavailable
 	}
+	for _, scope := range c.Scopes {
+		if !scope.ValidMetadata() {
+			return c, d.ErrUnavailable
+		}
+	}
 	return c, nil
 }
 func (s *Service) checkScopes(tx port.Tx, rt d.Runtime, scopes []string) (d.Catalog, error) {
@@ -94,7 +99,10 @@ func (s *Service) checkScopes(tx port.Tx, rt d.Runtime, scopes []string) (d.Cata
 	return c, nil
 }
 func (s *Service) fresh(rt d.Runtime) error {
-	if !rt.Fresh(s.now()) {
+	return s.freshAt(rt, s.now())
+}
+func (s *Service) freshAt(rt d.Runtime, observedAt time.Time) error {
+	if !rt.Fresh(observedAt) {
 		return d.ErrUnavailable
 	}
 	return nil

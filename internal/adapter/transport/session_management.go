@@ -99,6 +99,10 @@ func (s *SessionManagementService) ListOwnSessions(ctx context.Context, r *pb.Li
 			method = pb.AuthenticationMethod_DEVICE_CREDENTIAL
 		case "EMAIL_CODE_AND_DEVICE":
 			method = pb.AuthenticationMethod_EMAIL_CODE_AND_DEVICE
+		case "PASSWORD_AND_DEVICE":
+			method = pb.AuthenticationMethod_PASSWORD_AND_DEVICE
+		case "PASSWORD_AND_SESSION":
+			method = pb.AuthenticationMethod_PASSWORD_AND_SESSION
 		default:
 			return nil, sessionManagementError(ctx, d.ErrUnavailable)
 		}

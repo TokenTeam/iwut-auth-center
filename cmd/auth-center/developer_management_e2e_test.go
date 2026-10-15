@@ -8,6 +8,7 @@ import (
 	authpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 	pb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_management"
 	statuspb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_status"
+	emailpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_binding"
 	profilepb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/user_profile"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"google.golang.org/grpc"
@@ -24,6 +25,10 @@ import (
 
 func runDeveloperManagementFlow(t *testing.T, env map[string]string, conn *grpc.ClientConn, user *authpb.UserRegistrationResult, issue func(string) string, keyFile string, serviceKey *rsa.PrivateKey) string {
 	t.Helper()
+	binding, err := emailpb.NewEmailBindingServiceClient(conn).GetOwnEmailBinding(sessionCallContext(t.Context(), user.Session.SessionToken), &emailpb.GetOwnEmailBindingRequest{})
+	if err != nil || binding.ActiveEmail == nil || binding.ActiveEmail.Email == "" || binding.ActiveEmail.VerifiedAtUnixMs <= 0 {
+		t.Fatal("verified-email-first registration prerequisite missing", binding, err)
+	}
 	client := pb.NewDeveloperManagementServiceClient(conn)
 	ordinary := issue("iwut-auth-center")
 	userContext := func(token string) context.Context {
@@ -109,6 +114,8 @@ func runDeveloperManagementFlow(t *testing.T, env map[string]string, conn *grpc.
 }
 func runDeveloperManagementRecoveryClosed(t *testing.T, conn *grpc.ClientConn, authID, identity string) {
 	t.Helper()
+	// Registration already established a verified email. This deployment closes
+	// recovery readiness; it must not be modeled as an email-missing account.
 	ctx := metadata.NewOutgoingContext(t.Context(), metadata.Pairs("x-iwut-identity", identity))
 	client := pb.NewDeveloperManagementServiceClient(conn)
 	if _, e := client.ManageDeveloperStatus(ctx, &pb.ManageDeveloperStatusRequest{SubjectAuthId: authID, Action: pb.Action_SUSPEND, ExpectedDeveloperRevision: proto.Int64(3), Reason: "no recovery deployment"}); e != nil {
@@ -116,5 +123,9 @@ func runDeveloperManagementRecoveryClosed(t *testing.T, conn *grpc.ClientConn, a
 	}
 	if _, e := client.ManageDeveloperStatus(ctx, &pb.ManageDeveloperStatusRequest{SubjectAuthId: authID, Action: pb.Action_RESTORE, ExpectedDeveloperRevision: proto.Int64(4), Reason: "blocked"}); status.Code(e) != codes.FailedPrecondition {
 		t.Fatal(e)
+	}
+	state, err := client.GetManagedDeveloperStatus(ctx, &pb.GetManagedDeveloperStatusRequest{SubjectAuthId: authID})
+	if err != nil || state.DeveloperRevision != 4 || state.DeveloperStatus != pb.DeveloperStatus_SUSPENDED || state.AccountStatus != pb.AccountStatus_ACTIVE {
+		t.Fatal("blocked restore mutated developer/account state", state, err)
 	}
 }

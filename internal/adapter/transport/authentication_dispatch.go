@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/proto"
 
+	academicyearpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/academic_year_policy"
 	applicationoperationspb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/application_operations_permission"
 	authv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 	reviewerpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/reviewer_permission"
@@ -24,7 +25,7 @@ func userEndpointAuthenticationMiddleware(service *ServiceIdentityVerifier, prof
 	return func(handler middleware.Handler) middleware.Handler {
 		internal := serviceIdentityMiddleware(service)(handler)
 		return func(ctx context.Context, request any) (any, error) {
-			if tr, ok := kratostransport.FromServerContext(ctx); ok && (emailMethod(tr.Operation()) || emailLoginMethod(tr.Operation()) || accountClosureMethod(tr.Operation()) || applicationCloseReauthMethod(tr.Operation())) {
+			if tr, ok := kratostransport.FromServerContext(ctx); ok && (emailAccountMethod(tr.Operation()) || emailMethod(tr.Operation()) || emailLoginMethod(tr.Operation()) || campusCertificationMethod(tr.Operation()) || accountClosureMethod(tr.Operation()) || applicationCloseReauthMethod(tr.Operation())) {
 				return handler(ctx, request)
 			}
 			if !enabled {
@@ -34,10 +35,10 @@ func userEndpointAuthenticationMiddleware(service *ServiceIdentityVerifier, prof
 			if !ok {
 				return nil, transportStatus(codes.Unauthenticated, "AUTHENTICATION_FAILED", "authentication context is required")
 			}
-			if sessionManagementMethod(tr.Operation()) || developerWithdrawalMethod(tr.Operation()) || developerApplicationMethod(tr.Operation()) || oauthGrantMethod(tr.Operation()) {
+			if credentialManagementMethod(tr.Operation()) || sessionManagementMethod(tr.Operation()) || developerWithdrawalMethod(tr.Operation()) || developerApplicationMethod(tr.Operation()) || oauthGrantMethod(tr.Operation()) {
 				return handler(ctx, request)
 			}
-			if isPlatformAdministratorOperation(tr.Operation()) || accountManagementMethod(tr.Operation()) || isDeveloperManagementOperation(tr.Operation()) || applicationOperationsPermissionMethod(tr.Operation()) {
+			if isPlatformAdministratorOperation(tr.Operation()) || academicYearPolicyMethod(tr.Operation()) || accountManagementMethod(tr.Operation()) || isDeveloperManagementOperation(tr.Operation()) || applicationOperationsPermissionMethod(tr.Operation()) || applicationUserStorageMethod(tr.Operation()) {
 				if profile == nil {
 					return nil, accountError(account.ErrIdentity)
 				}
@@ -45,8 +46,9 @@ func userEndpointAuthenticationMiddleware(service *ServiceIdentityVerifier, prof
 			}
 			switch tr.Operation() {
 			case authv1.AuthenticationService_BeginUserRegistration_FullMethodName,
-				authv1.AuthenticationService_CompleteUserRegistration_FullMethodName,
-				authv1.AuthenticationService_BeginDeviceLogin_FullMethodName,
+				authv1.AuthenticationService_CompleteUserRegistration_FullMethodName:
+				return nil, transportStatus(codes.Unimplemented, "REGISTRATION_RETIRED", "use email registration")
+			case authv1.AuthenticationService_BeginDeviceLogin_FullMethodName,
 				authv1.AuthenticationService_CompleteDeviceLogin_FullMethodName,
 				authv1.AuthenticationService_RevokeCurrentSession_FullMethodName:
 				if err := checkAuthenticationMessageSize(request, limit); err != nil {
@@ -68,6 +70,8 @@ func userEndpointAuthenticationMiddleware(service *ServiceIdentityVerifier, prof
 				reviewerpb.ReviewerPermissionService_GetReviewerPermission_FullMethodName,
 				reviewerpb.ReviewerPermissionService_ManageApplicationReviewPermission_FullMethodName,
 				reviewerpb.ReviewerPermissionService_GetApplicationReviewPermissions_FullMethodName,
+				academicyearpb.AcademicYearPolicyService_GetAcademicYearSchedule_FullMethodName,
+				academicyearpb.AcademicYearPolicyService_UpdateNextAcademicYearRollover_FullMethodName,
 				applicationoperationspb.ApplicationOperationsPermissionService_ManageApplicationOperationsPermission_FullMethodName,
 				applicationoperationspb.ApplicationOperationsPermissionService_GetApplicationOperationsPermissions_FullMethodName:
 				if profile == nil {

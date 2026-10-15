@@ -11,6 +11,7 @@ import (
 	d "iwut-auth-center/internal/accountclosure/domain"
 	admin "iwut-auth-center/internal/administrator/domain"
 	owner "iwut-auth-center/internal/ownerexit/domain"
+	password "iwut-auth-center/internal/password/domain"
 	"math"
 	"slices"
 	"time"
@@ -66,7 +67,7 @@ func (r *AccountClosureRepository) read(ctx context.Context, id string) (d.Opera
 	if e != nil {
 		return d.Operation{}, e
 	}
-	if !identityFields(raw, map[string]bson.Type{"accountRevision": bson.TypeInt64, "developerRevision": bson.TypeInt64, "permissionRevision": bson.TypeInt64, "acceptable": bson.TypeBoolean, "ledgerConfirmed": bson.TypeBoolean, "localCleanupComplete": bson.TypeBoolean}) || bson.Unmarshal(raw, &doc) != nil {
+	if !identityFields(raw, map[string]bson.Type{"accountRevision": bson.TypeInt64, "passwordRevision": bson.TypeInt64, "developerRevision": bson.TypeInt64, "permissionRevision": bson.TypeInt64, "acceptable": bson.TypeBoolean, "ledgerConfirmed": bson.TypeBoolean, "localCleanupComplete": bson.TypeBoolean}) || bson.Unmarshal(raw, &doc) != nil {
 		return d.Operation{}, d.ErrUnavailable
 	}
 	o := d.Operation(doc)
@@ -77,6 +78,9 @@ func (r *AccountClosureRepository) read(ctx context.Context, id string) (d.Opera
 		return o, d.ErrUnavailable
 	}
 	if o.Acceptable && (!owner.ValidAuthID(o.AuthID) || o.AccountRevision <= 0) {
+		return o, d.ErrUnavailable
+	}
+	if o.PasswordRevision < 0 || ((o.State == d.Ready || o.TerminatedAt != nil) && o.PasswordRevision == 0) {
 		return o, d.ErrUnavailable
 	}
 	return o, nil
@@ -100,10 +104,14 @@ func (r *AccountClosureRepository) Begin(ctx context.Context, o d.Operation) (d.
 		var old closureOperationDocument
 		e = r.auth.database.Collection(AccountClosureCollection).FindOne(tx, bson.M{"requestId": o.RequestID}).Decode(&old)
 		if e == nil {
-			if old.LocatorKind != o.LocatorKind || !bytes.Equal(old.LocatorValue, o.LocatorValue) {
+			previous, err := r.read(tx, old.OperationID)
+			if err != nil {
+				return err
+			}
+			if previous.LocatorKind != o.LocatorKind || !bytes.Equal(previous.LocatorValue, o.LocatorValue) {
 				return d.ErrConflict
 			}
-			out = d.Operation(old)
+			out = previous
 			return nil
 		}
 		if !errors.Is(e, m.ErrNoDocuments) {
@@ -124,9 +132,10 @@ func (r *AccountClosureRepository) Begin(ctx context.Context, o d.Operation) (d.
 			query["fingerprint"] = o.LocatorValue
 		}
 		var c CredentialDocument
-		e = r.auth.database.Collection(CredentialCollection).FindOne(tx, query).Decode(&c)
+		credentialRaw, err := r.auth.database.Collection(CredentialCollection).FindOne(tx, query).Raw()
+		e = err
 		if e == nil {
-			if !validCredential(c) {
+			if !identityFields(credentialRaw, map[string]bson.Type{"credentialRevision": bson.TypeInt64}) || bson.Unmarshal(credentialRaw, &c) != nil || !validCredential(c) {
 				return d.ErrUnavailable
 			}
 			var raw bson.Raw
@@ -134,7 +143,7 @@ func (r *AccountClosureRepository) Begin(ctx context.Context, o d.Operation) (d.
 			if e == nil {
 				state := raw.Lookup("accountStatus")
 				if state.Type == bson.TypeString && (state.StringValue() == "ACTIVE" || state.StringValue() == "DISABLED") {
-					if !identityFields(raw, map[string]bson.Type{"principalType": bson.TypeString, "accountRevision": bson.TypeInt64}) {
+					if !identityFields(raw, map[string]bson.Type{"principalType": bson.TypeString, "accountRevision": bson.TypeInt64, "minimumCredentialRevision": bson.TypeInt64}) {
 						return d.ErrUnavailable
 					}
 					if raw.Lookup("principalType").StringValue() == "USER" {
@@ -142,7 +151,11 @@ func (r *AccountClosureRepository) Begin(ctx context.Context, o d.Operation) (d.
 						out.CredentialID = c.CredentialID
 						out.PublicKey = c.PublicKey
 						out.AccountRevision = raw.Lookup("accountRevision").Int64()
-						out.Acceptable = out.AccountRevision > 0
+						minimum := raw.Lookup("minimumCredentialRevision").Int64()
+						if out.AccountRevision <= 0 || minimum <= 0 || minimum > out.AccountRevision || c.CredentialRevision > out.AccountRevision {
+							return d.ErrUnavailable
+						}
+						out.Acceptable = password.EligibleCredential(c.CredentialRevision, minimum, out.AccountRevision)
 					}
 				}
 			} else if !errors.Is(e, m.ErrNoDocuments) {
@@ -191,16 +204,37 @@ func (r *AccountClosureRepository) snapshot(ctx context.Context, o d.Operation) 
 		return o, "", d.ErrConflict
 	}
 	var c CredentialDocument
-	e = r.auth.database.Collection(CredentialCollection).FindOne(ctx, bson.M{"credentialId": o.CredentialID, "authId": o.AuthID, "revokedAt": nil}).Decode(&c)
+	credentialRaw, err := r.auth.database.Collection(CredentialCollection).FindOne(ctx, bson.M{"credentialId": o.CredentialID, "authId": o.AuthID, "revokedAt": nil}).Raw()
+	e = err
 	if errors.Is(e, m.ErrNoDocuments) {
 		return o, "", d.ErrProof
 	}
 	if e != nil {
 		return o, "", e
 	}
-	if !validCredential(c) || !bytes.Equal(c.PublicKey, o.PublicKey) {
+	if !identityFields(credentialRaw, map[string]bson.Type{"credentialRevision": bson.TypeInt64}) || bson.Unmarshal(credentialRaw, &c) != nil || !validCredential(c) {
+		return o, "", d.ErrUnavailable
+	}
+	minimum := raw.Lookup("minimumCredentialRevision")
+	if minimum.Type != bson.TypeInt64 {
+		return o, "", d.ErrUnavailable
+	}
+	if minimum.Int64() <= 0 || minimum.Int64() > o.AccountRevision || c.CredentialRevision > o.AccountRevision {
+		return o, "", d.ErrUnavailable
+	}
+	if !password.EligibleCredential(c.CredentialRevision, minimum.Int64(), o.AccountRevision) || !bytes.Equal(c.PublicKey, o.PublicKey) {
 		return o, "", d.ErrProof
 	}
+	// Argon verification is performed outside transaction retries. This strict
+	// revision read binds its private attestation to the final Auth decision.
+	passwordRecord, e := (&PasswordRepository{auth: r.auth}).readPasswordTx(ctx, o.AuthID)
+	if e != nil {
+		return o, "", d.ErrUnavailable
+	}
+	if o.PasswordRevision > 0 && o.PasswordRevision != passwordRecord.Revision {
+		return o, "", d.ErrProof
+	}
+	o.PasswordRevision = passwordRecord.Revision
 	o.DeveloperRevision = raw.Lookup("developerRevision").Int64()
 	o.PermissionRevision = raw.Lookup("permissionRevision").Int64()
 	if o.DeveloperRevision < 0 || o.PermissionRevision <= 0 {
@@ -257,12 +291,30 @@ func (r *AccountClosureRepository) snapshot(ctx context.Context, o d.Operation) 
 	if e = cur.Err(); e != nil {
 		return o, "", e
 	}
-	binding, e := r.auth.database.Collection(EmailBindingCollection).FindOne(ctx, bson.M{"authId": o.AuthID}, options.FindOne().SetProjection(bson.M{"_id": 0})).Raw()
-	if e == nil {
-		hash.Write(binding)
-	} else if !errors.Is(e, m.ErrNoDocuments) {
-		return o, "", e
+	// Hash every bounded email binding and the separate login-role directory.
+	bindings, err := r.auth.database.Collection(EmailBindingCollection).Find(ctx, bson.M{"authId": o.AuthID}, options.Find().SetSort(bson.D{{Key: "bindingId", Value: 1}}).SetProjection(bson.M{"_id": 0}).SetLimit(11))
+	if err != nil {
+		return o, "", err
 	}
+	defer bindings.Close(ctx)
+	count := 0
+	for bindings.Next(ctx) {
+		count++
+		if count > 10 {
+			return o, "", d.ErrUnavailable
+		}
+		hash.Write(bindings.Current)
+	}
+	if err = bindings.Err(); err != nil {
+		return o, "", err
+	}
+	directory, err := r.auth.database.Collection(EmailDirectoryCollection).FindOne(ctx, bson.M{"authId": o.AuthID}, options.FindOne().SetProjection(bson.M{"_id": 0})).Raw()
+	if err == nil {
+		hash.Write(directory)
+	} else if !errors.Is(err, m.ErrNoDocuments) {
+		return o, "", err
+	}
+
 	o.MutationDigest = hash.Sum(nil)
 	return o, blocker, nil
 }
@@ -280,7 +332,7 @@ func (r *AccountClosureRepository) cancelTx(tx context.Context, o *d.Operation, 
 	o.State = d.Cancelled
 	return r.save(tx, *o)
 }
-func (r *AccountClosureRepository) Prepare(ctx context.Context, id string, now time.Time) (d.Operation, owner.Operation, error) {
+func (r *AccountClosureRepository) Prepare(ctx context.Context, id string, passwordRevision int64, now time.Time) (d.Operation, owner.Operation, error) {
 	var out d.Operation
 	var owned owner.Operation
 	var after error
@@ -292,7 +344,7 @@ func (r *AccountClosureRepository) Prepare(ctx context.Context, id string, now t
 		if e != nil {
 			return e
 		}
-		if !out.Acceptable || out.FailedAttempts >= 5 || !now.Before(out.ExpiresAt) {
+		if passwordRevision <= 0 || !out.Acceptable || out.FailedAttempts >= 5 || !now.Before(out.ExpiresAt) {
 			return d.ErrProof
 		}
 		if out.State != d.Preparing {
@@ -305,6 +357,10 @@ func (r *AccountClosureRepository) Prepare(ctx context.Context, id string, now t
 				return r.cancelTx(tx, &out, now, "CONDITIONS_CHANGED")
 			}
 			return e
+		}
+		if current.PasswordRevision != passwordRevision {
+			after = d.ErrProof
+			return r.cancelTx(tx, &out, now, "CONDITIONS_CHANGED")
 		}
 		if len(out.MutationDigest) > 0 && !sameSnapshot(out, current) {
 			after = d.ErrProof
@@ -365,7 +421,7 @@ func (r *AccountClosureRepository) Prepare(ctx context.Context, id string, now t
 	return out, owned, e
 }
 func sameSnapshot(a, b d.Operation) bool {
-	return a.AccountRevision == b.AccountRevision && a.DeveloperRevision == b.DeveloperRevision && a.PermissionRevision == b.PermissionRevision && bytes.Equal(a.MutationDigest, b.MutationDigest)
+	return a.AccountRevision == b.AccountRevision && a.PasswordRevision == b.PasswordRevision && a.DeveloperRevision == b.DeveloperRevision && a.PermissionRevision == b.PermissionRevision && bytes.Equal(a.MutationDigest, b.MutationDigest)
 }
 func (r *AccountClosureRepository) Ready(ctx context.Context, id string, confirmation, receipt []byte, now time.Time) (d.Operation, error) {
 	var out d.Operation
@@ -377,7 +433,7 @@ func (r *AccountClosureRepository) Ready(ctx context.Context, id string, confirm
 		if e != nil {
 			return e
 		}
-		if out.State != d.Preparing || len(out.ConfirmationDigest) != 0 || !now.Before(out.ExpiresAt) {
+		if out.State != d.Preparing || out.PasswordRevision <= 0 || len(out.ConfirmationDigest) != 0 || !now.Before(out.ExpiresAt) {
 			return d.ErrConflict
 		}
 		current, blocker, e := r.snapshot(tx, out)

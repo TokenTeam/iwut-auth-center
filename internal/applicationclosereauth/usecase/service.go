@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/asn1"
 	"encoding/binary"
+	"errors"
 	"math/big"
 	"strings"
 	"time"
@@ -14,6 +15,8 @@ import (
 	"github.com/google/uuid"
 	d "iwut-auth-center/internal/applicationclosereauth/domain"
 	p "iwut-auth-center/internal/applicationclosereauth/port"
+	pd "iwut-auth-center/internal/password/domain"
+	pp "iwut-auth-center/internal/password/port"
 )
 
 const (
@@ -23,6 +26,7 @@ const (
 )
 
 type Service struct {
+	password   pp.PasswordVerifier
 	repository p.Repository
 	protocol   p.Protocol
 	signer     p.Signer
@@ -31,11 +35,11 @@ type Service struct {
 	newJTI     func() (uuid.UUID, error)
 }
 
-func New(repository p.Repository, protocol p.Protocol, signer p.Signer, issuer string) (*Service, error) {
-	if repository == nil || protocol == nil || signer == nil || strings.TrimSpace(issuer) == "" {
+func New(repository p.Repository, protocol p.Protocol, signer p.Signer, issuer string, password pp.PasswordVerifier) (*Service, error) {
+	if password == nil || repository == nil || protocol == nil || signer == nil || strings.TrimSpace(issuer) == "" {
 		return nil, d.ErrUnavailable
 	}
-	return &Service{repository: repository, protocol: protocol, signer: signer, issuer: issuer, clock: time.Now, newJTI: uuid.NewV7}, nil
+	return &Service{password: password, repository: repository, protocol: protocol, signer: signer, issuer: issuer, clock: time.Now, newJTI: uuid.NewV7}, nil
 }
 
 func canonicalID(value string) bool {
@@ -94,8 +98,8 @@ func validSignature(signature []byte) bool {
 	return err == nil && bytes.Equal(canonical, signature) && len(signature) <= 72
 }
 
-func (s *Service) Complete(ctx context.Context, sessionDigest []byte, operationID, applicationID string, signature []byte) (d.Proof, error) {
-	if len(sessionDigest) != 32 || !canonicalID(operationID) || !canonicalID(applicationID) || !validSignature(signature) {
+func (s *Service) Complete(ctx context.Context, sessionDigest []byte, operationID, applicationID string, signature []byte, password, source string) (d.Proof, error) {
+	if password == "" || len(password) > 1024 || len(sessionDigest) != 32 || !canonicalID(operationID) || !canonicalID(applicationID) || !validSignature(signature) {
 		return d.Proof{}, d.ErrInvalid
 	}
 	now := s.clock().UTC().Truncate(time.Millisecond)
@@ -104,18 +108,36 @@ func (s *Service) Complete(ctx context.Context, sessionDigest []byte, operationI
 		return d.Proof{}, err
 	}
 	digest := sha256.Sum256(signature)
+	payload, err := SigningPayload(op.OperationID, op.ApplicationID, op.Challenge)
+	if err != nil || !s.protocol.Verify(op.PublicKey, payload, signature) || op.State == d.Completed && !equal(op.SignatureDigest, digest[:]) {
+		return d.Proof{}, s.reject(ctx, op, now)
+	}
+	revision, err := s.password.VerifyPassword(ctx, pp.ReauthRequest{AuthID: op.AuthID, CredentialID: op.CredentialID, AccountRevision: op.AccountRevision, Password: password, Source: source})
+	if err != nil {
+		switch {
+		case errors.Is(err, pd.ErrAuthentication), errors.Is(err, pd.ErrSessionInvalid):
+			return d.Proof{}, s.reject(ctx, op, now)
+		case errors.Is(err, pd.ErrInvalidInput):
+			return d.Proof{}, d.ErrInvalid
+		case errors.Is(err, pd.ErrLimited):
+			return d.Proof{}, d.ErrRate
+		default:
+			return d.Proof{}, d.ErrUnavailable
+		}
+	}
+	if revision <= 0 || revision != op.PasswordRevision {
+		return d.Proof{}, d.ErrFailed
+	}
+	// auth_time represents successful dual verification, not request arrival or
+	// the Session timestamp; the repository rechecks expiry at this final time.
+	now = s.clock().UTC().Truncate(time.Millisecond)
 	if op.State == d.Completed {
-		if !equal(op.SignatureDigest, digest[:]) {
-			return d.Proof{}, d.ErrFailed
+		// Even retries cross the final authentication fence after verifying the password.
+		op, err = s.repository.Complete(ctx, sessionDigest, operationID, applicationID, digest[:], revision, operationClaims(op, s.issuer), now)
+		if err != nil {
+			return d.Proof{}, err
 		}
 		return s.proof(ctx, op)
-	}
-	payload, err := SigningPayload(op.OperationID, op.ApplicationID, op.Challenge)
-	if err != nil || !s.protocol.Verify(op.PublicKey, payload, signature) {
-		if failErr := s.repository.Fail(ctx, operationID, now); failErr != nil {
-			return d.Proof{}, failErr
-		}
-		return d.Proof{}, d.ErrFailed
 	}
 	jti, err := s.newJTI()
 	if err != nil {
@@ -123,7 +145,7 @@ func (s *Service) Complete(ctx context.Context, sessionDigest []byte, operationI
 	}
 	issued := time.Unix(now.Unix(), 0).UTC()
 	claims := d.Claims{Issuer: s.issuer, Subject: op.AuthID, Audience: proofAudience, TokenType: proofType, Purpose: proofPurpose, ApplicationID: applicationID, JTI: jti.String(), AuthTime: issued, IssuedAt: issued, NotBefore: issued.Add(-30 * time.Second), ExpiresAt: issued.Add(5 * time.Minute)}
-	op, err = s.repository.Complete(ctx, sessionDigest, operationID, applicationID, digest[:], claims, now)
+	op, err = s.repository.Complete(ctx, sessionDigest, operationID, applicationID, digest[:], revision, claims, now)
 	if err != nil {
 		return d.Proof{}, err
 	}
@@ -154,4 +176,13 @@ func (s *Service) proof(ctx context.Context, op d.Operation) (d.Proof, error) {
 		return d.Proof{}, d.ErrUnavailable
 	}
 	return d.Proof{JWS: proof, ExpiresAt: op.ProofExpiresAt}, nil
+}
+
+func (s *Service) reject(ctx context.Context, op d.Operation, now time.Time) error {
+	if op.State == d.Pending {
+		if err := s.repository.Fail(ctx, op.OperationID, now); err != nil {
+			return err
+		}
+	}
+	return d.ErrFailed
 }

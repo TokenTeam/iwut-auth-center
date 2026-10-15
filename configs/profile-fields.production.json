@@ -1,0 +1,13 @@
+{
+  "definitions": [
+    {"key":"basic.name","label":"姓名","description":"用户主动确认的姓名；平台只校验格式，不验证真实性。","valueType":"STRING","constraints":{"minLength":1,"maxLength":80}},
+    {"key":"basic.gender","label":"性别","description":"用户主动确认的性别；不提供其它选项，可通过删除置空。","valueType":"STRING","constraints":{"maxLength":6,"options":[{"value":"MALE","label":"男"},{"value":"FEMALE","label":"女"}]}},
+    {"key":"education.campus_areas","label":"活动片区","description":"用户经常活动的校内片区，可多选；片区名称不表示行政校区划分。","valueType":"STRING_SET","constraints":{"options":[{"value":"NANHU","label":"南湖"},{"value":"JIANHU","label":"鉴湖"},{"value":"MAFANGSHAN_WEST","label":"西院"},{"value":"MAFANGSHAN_EAST","label":"东院"},{"value":"YUJIA_TOU","label":"余家头"},{"value":"JUNSHAN","label":"军山"}],"minItems":1,"maxItems":6}},
+    {"key":"education.major","label":"专业","description":"用户主动确认的专业名称；平台不验证学籍真实性。","valueType":"STRING","constraints":{"minLength":1,"maxLength":128}},
+    {"key":"personal.birthday","label":"生日","description":"用户主动确认的公历生日，不得晚于上海时区的今天。","valueType":"DATE","constraints":{"notAfterToday":true}},
+    {"key":"education.campus_card_number","label":"一卡通号","description":"用户主动确认的六位一卡通号；平台不验证卡片归属。","valueType":"STRING","constraints":{"minLength":6,"maxLength":6,"characterSet":"ASCII_DIGITS"}},
+    {"key":"contact.phone","label":"手机号","description":"用户主动确认的十一位手机号；不会据此建立登录凭据。","valueType":"STRING","constraints":{"minLength":11,"maxLength":11,"characterSet":"ASCII_DIGITS"}},
+    {"key":"contact.qq","label":"QQ","description":"用户主动确认的 QQ 号；按文本标识保存。","valueType":"STRING","constraints":{"minLength":5,"maxLength":12,"characterSet":"ASCII_DIGITS"}},
+    {"key":"education.current_grade","label":"当前就读年级","description":"用户确认的培养阶段与年级锚点；系统仅在该阶段内按学年推进并封顶。","valueType":"ACADEMIC_GRADE","constraints":{}}
+  ]
+}

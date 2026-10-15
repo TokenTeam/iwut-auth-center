@@ -34,6 +34,7 @@ type Operation struct {
 }
 
 type Credential struct {
+	CredentialRevision int64
 	// AccountRevision is a transient login resolution snapshot, never credential storage.
 	AccountRevision                       int64
 	CredentialID, AuthID, ProtocolVersion string
@@ -43,6 +44,8 @@ type Credential struct {
 }
 
 type Session struct {
+	PasswordRevision                                      int64
+	SourceSessionID                                       string
 	AccountRevision                                       int64
 	SessionID, AuthID, AuthenticationMethod, CredentialID string
 	TokenDigest                                           []byte

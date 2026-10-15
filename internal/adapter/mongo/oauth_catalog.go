@@ -22,12 +22,8 @@ func (r *OAuthRepository) SeedCatalog(ctx context.Context, scopes []d.Scope) err
 	profileFields := map[string]bool{}
 	for _, s := range scopes {
 		names = append(names, s.Name)
-		protocol := d.Contains([]string{"openid", "email", "offline_access"}, s.Name)
 		profile := s.Kind == "USERINFO_PROFILE"
-		if protocol != (s.Kind == "PROTOCOL") || protocol && (s.Audience != "" || s.ProfileField != "" || s.ProfileValueType != "") {
-			return d.ErrScope
-		}
-		if s.Label == "" || s.Description == "" || s.Kind != "PROTOCOL" && s.Kind != "RESOURCE" && !profile || s.Kind == "RESOURCE" && (s.Audience == "" || s.ProfileField != "" || s.ProfileValueType != "") || s.Kind == "PROTOCOL" && !protocol || profile && (s.Audience != "" || s.ProfileField == "" || s.Name != "profile."+s.ProfileField || !d.ValidProfileValueType(s.ProfileValueType)) {
+		if s.Label == "" || s.Description == "" || !s.ValidMetadata() {
 			return d.ErrScope
 		}
 		if profile {

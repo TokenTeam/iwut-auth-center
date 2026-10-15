@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	accountpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/account_management"
 	applicationoperationspb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/application_operations_permission"
 	authpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 	emailpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_binding"
@@ -26,7 +27,6 @@ import (
 	"iwut-auth-center/internal/config"
 	"iwut-auth-center/internal/testutil/smtpcapture"
 	"net/http"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -35,31 +35,17 @@ import (
 
 func runReviewerFlow(t *testing.T, env map[string]string, conn *grpc.ClientConn, serviceKey *rsa.PrivateKey, keyFile string, capture *smtpcapture.Server) {
 	t.Helper()
-	auth := authpb.NewAuthenticationServiceClient(conn)
 	issuer := identitypb.NewUserIdentityServiceClient(conn)
 	review := pb.NewReviewerPermissionServiceClient(conn)
 	register := func(label string) *authpb.UserRegistrationResult {
 		key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		token := sha256.Sum256([]byte(label))
-		u, _ := registerUser(t, auth, key, token[:])
+		u, _ := registerUser(t, conn, key, token[:])
 		return u
 	}
 	admin, subject, operator := register("reviewer-admin"), register("reviewer-subject"), register("application-operator")
 	bindEmail := func(user *authpb.UserRegistrationResult, email string) {
-		t.Helper()
-		client := emailpb.NewEmailBindingServiceClient(conn)
-		ctx := metadata.NewOutgoingContext(t.Context(), metadata.Pairs("x-iwut-session", user.Session.SessionToken))
-		challenge, err := client.BeginSetEmail(ctx, &emailpb.BeginSetEmailRequest{RequestId: uuid.NewString(), Email: email, Intent: &emailpb.BeginSetEmailRequest_Binding{Binding: &emailpb.BindEmailIntent{ExpectedRevision: proto.Int64(0)}}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		match := regexp.MustCompile(`Verification code: ([0-9]{8})`).FindStringSubmatch(capture.Next(t).Body)
-		if len(match) != 2 {
-			t.Fatal("missing code")
-		}
-		if _, err = client.CompleteSetEmail(ctx, &emailpb.CompleteSetEmailRequest{OperationId: challenge.OperationId, Code: match[1]}); err != nil {
-			t.Fatal(err)
-		}
+		addAndSwitchLoginEmail(t, conn, user.Session.SessionToken, email)
 	}
 	bindEmail(admin, "administrator@example.test")
 	bindEmail(operator, "application-operator@example.test")
@@ -160,6 +146,10 @@ func runReviewerFlow(t *testing.T, env map[string]string, conn *grpc.ClientConn,
 
 func runApplicationOperationsPermissionFlow(t *testing.T, env map[string]string, conn *grpc.ClientConn, subject *authpb.UserRegistrationResult, adminctx context.Context, adminToken string, issue func(*authpb.UserRegistrationResult, string) string) {
 	t.Helper()
+	binding, err := emailpb.NewEmailBindingServiceClient(conn).GetOwnEmailBinding(sessionCallContext(t.Context(), subject.Session.SessionToken), &emailpb.GetOwnEmailBindingRequest{})
+	if err != nil || binding.ActiveEmail == nil || binding.ActiveEmail.Email == "" || binding.ActiveEmail.VerifiedAtUnixMs <= 0 {
+		t.Fatal("verified-email-first registration prerequisite missing", binding, err)
+	}
 	client := applicationoperationspb.NewApplicationOperationsPermissionServiceClient(conn)
 	query := &applicationoperationspb.GetApplicationOperationsPermissionsRequest{SubjectAuthId: subject.AuthId}
 	if _, err := client.GetApplicationOperationsPermissions(t.Context(), query); status.Code(err) != codes.Unauthenticated {
@@ -201,6 +191,18 @@ func runApplicationOperationsPermissionFlow(t *testing.T, env map[string]string,
 	if permissions := identityPayload(t, issue(subject, "iwut-auth-center"))["permissions"].([]any); len(permissions) != 0 {
 		t.Fatal(permissions)
 	}
+	accounts := accountpb.NewAccountManagementServiceClient(conn)
+	disabled, err := accounts.ManageUserAccountStatus(adminctx, &accountpb.ManageUserAccountStatusRequest{SubjectAuthId: subject.AuthId, Action: accountpb.AccountStatusAction_ACCOUNT_STATUS_ACTION_DISABLE, ExpectedAccountRevision: proto.Int64(1), Reason: "operations permission eligibility check"})
+	if err != nil || disabled.AccountRevision != 2 || disabled.AccountStatus != accountpb.AccountStatus_ACCOUNT_STATUS_DISABLED {
+		t.Fatal(disabled, err)
+	}
+	blocked, err := client.GetApplicationOperationsPermissions(adminctx, query)
+	if err != nil || blocked.PermissionRevision != 2 || !blocked.Permissions[1].Granted || blocked.Permissions[1].Effective || !slices.Equal(blocked.GrantBlockers, []applicationoperationspb.ApplicationOperationsGrantBlocker{applicationoperationspb.ApplicationOperationsGrantBlocker_APPLICATION_OPERATIONS_GRANT_BLOCKER_ACCOUNT_DISABLED}) {
+		t.Fatal("disabled account was treated as missing email or retained effective operation authority", blocked, err)
+	}
+	if _, err = client.ManageApplicationOperationsPermission(adminctx, &applicationoperationspb.ManageApplicationOperationsPermissionRequest{SubjectAuthId: subject.AuthId, Permission: "app.application.restore", Action: applicationoperationspb.ApplicationOperationsPermissionAction_APPLICATION_OPERATIONS_PERMISSION_ACTION_GRANT, ExpectedPermissionRevision: proto.Int64(2), Reason: "blocked disabled grant"}); status.Code(err) != codes.FailedPrecondition {
+		t.Fatal("disabled verified account accepted new authority", err)
+	}
 	revoked, err := client.ManageApplicationOperationsPermission(adminctx, &applicationoperationspb.ManageApplicationOperationsPermissionRequest{
 		SubjectAuthId:              subject.AuthId,
 		Permission:                 applicationoperationspbPermissionSuspend,
@@ -210,6 +212,39 @@ func runApplicationOperationsPermissionFlow(t *testing.T, env map[string]string,
 	})
 	if err != nil || revoked.PermissionRevision != 3 || revoked.Permissions[1].Granted {
 		t.Fatal(revoked, err)
+	}
+	if _, err = accounts.ManageUserAccountStatus(adminctx, &accountpb.ManageUserAccountStatusRequest{SubjectAuthId: subject.AuthId, Action: accountpb.AccountStatusAction_ACCOUNT_STATUS_ACTION_RESTORE, ExpectedAccountRevision: proto.Int64(2), Reason: "operations eligibility check complete"}); err != nil {
+		t.Fatal(err)
+	}
+	// Run the same real Wire composition with recovery readiness off. Existing
+	// verified email remains present; only the deployment blocker is reported.
+	closedEnvironment := make(map[string]string, len(env))
+	for key, value := range env {
+		closedEnvironment[key] = value
+	}
+	closedEnvironment[config.HTTPAddrEnv], closedEnvironment[config.GRPCAddrEnv] = reserveAddress(t), reserveAddress(t)
+	closedEnvironment["AUTH_EMAIL_RECOVERY_READY"] = "false"
+	configuration, err := config.Load(func(key string) (string, bool) { value, exists := closedEnvironment[key]; return value, exists })
+	if err != nil {
+		t.Fatal(err)
+	}
+	closedApp, closedCleanup, err := wireApp(configuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closedConnection, stop := startUserApp(t, closedApp, closedCleanup, configuration.GRPCAddr)
+	defer stop()
+	closedClient := applicationoperationspb.NewApplicationOperationsPermissionServiceClient(closedConnection)
+	blocked, err = closedClient.GetApplicationOperationsPermissions(adminctx, query)
+	if err != nil || blocked.PermissionRevision != 3 || !slices.Equal(blocked.GrantBlockers, []applicationoperationspb.ApplicationOperationsGrantBlocker{applicationoperationspb.ApplicationOperationsGrantBlocker_APPLICATION_OPERATIONS_GRANT_BLOCKER_EMAIL_RECOVERY_UNAVAILABLE}) {
+		t.Fatal("recovery deployment closure was mistaken for missing verified email", blocked, err)
+	}
+	if _, err = closedClient.ManageApplicationOperationsPermission(adminctx, &applicationoperationspb.ManageApplicationOperationsPermissionRequest{SubjectAuthId: subject.AuthId, Permission: applicationoperationspbPermissionSuspend, Action: applicationoperationspb.ApplicationOperationsPermissionAction_APPLICATION_OPERATIONS_PERMISSION_ACTION_GRANT, ExpectedPermissionRevision: proto.Int64(3), Reason: "blocked recovery grant"}); status.Code(err) != codes.FailedPrecondition {
+		t.Fatal("recovery-disabled deployment granted operation authority", err)
+	}
+	unchanged, err := client.GetApplicationOperationsPermissions(adminctx, query)
+	if err != nil || unchanged.PermissionRevision != 3 || len(unchanged.GrantBlockers) != 0 || unchanged.Permissions[1].Granted {
+		t.Fatal("failed recovery grant changed original ready state", unchanged, err)
 	}
 }
 

@@ -35,6 +35,8 @@ func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 		provideMongoDatabaseWithReadiness,
 		provideObservability,
 		provideUserEndpoints,
+		providePasswordRuntime,
+		provideCredentialManagement,
 		provideServerConfigWithObservability,
 		provideApp,
 	))

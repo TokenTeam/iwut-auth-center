@@ -42,7 +42,7 @@ func TestAccountClosureActualAppWire(t *testing.T) {
 			key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 			assoc := make([]byte, 32)
 			_, _ = rand.Read(assoc)
-			user, _ := registerUser(t, auth, key, assoc)
+			user, _ := registerUser(t, f.Conn, key, assoc)
 			if disabled {
 				_, e := f.DB.Collection(ma.PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": user.AuthId}, bson.M{"$set": bson.M{"accountStatus": "DISABLED", "accountRevision": int64(2)}})
 				if e != nil {
@@ -81,7 +81,22 @@ func TestAccountClosureActualAppWire(t *testing.T) {
 					t.Fatal("pending proof accepted without closure runtime")
 				}
 			}
-			prepare := &pb.PrepareAccountClosureRequest{OperationId: challenge.OperationId, Signature: signDevice(t, key, challenge.SigningPayload)}
+			prepare := &pb.PrepareAccountClosureRequest{OperationId: challenge.OperationId, Signature: signDevice(t, key, challenge.SigningPayload), CurrentPassword: "a long fixture password 123"}
+			missingPassword := proto.Clone(prepare).(*pb.PrepareAccountClosureRequest)
+			missingPassword.CurrentPassword = ""
+			if _, err := client.PrepareAccountClosure(t.Context(), missingPassword); status.Code(err) != codes.InvalidArgument {
+				t.Fatal("native signature-only Prepare was not rejected", err)
+			}
+			closureHTTP(t, f, "prepare", missingPassword, "", "", nil, http.StatusBadRequest)
+			wrongPassword := proto.Clone(prepare).(*pb.PrepareAccountClosureRequest)
+			wrongPassword.CurrentPassword = "an incorrect fixture password"
+			if _, err := client.PrepareAccountClosure(t.Context(), wrongPassword); status.Code(err) != codes.Unauthenticated {
+				t.Fatal("native wrong password was not rejected", err)
+			}
+			closureHTTP(t, f, "prepare", wrongPassword, "", "", nil, http.StatusUnauthorized)
+			if n, err := f.DB.Collection(ma.OwnerExitCollection).CountDocuments(t.Context(), bson.M{"operationId": challenge.OperationId}); err != nil || n != 0 {
+				t.Fatal("failed password created an App ownership barrier", n, err)
+			}
 			var ready *pb.AccountClosurePreparation
 			if disabled {
 				ready = &pb.AccountClosurePreparation{}

@@ -156,7 +156,7 @@ func newOAuthRuntime(configuration config.Config, db *m.Database, endpoints *tra
 	repo := ma.NewOAuthRepository(repository, db)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if ma.EnsureOAuthSchema(ctx, db) != nil || repo.CheckSectorSuffix(ctx, c.SectorSuffix) != nil {
+	if ma.EnsureOAuthSchema(ctx, db) != nil || ma.EnsureApplicationUserStorageSchema(ctx, db) != nil || repo.CheckSectorSuffix(ctx, c.SectorSuffix) != nil {
 		return fail()
 	}
 	file, e := os.Open(c.CatalogFile)
@@ -183,6 +183,9 @@ func newOAuthRuntime(configuration config.Config, db *m.Database, endpoints *tra
 	if bindUserInfoProfileScopes(seed, profileDefinitions) != nil {
 		return fail()
 	}
+	if configuration.ApplicationUserStorage != nil && validateApplicationUserStorageScopes(seed) != nil {
+		return fail()
+	}
 	for index := range seed {
 		scope := &seed[index]
 		if scope.Kind == "RESOURCE" && scope.Enabled && !c.ResourceScopesReady {
@@ -197,7 +200,7 @@ func newOAuthRuntime(configuration config.Config, db *m.Database, endpoints *tra
 	if e != nil {
 		return fail()
 	}
-	http := &transport.OAuthHTTP{IPPerMinute: c.IPPerMinute, ClientPerMinute: c.ClientPerMinute, UserConfirmPerMinute: c.UserConfirmPerMinute, Service: uc, Issuer: c.Issuer, Origin: c.PortalOrigin, LoginURL: c.PortalLoginURL, SectorSuffix: c.SectorSuffix, Enabled: c.PublicEnabled}
+	http := &transport.OAuthHTTP{IPPerMinute: c.IPPerMinute, ClientPerMinute: c.ClientPerMinute, UserConfirmPerMinute: c.UserConfirmPerMinute, Service: uc, Issuer: c.Issuer, Origin: c.PortalOrigin, LoginURL: c.PortalLoginURL, SectorSuffix: c.SectorSuffix, Enabled: c.PublicEnabled, StorageEnabled: configuration.ApplicationUserStorage != nil}
 	for _, context := range c.PublicClientContexts {
 		http.PublicContexts = append(http.PublicContexts, transport.OAuthPublicContext{ClientID: context.ClientID, Major: context.Major})
 	}
@@ -222,6 +225,25 @@ func newOAuthRuntime(configuration config.Config, db *m.Database, endpoints *tra
 		}
 	}
 	return &oauthRuntime{HTTP: http, Catalog: ma.NewOAuthCatalog(repo), Grant: &transport.OAuthGrantService{Service: uc}, Delegation: delegationService}, cleanup, nil
+}
+
+func validateApplicationUserStorageScopes(scopes []d.Scope) error {
+	required := map[string]bool{"storage.read": false, "storage.write": false}
+	for _, scope := range scopes {
+		if _, relevant := required[scope.Name]; !relevant {
+			continue
+		}
+		if required[scope.Name] || !scope.Enabled || scope.Kind != "RESOURCE" || scope.Audience != "iwut-auth-center" || scope.ProfileField != "" || scope.ProfileValueType != "" {
+			return fmt.Errorf("invalid ApplicationUserStorage scope %q", scope.Name)
+		}
+		required[scope.Name] = true
+	}
+	for name, found := range required {
+		if !found {
+			return fmt.Errorf("missing ApplicationUserStorage scope %q", name)
+		}
+	}
+	return nil
 }
 func provideScopeCatalog(runtime *oauthRuntime) sp.Catalog { return runtime.Catalog }
 

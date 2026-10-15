@@ -12,6 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	auth "iwut-auth-center/internal/authentication/domain"
 	ap "iwut-auth-center/internal/authentication/port"
+	campus "iwut-auth-center/internal/campuscertification/domain"
 	d "iwut-auth-center/internal/emailbinding/domain"
 	emailport "iwut-auth-center/internal/emailbinding/port"
 	rp "iwut-auth-center/internal/registration/port"
@@ -369,12 +370,17 @@ func (r *EmailRepository) Complete(ctx context.Context, expected emailport.Opera
 			return d.ErrOccupied
 		}
 		if op.Mode == d.Register {
-			if c == nil || !sameRegistrationSnapshot(op.Proof, c.Operation) || !bytes.Equal(c.Credential.PublicKey, op.Proof.PublicKey) || !bytes.Equal(c.Credential.Fingerprint, op.Proof.LocatorValue) || !bytes.Equal(c.Association.LookupKey, op.Proof.LookupKey) || c.Association.KeyVersion != op.Proof.KeyVersion || c.Credential.AuthID != c.Session.AuthID || c.Credential.CredentialID != c.Session.CredentialID {
+			if c == nil || op.Proof.ProtocolVersion != d.ProtocolVersion || op.Proof.SchemeVersion != "" || op.Proof.KeyVersion != "" || len(op.Proof.LookupKey) != 0 || len(op.Proof.Nonce) != 0 || len(op.Proof.Ciphertext) != 0 || !sameRegistrationSnapshot(op.Proof, c.Operation) || !bytes.Equal(c.Credential.PublicKey, op.Proof.PublicKey) || !bytes.Equal(c.Credential.Fingerprint, op.Proof.LocatorValue) || c.Credential.ProtocolVersion != auth.ProtocolVersion || c.Credential.AuthID != c.Session.AuthID || c.Credential.CredentialID != c.Session.CredentialID {
 				return d.ErrVerification
 			}
 			authID = c.Credential.AuthID
 			if e = r.CreateRegisteredUserTx(tx, *c, now); e != nil {
 				return e
+			}
+			if campus.IsWHUTEmail(op.Email) {
+				if e = EnsureCampusCertificationTx(tx, r.db, authID, now); e != nil {
+					return e
+				}
 			}
 		}
 		_, e = r.db.Collection(EmailBindingCollection).UpdateOne(tx, bson.M{"authId": authID}, bson.M{"$set": bson.M{"email": op.Email, "revision": revision, "verifiedAt": now}, "$unset": bson.M{"pendingId": ""}}, options.UpdateOne().SetUpsert(true))

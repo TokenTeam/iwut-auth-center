@@ -3,17 +3,19 @@ package main
 import (
 	"context"
 	"fmt"
+	academicyearusecase "iwut-auth-center/internal/academicyear/usecase"
 	accountusecase "iwut-auth-center/internal/account/usecase"
+	"iwut-auth-center/internal/adapter/emailaccountprotocol"
 	"iwut-auth-center/internal/adapter/emailloginprotocol"
-	"iwut-auth-center/internal/adapter/emailprotocol"
 	"iwut-auth-center/internal/adapter/identitysigner"
 	"iwut-auth-center/internal/adapter/sessionmanagementrate"
 	"iwut-auth-center/internal/adapter/smtpmail"
 	adminusecase "iwut-auth-center/internal/administrator/usecase"
 	applicationoperationsusecase "iwut-auth-center/internal/applicationoperations/usecase"
+	applicationuserstorageusecase "iwut-auth-center/internal/applicationuserstorage/usecase"
 	developerusecase "iwut-auth-center/internal/developer/usecase"
+	emailaccountusecase "iwut-auth-center/internal/emailaccount/usecase"
 	emaildomain "iwut-auth-center/internal/emailbinding/domain"
-	emailusecase "iwut-auth-center/internal/emailbinding/usecase"
 	emailloginusecase "iwut-auth-center/internal/emaillogin/usecase"
 	identityusecase "iwut-auth-center/internal/identity/usecase"
 	reviewerusecase "iwut-auth-center/internal/reviewer/usecase"
@@ -21,7 +23,6 @@ import (
 	"time"
 
 	drivermongo "go.mongodb.org/mongo-driver/v2/mongo"
-	"iwut-auth-center/internal/adapter/associationcrypto"
 	"iwut-auth-center/internal/adapter/catalog"
 	"iwut-auth-center/internal/adapter/deviceprotocol"
 	mongoadapter "iwut-auth-center/internal/adapter/mongo"
@@ -29,12 +30,11 @@ import (
 	authusecase "iwut-auth-center/internal/authentication/usecase"
 	"iwut-auth-center/internal/config"
 	profileusecase "iwut-auth-center/internal/profile/usecase"
-	registrationusecase "iwut-auth-center/internal/registration/usecase"
 )
 
 // Runtime construction is the startup gate: no RPC listener exists until the
-// complete configuration, catalog, indexes and offline migration are verified.
-func provideUserEndpoints(configuration config.Config, database *drivermongo.Database) (*transport.UserEndpoints, error) {
+// complete configuration, catalog, indexes and transaction support are verified.
+func provideUserEndpoints(configuration config.Config, database *drivermongo.Database, passwordsRuntime *passwordRuntime, credentialRuntime *credentialManagementRuntime) (*transport.UserEndpoints, error) {
 	c := configuration.UserEndpoints
 	if c == nil {
 		return nil, nil
@@ -51,18 +51,6 @@ func provideUserEndpoints(configuration config.Config, database *drivermongo.Dat
 	if err != nil {
 		return nil, err
 	}
-	key := func(k config.AssociationKey) associationcrypto.Key {
-		return associationcrypto.Key{Version: k.Version, Encrypt: k.Encrypt, Lookup: k.Lookup}
-	}
-	var previous *associationcrypto.Key
-	if c.Association.Previous != nil {
-		p := key(*c.Association.Previous)
-		previous = &p
-	}
-	cipher, err := associationcrypto.New(key(c.Association.Current), previous)
-	if err != nil {
-		return nil, err
-	}
 	limiter, err := deviceprotocol.NewLimiter(deviceprotocol.RateLimits{BeginGlobal: c.Authentication.BeginGlobal, CompleteGlobal: c.Authentication.CompleteGlobal, BeginSource: c.Authentication.BeginSource, CompleteLocator: c.Authentication.CompleteLocator, MaxBuckets: c.Authentication.MaxBuckets})
 	if err != nil {
 		return nil, err
@@ -71,16 +59,18 @@ func provideUserEndpoints(configuration config.Config, database *drivermongo.Dat
 	if err != nil {
 		return nil, err
 	}
-	migration, err := mongoadapter.NewAssociationMigrationRepository(database)
-	if err != nil {
-		return nil, err
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	if err := mongoadapter.EnsureAuthenticationSchema(ctx, database); err != nil {
 		return nil, fmt.Errorf("ensure authentication schema: %w", err)
 	}
+	if err := mongoadapter.EnsureCampusSchema(ctx, database); err != nil {
+		return nil, fmt.Errorf("ensure campus schema: %w", err)
+	}
 	if err := mongoadapter.EnsurePlatformAdministratorSchema(ctx, database); err != nil {
+		return nil, err
+	}
+	if err := mongoadapter.EnsureAcademicYearSchema(ctx, database); err != nil {
 		return nil, err
 	}
 	if err := mongoadapter.EnsureReviewerSchema(ctx, database); err != nil {
@@ -89,14 +79,14 @@ func provideUserEndpoints(configuration config.Config, database *drivermongo.Dat
 	if err := repository.WithAuthTransaction(ctx, func(context.Context) error { return nil }); err != nil {
 		return nil, fmt.Errorf("verify Mongo transaction support: %w", err)
 	}
-	if err := registrationusecase.MigrateAssociations(ctx, migration, cipher, time.Now().UTC()); err != nil {
-		return nil, fmt.Errorf("association startup gate: %w", err)
-	}
-	registrationRepo, err := mongoadapter.NewRegistrationRepository(database, repository)
+	academicYearRepository, err := mongoadapter.NewAcademicYearRepository(repository)
 	if err != nil {
 		return nil, err
 	}
-	registration, err := registrationusecase.NewRegistration(registrationRepo, protocol, cipher, limiter, c.Authentication.ServiceID, c.Authentication.SessionTTL)
+	if err := academicYearRepository.Initialize(ctx); err != nil {
+		return nil, fmt.Errorf("initialize academic year policy: %w", err)
+	}
+	registrationRepo, err := mongoadapter.NewRegistrationRepository(database, repository)
 	if err != nil {
 		return nil, err
 	}
@@ -112,11 +102,11 @@ func provideUserEndpoints(configuration config.Config, database *drivermongo.Dat
 	if err != nil {
 		return nil, err
 	}
-	authentication, err := transport.NewAuthenticationService(transport.NewRegistrationHandler(registration, c.Authentication.MaxMessageBytes), transport.NewLoginHandler(login), transport.NewSessionRevocationHandler(sessions), transport.NewCredentialRevocationHandler(credentials))
+	authentication, err := transport.NewAuthenticationService(nil, transport.NewLoginHandler(login), transport.NewSessionRevocationHandler(sessions), transport.NewCredentialRevocationHandler(credentials))
 	if err != nil {
 		return nil, err
 	}
-	profileRepo, err := mongoadapter.NewProfileRepository(database)
+	profileRepo, err := mongoadapter.NewProfileRepository(database, repository)
 	if err != nil {
 		return nil, err
 	}
@@ -140,9 +130,27 @@ func provideUserEndpoints(configuration config.Config, database *drivermongo.Dat
 	if err != nil {
 		return nil, err
 	}
+
 	var emailService *transport.EmailBindingService
-	if ec := configuration.EmailBinding; ec != nil {
-		ep, err := emailprotocol.New(ec.HMACKey, c.Authentication.ServiceID)
+	var emailAccount *transport.EmailAccountService
+	var emailAccountCore *emailaccountusecase.Service
+	if pc := configuration.Password; pc != nil {
+		ec := configuration.EmailBinding
+		engine := passwordsRuntime.Engine
+		passwords := passwordsRuntime.Repository
+		quota := passwordsRuntime.Quota
+		if engine == nil || passwords == nil || quota == nil {
+			return nil, fmt.Errorf("password runtime is required by email v3")
+		}
+
+		ep, err := emailaccountprotocol.New(ec.HMACKey, pc.OperationKey, c.Authentication.ServiceID)
+		if err != nil {
+			return nil, err
+		}
+		if err = mongoadapter.EnsureEmailAccountSchema(ctx, database); err != nil {
+			return nil, err
+		}
+		repo, err := mongoadapter.NewEmailAccountRepository(registrationRepo, passwords, ep.KeyID(), mongoadapter.EmailLimits{OwnerHourly: ec.OwnerHourly, EmailHourly: ec.EmailHourly, SourceHourly: ec.SourceHourly, MaxBuckets: ec.MaxBuckets})
 		if err != nil {
 			return nil, err
 		}
@@ -150,18 +158,12 @@ func provideUserEndpoints(configuration config.Config, database *drivermongo.Dat
 		if err != nil {
 			return nil, err
 		}
-		repo, err := mongoadapter.NewEmailRepository(registrationRepo, ep.KeyID(), mongoadapter.EmailLimits{OwnerHourly: ec.OwnerHourly, EmailHourly: ec.EmailHourly, SourceHourly: ec.SourceHourly, MaxBuckets: ec.MaxBuckets})
+		emailAccountCore, err = emailaccountusecase.New(repo, ep, protocol, engine, quota, sender, c.Authentication.ServiceID, c.Authentication.SessionTTL)
 		if err != nil {
 			return nil, err
 		}
-		if err = repo.Initialize(ctx, time.Now().UTC()); err != nil {
-			return nil, err
-		}
-		service, err := emailusecase.New(repo, ep, protocol, cipher, sender, limiter, c.Authentication.ServiceID, c.Authentication.SessionTTL)
-		if err != nil {
-			return nil, err
-		}
-		emailService = transport.NewEmailBindingService(service)
+		emailAccount = transport.NewEmailAccountService(emailAccountCore)
+		emailService = transport.NewEmailBindingProjection(emailAccountCore)
 	}
 
 	var emailLoginService *transport.EmailLoginService
@@ -187,6 +189,12 @@ func provideUserEndpoints(configuration config.Config, database *drivermongo.Dat
 		}
 		emailLoginService = transport.NewEmailLoginService(service, c.Authentication.MaxMessageBytes)
 	}
+
+	var campusCertification *transport.CampusCertificationService
+	if configuration.CampusCertification != nil && emailAccountCore != nil {
+		campusCertification = transport.NewCampusEmailAlias(emailAccountCore)
+	}
+
 	var developerApplication *transport.DeveloperApplicationService
 	if dc := configuration.DeveloperApplication; dc != nil {
 		if err = mongoadapter.EnsureDeveloperApplicationSchema(ctx, database); err != nil {
@@ -213,6 +221,14 @@ func provideUserEndpoints(configuration config.Config, database *drivermongo.Dat
 			return nil, err
 		}
 		administrator = transport.NewPlatformAdministratorService(adminusecase.New(repo, gate))
+	}
+	var academicYearPolicy *transport.AcademicYearPolicyService
+	if ac := configuration.AcademicYearPolicy; ac != nil {
+		gate, err := deviceprotocol.NewLimiter(deviceprotocol.RateLimits{BeginGlobal: 1000000, CompleteGlobal: 1000000, BeginSource: ac.ReadPerMinute, CompleteLocator: ac.WritePerMinute, MaxBuckets: ac.MaxBuckets})
+		if err != nil {
+			return nil, err
+		}
+		academicYearPolicy = transport.NewAcademicYearPolicyService(academicyearusecase.New(academicYearRepository, gate))
 	}
 	var applicationOperations *transport.ApplicationOperationsPermissionService
 	if ac := configuration.ApplicationOperationsPermission; ac != nil {
@@ -271,15 +287,30 @@ func provideUserEndpoints(configuration config.Config, database *drivermongo.Dat
 		}
 		sessionManagement = transport.NewSessionManagementService(service, gate)
 	}
-	return &transport.UserEndpoints{SessionManagement: sessionManagement, DeveloperManagement: developerManagement, AccountManagement: accountManagement, PlatformAdministrator: administrator,
+	var applicationUserStorage *transport.ApplicationUserStorageService
+	if configuration.ApplicationUserStorage != nil {
+		if err := mongoadapter.EnsureApplicationUserStorageSchema(ctx, database); err != nil {
+			return nil, err
+		}
+		repo, err := mongoadapter.NewApplicationUserStorageRepository(repository)
+		if err != nil {
+			return nil, err
+		}
+		applicationUserStorage = transport.NewApplicationUserStorageService(applicationuserstorageusecase.New(repo))
+	}
+	return &transport.UserEndpoints{SessionManagement: sessionManagement, DeveloperManagement: developerManagement, AccountManagement: accountManagement, PlatformAdministrator: administrator, AcademicYearPolicy: academicYearPolicy,
 		ApplicationOperations:         applicationOperations,
+		CredentialManagement:          credentialRuntime.Service,
+		ApplicationUserStorage:        applicationUserStorage,
 		DeveloperApplication:          developerApplication,
 		EmailBinding:                  emailService,
+		EmailAccount:                  emailAccount,
 		EmailLogin:                    emailLoginService,
+		CampusCertification:           campusCertification,
 		Reviewer:                      transport.NewReviewerPermissionService(reviewerusecase.New(reviewerRepo)),
 		IdentityIssuance:              issuance,
 		Authentication:                authentication,
-		Profile:                       transport.NewUserProfileServer(profileusecase.NewProfileService(profileRepo, profileCatalog)),
+		Profile:                       transport.NewUserProfileServer(profileusecase.NewProfileService(profileRepo, profileCatalog, academicYearRepository)),
 		ProfileIdentity:               transport.UserCapabilityIdentityMiddleware(profileIdentity),
 		SessionIdentity:               transport.UserSessionMiddleware(login),
 		MaxAuthenticationMessageBytes: c.Authentication.MaxMessageBytes,

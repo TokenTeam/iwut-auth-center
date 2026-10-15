@@ -49,6 +49,26 @@ func (s *UserProfileServer) EditOwnProfile(ctx context.Context, r *pb.EditOwnPro
 		case *pb.ProfileValue_DateValue:
 			v.Type = domain.Date
 			v.Text = value.DateValue
+		case *pb.ProfileValue_StringSetValue:
+			if value.StringSetValue == nil {
+				return nil, profileError(domain.ErrInvalidEdit)
+			}
+			v.Type = domain.StringSet
+			v.Strings = append([]string(nil), value.StringSetValue.Values...)
+		case *pb.ProfileValue_AcademicGradeValue:
+			if value.AcademicGradeValue == nil {
+				return nil, profileError(domain.ErrInvalidEdit)
+			}
+			grade := value.AcademicGradeValue
+			v.Type = domain.AcademicGrade
+			v.Academic = &domain.Grade{Stage: grade.Stage, Year: grade.Year, FinalYear: grade.FinalYear, AcademicYear: grade.AcademicYear}
+			if grade.ConfirmedAt != nil {
+				if !grade.ConfirmedAt.IsValid() {
+					return nil, profileError(domain.ErrInvalidEdit)
+				}
+				confirmedAt := grade.ConfirmedAt.AsTime()
+				v.Academic.ConfirmedAt = &confirmedAt
+			}
 		default:
 			return nil, profileError(domain.ErrInvalidEdit)
 		}
@@ -76,13 +96,29 @@ func (s *UserProfileServer) GetProfileEditingSchema(ctx context.Context, _ *pb.G
 	if e != nil {
 		return nil, e
 	}
-	defs, e := s.service.GetProfileEditingSchema(ctx, id)
+	defs, academicYear, e := s.service.GetProfileEditingSchema(ctx, id)
 	if e != nil {
 		return nil, profileError(e)
 	}
-	result := &pb.ProfileEditingSchema{Definitions: make([]*pb.ProfileFieldDefinition, 0, len(defs)), Limits: &pb.ProfileEditingLimits{MaxOperations: domain.MaxOperations, MaxFields: domain.MaxFields, MaxProfileBytes: domain.MaxProfileBytes, MaxCommandBytes: domain.MaxCommandBytes, MaxMessageBytes: domain.MaxMessageBytes}}
+	result := &pb.ProfileEditingSchema{Definitions: make([]*pb.ProfileFieldDefinition, 0, len(defs)), Limits: &pb.ProfileEditingLimits{MaxOperations: domain.MaxOperations, MaxFields: domain.MaxFields, MaxProfileBytes: domain.MaxProfileBytes, MaxCommandBytes: domain.MaxCommandBytes, MaxMessageBytes: domain.MaxMessageBytes}, CurrentAcademicYear: academicYear}
 	for _, d := range defs {
-		result.Definitions = append(result.Definitions, &pb.ProfileFieldDefinition{Key: d.Key, Label: d.Label, Description: d.Description, ValueType: string(d.ValueType), Constraints: &pb.ProfileFieldConstraints{MinLength: d.Constraints.MinLength, MaxLength: d.Constraints.MaxLength, Minimum: d.Constraints.Minimum, Maximum: d.Constraints.Maximum}})
+		constraints := &pb.ProfileFieldConstraints{MinLength: d.Constraints.MinLength, MaxLength: d.Constraints.MaxLength, Minimum: d.Constraints.Minimum, Maximum: d.Constraints.Maximum, NotAfterToday: d.Constraints.NotAfterToday}
+		if d.Constraints.CharacterSet != "" {
+			value := d.Constraints.CharacterSet
+			constraints.CharacterSet = &value
+		}
+		if d.Constraints.MinItems != nil {
+			value := uint32(*d.Constraints.MinItems)
+			constraints.MinItems = &value
+		}
+		if d.Constraints.MaxItems != nil {
+			value := uint32(*d.Constraints.MaxItems)
+			constraints.MaxItems = &value
+		}
+		for _, option := range d.Constraints.Options {
+			constraints.Options = append(constraints.Options, &pb.ProfileFieldOption{Value: option.Value, Label: option.Label})
+		}
+		result.Definitions = append(result.Definitions, &pb.ProfileFieldDefinition{Key: d.Key, Label: d.Label, Description: d.Description, ValueType: string(d.ValueType), Constraints: constraints})
 	}
 	return result, nil
 }
@@ -99,6 +135,17 @@ func profileSnapshot(s domain.Snapshot) *pb.OwnUserProfileSnapshot {
 			v.Value = &pb.ProfileValue_BooleanValue{BooleanValue: a.Value.Boolean}
 		case domain.Date:
 			v.Value = &pb.ProfileValue_DateValue{DateValue: a.Value.Text}
+		case domain.StringSet:
+			v.Value = &pb.ProfileValue_StringSetValue{StringSetValue: &pb.StringSetValue{Values: append([]string(nil), a.Value.Strings...)}}
+		case domain.AcademicGrade:
+			grade := a.Value.Academic
+			if grade != nil {
+				value := &pb.AcademicGradeValue{Stage: grade.Stage, Year: grade.Year, FinalYear: grade.FinalYear, AcademicYear: grade.AcademicYear}
+				if grade.ConfirmedAt != nil {
+					value.ConfirmedAt = timestamppb.New(*grade.ConfirmedAt)
+				}
+				v.Value = &pb.ProfileValue_AcademicGradeValue{AcademicGradeValue: value}
+			}
 		}
 		result.Entries = append(result.Entries, &pb.ProfileFieldAssignment{Key: a.Key, Value: v})
 	}
@@ -118,11 +165,11 @@ func profileError(e error) error {
 		code = codes.NotFound
 	case errors.Is(e, domain.ErrLimit):
 		code = codes.ResourceExhausted
-	case errors.Is(e, domain.ErrConflict):
+	case errors.Is(e, domain.ErrConflict), errors.Is(e, domain.ErrAcademicYearConflict):
 		code = codes.Aborted
 	case errors.Is(e, domain.ErrExhausted):
 		code = codes.FailedPrecondition
-	case errors.Is(e, domain.ErrCatalog), errors.Is(e, domain.ErrUnavailable):
+	case errors.Is(e, domain.ErrCatalog), errors.Is(e, domain.ErrAcademicYear), errors.Is(e, domain.ErrUnavailable):
 		code = codes.Unavailable
 	}
 	if code != codes.Internal {

@@ -11,7 +11,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	ap "iwut-auth-center/internal/authentication/port"
 	d "iwut-auth-center/internal/developer/domain"
-	email "iwut-auth-center/internal/emailbinding/domain"
 )
 
 const DeveloperActivationCollection = "auth_developer_activations"
@@ -368,34 +367,11 @@ func duplicateDeveloperHandle(err error, handle string) bool {
 	return v.Type == bson.TypeString && v.StringValue() == handle
 }
 func (r *DeveloperApplicationRepository) emailRevision(ctx context.Context, id string) (int64, error) {
-	var raw bson.Raw
-	err := r.authentication.database.Collection(EmailBindingCollection).FindOne(ctx, bson.M{"authId": id}).Decode(&raw)
-	if errors.Is(err, m.ErrNoDocuments) {
-		return 0, nil
-	}
+	_, revision, err := ReadPrimaryEmailTx(ctx, r.authentication.database, id)
 	if err != nil {
-		return 0, err
-	}
-	if !identityFields(raw, map[string]bson.Type{"authId": bson.TypeString, "revision": bson.TypeInt64}) {
 		return 0, d.ErrApplicationUnavailable
 	}
-	rev := raw.Lookup("revision").Int64()
-	if rev < 0 {
-		return 0, d.ErrApplicationUnavailable
-	}
-	// Pending-only rows have revision zero and no current email or verifiedAt.
-	address, verified := raw.Lookup("email"), raw.Lookup("verifiedAt")
-	if address.Type == 0 && verified.Type == 0 && rev == 0 {
-		return 0, nil
-	}
-	if address.Type != bson.TypeString || verified.Type != bson.TypeDateTime || verified.DateTime() <= 0 || rev <= 0 {
-		return 0, d.ErrApplicationUnavailable
-	}
-	normalized, err := email.NormalizeEmail(address.StringValue())
-	if err != nil || normalized != address.StringValue() {
-		return 0, d.ErrApplicationUnavailable
-	}
-	return rev, nil
+	return revision, nil
 }
 
 func validTerminalHandleDocument(raw bson.Raw) bool {

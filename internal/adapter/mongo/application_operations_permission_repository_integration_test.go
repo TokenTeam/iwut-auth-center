@@ -82,7 +82,7 @@ func TestApplicationOperationsMongoEmailAndSharedAudit(t *testing.T) {
 	repository, _ := NewApplicationOperationsPermissionRepository(reviewer.authentication, true)
 	ctx := account.WithIdentity(t.Context(), "admin", 1)
 	command := domain.Command{ActorAuthID: "admin", SubjectAuthID: subject, Permission: domain.Suspend, Action: "GRANT", ExpectedRevision: 1, Reason: "operations duty"}
-	if _, err := repository.Manage(ctx, command); !errors.Is(err, domain.ErrGrantBlocked) {
+	if _, err := repository.Manage(ctx, command); !errors.Is(err, domain.ErrUnavailable) {
 		t.Fatal(err)
 	}
 	adminVerifiedEmail(t, database, subject)

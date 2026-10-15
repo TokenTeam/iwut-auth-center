@@ -76,6 +76,8 @@ func credentialRevocationError(err error) error {
 		return transportStatus(codes.InvalidArgument, "INVALID_CREDENTIAL_ID", "credential ID is invalid")
 	case errors.Is(err, port.ErrNotFound):
 		return transportStatus(codes.NotFound, "CREDENTIAL_NOT_FOUND", "credential not found")
+	case errors.Is(err, port.ErrCredentialReauthRequired):
+		return transportStatus(codes.PermissionDenied, "CREDENTIAL_REAUTH_REQUIRED", "use reviewed device reauthentication")
 	default:
 		return transportStatus(codes.Unavailable, "CREDENTIAL_REVOCATION_UNAVAILABLE", "credential revocation is unavailable")
 	}

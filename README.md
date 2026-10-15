@@ -1,15 +1,65 @@
 # iWUT Auth Center
 
+## 2026-10-13 email account v3
+
+UC006/011/031 and `auth-email-account-v3` are accepted; briefs were regenerated
+before implementation. V3 registers a verified email, platform password and
+background device credential atomically. Every account has 1–10 globally unique
+verified addresses and exactly one login/recovery role. Adding/removing non-login
+addresses does not require a password; switching roles does, without clearing
+existing devices or Sessions. The current login binding, not mere email ownership,
+is used by email-code login, OAuth email disclosure and Developer enrollment.
+
+Campus certification is derived only from current exact `@whut.edu.cn` bindings.
+Its timestamp is the earliest verification among current campus bindings. Campus
+verification routes are ADD aliases; they neither write nor trust old permanent
+facts. Removing the last campus basis immediately removes disclosure while
+preserving OAuth consent and Application pairwise sub. Auth never manages App
+benefit counters or receipt ledgers.
+
+Old no-email registration and v1 BeginSetEmail/CompleteSetEmail are permanently
+retired (gRPC UNIMPLEMENTED; no HTTP routes). The retained v1 Get is a projection
+of the primary binding/login-role revision with no pending proposal. Device login
+signing bytes are unchanged. No deployment/production migration is performed;
+missing/malformed directory/password records are not repaired or defaulted.
+
+This is an incomplete combined password delivery: default password login, reset,
+reliable notification delivery and public password services remain incomplete.
+UC009/025/026 danger gates are implemented and verified in the full real Mongo/Wire race suite:
+current-only legacy revocation and current-password plus registered-device proof
+for account/App closure. PasswordManagement/PasswordLogin services
+are not registered. Do not enable the new model in production yet. Gateway,
+Console and mobile UI delivery are independent work packages.
+
+### Development gate for the v3 email runtime
+
+`AUTH_PASSWORD_ENABLED` defaults false. V3 additionally requires enabled user
+endpoints and `AUTH_EMAIL_BINDING_ENABLED=true`, SMTP settings, and these explicit
+inputs:
+
+- `AUTH_PASSWORD_OPERATION_HMAC_KEY`: canonical standard Base64, independent random 32-byte key.
+- `AUTH_PASSWORD_BLOCKLIST_FILE`, `AUTH_PASSWORD_BLOCKLIST_VERSION`, `AUTH_PASSWORD_BLOCKLIST_SOURCE`, `AUTH_PASSWORD_BLOCKLIST_SHA256`: pinned nonempty regular file of whole NFC-password SHA-256 digests (64 lowercase hex + LF), at most 1,000,000 unique lines. Not an account password verifier.
+- `AUTH_PASSWORD_READINESS_CONFIRMED=true`: operator declaration, not automatic evidence that remaining delivery is complete.
+- Optional `AUTH_PASSWORD_ARGON_MEMORY_KIB`, `AUTH_PASSWORD_ARGON_ITERATIONS`, `AUTH_PASSWORD_ARGON_PARALLELISM`: reviewed defaults 19456/2/1 and enforced bounds.
+
+The campus alias additionally uses `AUTH_CAMPUS_CERTIFICATION_ENABLED=true` and
+the ADD email key; retired `AUTH_CAMPUS_CERTIFICATION_CODE_KEY` is ignored, not a
+startup rejection. Existing email-code login can be enabled against a valid v3
+directory without enabling registration. A populated legacy one-owner-binding
+schema fails startup rather than undergoing an automatic migration or deletion.
+
 This orphan-branch implementation bootstraps Auth Center from the authoritative
 design in [`TokenTeam/iwut-docs`](https://github.com/TokenTeam/iwut-docs/tree/main/auth-center). It exposes the full scope catalog snapshot
 the current Developer status projection and Auth-owned SYSTEM principals to
 authorized internal services through native gRPC.
 
-The current catalog remains deliberately hard-coded. Developer and SYSTEM
-principals are read from Auth-owned MongoDB collection `auth_principals`.
+The OAuth scope catalog is persisted and seeded from an explicit deployment
+manifest when OAuth is enabled; the hard-coded catalog is only a development
+fallback. Developer and SYSTEM principals are read from Auth-owned MongoDB
+collection `auth_principals`.
 Internal business RPCs use caller-signed service JWS and a fixed permission
 allowlist. The optional UC005–009 user endpoints add profile editing, app-managed
-device registration/login, Session revocation and credential revocation over both
+email registration/background device login, Session revocation and credential revocation over both
 HTTP/JSON and native gRPC. Their
 authentication is selected by exact full method, following
 [`auth-device-session-v1`](https://github.com/TokenTeam/iwut-docs/blob/main/platform/contracts/auth-device-session-v1.md).
@@ -89,8 +139,10 @@ response bodies, OAuth material, cookies, email addresses or profile values.
 
 ## Temporary implementation boundary
 
-- The scope catalog remains hard-coded. The profile field catalog is a separate
-  validated deployment file; a production field list still requires a product decision.
+- OAuth's scope catalog and the profile field catalog are separate validated
+  deployment manifests. The accepted production field/scope lists are checked
+  into `configs/`; the academic-year schedule is Mongo-authoritative and starts
+  from the deterministic September 1 baseline.
 - Startup ensures the unique `authId` and SYSTEM purpose indexes and idempotently
   provisions the known non-login SYSTEM principals. Ordinary USER records are created only by atomic registration, including an empty
   profile at revision 1. Startup never mutates Developer status.
@@ -103,7 +155,7 @@ response bodies, OAuth material, cookies, email addresses or profile values.
 
 ## Enable user endpoints
 
-Set `AUTH_USER_ENDPOINTS_ENABLED=true` to register UC005–009. It defaults to false
+Set `AUTH_USER_ENDPOINTS_ENABLED=true` for retained UC005/007–009 and the shared user runtime; UC011 registration has its independent email switch. It defaults to false
 for deployments using only the existing internal methods. Enabling it requires
 all configuration below; missing or invalid values fail startup. MongoDB must be
 a replica set (a single member is sufficient) or a transaction-capable cluster.
@@ -113,9 +165,6 @@ Startup probes a real transaction before serving requests.
 | --- | --- | --- |
 | `AUTH_AUTHENTICATION_SERVICE_ID` | yes | Stable deployment identity, for example `iwut-auth-center:prod`; clients must use the same value |
 | `AUTH_SESSION_TTL` | yes | Positive whole-millisecond Go duration; `720h` is an example, not a default |
-| `AUTH_ASSOC_KEY_VERSION` | yes | Current association encryption/lookup key version |
-| `AUTH_ASSOC_ENCRYPT_KEY` | yes | Canonical standard Base64 of an independent random 32-byte AES key |
-| `AUTH_ASSOC_LOOKUP_KEY` | yes | Canonical standard Base64 of a separate random 32-byte HMAC key |
 | `AUTH_PROFILE_CATALOG_FILE` | yes | JSON file with a `definitions` array following UC005; an explicitly empty array is valid |
 | `AUTH_USER_IDENTITY_ISSUER` | yes | Trusted-user JWS issuer |
 | `AUTH_USER_IDENTITY_PUBLIC_KEYS_JSON` | yes | JSON object mapping each issuer `kid` to a PEM public-key file path; RSA 2048 bits minimum |
@@ -133,9 +182,31 @@ LRU order. No Session validity cache bypasses current principal/credential state
 
 Profile RPCs require `x-iwut-identity` with a trusted-user JWS for
 `iwut-auth-center`. Device proof RPCs are explicitly bounded anonymous methods.
+The accepted production field and scope manifests are provided in
+`configs/profile-fields.production.json` and `configs/oauth-scopes.production.json`.
+Academic-year progression is provisioned in Mongo with a deterministic September 1
+baseline and is not loaded from a deployment file. `AUTH_ACADEMIC_CALENDAR_FILE` is
+retired and ignored if it remains in an environment. The schedule is a platform
+progression policy, not an official university fact or proof of enrollment.
 `RevokeCurrentSession` accepts only its `x-iwut-session` token and succeeds
 idempotently even when that correctly formatted token is expired or unknown.
 `RevokeOwnCredential` requires a currently valid Session in that header.
+It can revoke only the credential used by that Session. Every other valid-shaped
+target returns `CREDENTIAL_REAUTH_REQUIRED` (403), before looking up ownership.
+UC032 provides bounded, no-touch credential listing, optional labels with CAS,
+and revocation of one other credential using the current Session, current
+password and a fresh signature from that Session's device key. A Session alone
+cannot revoke another credential. The four native gRPC/HTTP methods belong to
+`auth_center.v1.credential_management.CredentialManagementService`.
+`AUTH_CREDENTIAL_MANAGEMENT_ENABLED` defaults to false; enabling it requires
+the user endpoints and the shared password runtime. Its independent
+`AUTH_CREDENTIAL_MANAGEMENT_GLOBAL_PER_MINUTE`,
+`AUTH_CREDENTIAL_MANAGEMENT_SOURCE_PER_MINUTE`,
+`AUTH_CREDENTIAL_MANAGEMENT_ACCOUNT_PER_MINUTE`, and
+`AUTH_CREDENTIAL_MANAGEMENT_MAX_BUCKETS` settings default to 600, 120, 30,
+and 4096 (all finite positive values). Operations expire after five minutes,
+share a five-failure password/signature budget, and retain replay state for
+24 hours. Turning off the routes keeps bounded cleanup of persisted operations.
 Gateway routes, old-device authorization and mobile key storage/UI remain
 separate deliveries. Email recovery through a new device is implemented by UC012 below. These are app-managed device
 keys, not WebAuthn Passkeys.
@@ -155,8 +226,6 @@ Gateway routing is a separate delivery.
 
 | Method | Service-local path | RPC |
 | --- | --- | --- |
-| POST | `/v1/registrations` | BeginUserRegistration |
-| POST | `/v1/registrations/{operation_id}/completion` | CompleteUserRegistration |
 | POST | `/v1/device-logins` | BeginDeviceLogin |
 | POST | `/v1/device-logins/{operation_id}/completion` | CompleteDeviceLogin |
 | DELETE | `/v1/sessions/current` | RevokeCurrentSession |
@@ -174,54 +243,32 @@ Query parameters and GET/DELETE bodies are rejected. Compressed request bodies
 are unsupported. Input rejects unknown/duplicate fields and conflicting oneof
 values; body reads are bounded before allocation. Authentication bodies default
 to 16 KiB; profile edits allow 128 KiB. Business capacity checks still apply.
-All responses carry `Cache-Control: no-store`; registration/login completion
-return 201, other successes return 200 (revocation returns `{}`). Error JSON
+All responses carry `Cache-Control: no-store`; device/email login completions
+return 201, email signup and campus completion return 200 (revocation returns `{}`). Error JSON
 preserves the same stable reason as gRPC, with UC-specific 400/401/403/404/409/
 413/429/503 status mapping. Parser errors never echo raw submitted values.
 
 `cmd/auth-center/http_e2e_test.go` runs against the real Wire process and MongoDB,
-covering the nine routes, generated HTTP clients, strict JSON, Session headers,
+covering the retained routes, retired no-email 404, generated HTTP clients, strict JSON, Session headers,
 profile CAS, revocation retries, and isolation of internal methods. The existing
 gRPC provider tests exercise the same running composition root.
 
-## Cold key rotation and storage
+## Retired association configuration and storage
 
-Stop the old process and drain requests. Inject the new current key group and
-exactly one previous group using `AUTH_ASSOC_PREVIOUS_KEY_VERSION`,
-`AUTH_ASSOC_PREVIOUS_ENCRYPT_KEY`, and `AUTH_ASSOC_PREVIOUS_LOOKUP_KEY`.
-All encryption and lookup keys must be distinct. The new process closes pending
-registration operations, migrates groups in batches of at most 500, verifies all
-resulting ciphertext/lookup pairs and counts, then starts listening. It preserves
-association IDs and memberships. The startup gate has a 10-minute deadline.
-Failure exits before listening; restart with the same groups to retry idempotently.
-After success, future starts can omit all previous-key variables. Keep the keys
-needed to decrypt retained backups under the backup restoration policy.
-A production-size maintenance-window measurement is still required on the real
-transaction-enabled MongoDB deployment; local tests do not establish that budget.
+AUTH_ASSOC_KEY_VERSION, AUTH_ASSOC_ENCRYPT_KEY, AUTH_ASSOC_LOOKUP_KEY and their
+AUTH_ASSOC_PREVIOUS_* counterparts are ignored. Malformed leftovers do not block
+startup. There are no association group/member writes, encryption, startup
+migration or full-scan maintenance prerequisites. This undeployed system has no
+production association migration; startup does not silently delete old development
+data or turn old school declarations into campus certification.
 
-Collections are separate: `auth_principals` (embedded profile), `auth_credentials`,
-`auth_sessions`, `auth_authentication_operations`, `auth_student_associations`,
-`auth_student_association_members`, and `auth_runtime`. Unique indexes guard IDs,
-credential fingerprints, Session token digests and keyed association lookups.
-The current single-process implementation serializes authentication transactions
-with the `auth_runtime/authentication` fence before touching operation, principal,
-credential and Session state. This favors correctness over throughput; future
-principal disable and credential mutation must join the same transaction protocol.
-Profile optimistic updates preserve the other principal fields.
-
-Session tokens, raw association tokens, student numbers and registration signing
-payloads are not persisted. Association tokens use authenticated encryption;
-lookup HMAC and encryption use distinct keys. Completed/closed registration
-snapshots clear encrypted token material. Revoked Sessions and credential rows
-are conservatively retained: no TTL deletion currently releases audit markers or
-public-key ownership. Physical retention/cleanup is a later maintenance task.
-
-`cmd/auth-center/user_endpoints_e2e_test.go` exercises the production Wire root,
-real gRPC generated clients and MongoDB for registration → profile → login →
-Session/credential revocation → cold rotation → association reuse. Run
-`./scripts/test-mongo-integration.sh -race` for all database and provider tests.
-The script starts an isolated single-member replica set with fault injection
-enabled only in that test container and removes it on exit.
+USER initialization, credentials, operations and Sessions remain Auth-owned,
+with unique IDs/fingerprints/token digests and the shared authentication
+transaction fence. Session secrets, device private keys, school passwords,
+student numbers and whole signing payloads are not persisted. The registration
+API only accepts verified email plus the background device proof. Email-key
+cold updates, JWS rotation and UC025 termination-ledger restore checks remain
+required under their own contracts; they are not association migration.
 
 ## Session-to-user-identity issuance (UC010)
 
@@ -347,14 +394,14 @@ receives profile-review permission automatically.
 ## Email registration and binding (UC011)
 
 `AUTH_EMAIL_BINDING_ENABLED` defaults to `false`. Enabling it requires the complete
-user endpoint runtime plus an independent email HMAC key and SMTP settings below.
+user endpoint runtime plus the v3/password gate, an independent email HMAC key and SMTP settings below.
 Disabled HTTP routes are absent and the three native gRPC methods return
 UNIMPLEMENTED. Startup validates configuration, CA certificates, database indexes
-and migration state without sending probe mail.
+without sending probe mail.
 
 | Variable | Meaning |
 | --- | --- |
-| `AUTH_EMAIL_BINDING_HMAC_KEY` | Required canonical standard Base64 of an independent random 32-byte key; must differ from current/previous association keys |
+| `AUTH_EMAIL_BINDING_HMAC_KEY` | Required canonical standard Base64 of an independent random 32-byte key; must differ from email-login and password operation keys |
 | `AUTH_SMTP_ADDR` | Required SMTP `host:port`, with a certificate valid for that host |
 | `AUTH_SMTP_FROM` | Required single lowercase platform sender address |
 | `AUTH_SMTP_TLS_MODE` | Required `implicit_tls` or `starttls`; verified TLS is mandatory |
@@ -371,69 +418,53 @@ advertised `LOGIN`; credentials are never sent before verified TLS is active. A
 server offering only unsupported mechanisms such as `XOAUTH2` fails closed with
 `EMAIL_DELIVERY_UNAVAILABLE`. OAuth-based SMTP authentication is not implemented.
 
-The three exact `auth_center.v1.email_binding.EmailBindingService` methods are
-`BeginSetEmail`, `CompleteSetEmail` and `GetOwnEmailBinding`, mapped respectively to
-`POST /v1/email-bindings`, `POST /v1/email-bindings/{operation_id}/completion` and
-`GET /v1/users/me/email-binding`. Both completion modes return HTTP 200. Gateway
-uses DIRECT forwarding with the `/auth-center` prefix stripped; Gateway and
-mobile implementation are separate work packages.
+V3 exposes the seven exact `auth_center.v3.email_account.EmailAccountService`
+methods at `/v3/email-registrations`, `/v3/email-registrations:complete`,
+`/v3/users/me/emails`, `/v3/users/me/email-verifications`,
+`/v3/users/me/email-verifications:complete`, `/v3/users/me/login-email:switch`
+and `/v3/users/me/emails:remove`. Anonymous registration rejects every supplied
+Session carrier. Owner methods require exactly one current Session; other
+identity carriers cannot substitute for it. Strict lowerCamelCase JSON rejects
+unknown/duplicate/null/omitted fields and non-string int64 revisions. Native
+Proto rejects duplicate/unknown fields before unmarshal loses them. Both use
+16 KiB bounds, exact DIRECT dispatch and no-store responses.
 
-Absent `x-iwut-session` selects email registration; a valid token selects binding
-to the current account. Empty, malformed, duplicate, expired or revoked tokens
-are rejected. The operation's mode cannot change. Registration requires the
-existing `iwut-device-v1` public-key proposal and student association declaration,
-then both the email code and an independent `iwut-email-registration-v1` device
-proof. Begin creates no account. Complete creates USER, device, association,
-first Session and revision-1 email binding in one Mongo transaction. BIND requires
-an explicit nonnegative `expectedRevision` (including initial zero) and a current
-same-account Session at completion. Replacing an email preserves the old binding
-until the new address is verified and committed. Query always requires Session.
+Signup requires code, new-password policy and ten-field v3 device signature.
+All new USER/password/directory/binding/key/Session/audit facts commit together;
+SMTP only runs after confirmed Begin. Codes last ten minutes, permit five
+failures and share the old persistent send budgets. Lost SMTP acknowledgments
+retain the operation and quota; same requestId recovers metadata without sending
+again. Signup never replays the Session token. Mutation retries can recover only
+still-current non-secret state, not historical directory results.
 
-Codes are eight ASCII digits (including leading zeros), expire at ten minutes,
-and share a five-failure limit with device proof failures. Each owner/public key
-and target email has a fixed 60-second resend cooldown. Send quotas are persistent
-sliding 60-minute windows. General authentication request limits also apply.
-The peer address is taken from the transport connection, never caller-supplied
-forwarding headers. Size is bounded at 16 KiB; JSON and protobuf reject unknown
-and ambiguous fields. Responses carry `Cache-Control: no-store`.
+Mongo stores the directory and bindings separately, with global address and
+binding-ID uniqueness, no owner-unique binding index, and bounded 11-row integrity
+reads. V3 proposals/mutations retain 24-hour idempotence records. Pending and
+retained admission is shared with authentication operations under the same Auth
+transaction fence; physical limits do not depend on timely TTL deletion. Cold
+operation keys invalidate old proposals without changing verified email ownership.
 
-`requestId` deduplication lasts at least 24 hours and never sends the same operation
-again. A delivery rejection, timeout or lost SMTP acknowledgement returns
-EMAIL_DELIVERY_UNAVAILABLE while preserving the operation and consumed quota.
-Retry the same request ID to recover operation metadata; resend explicitly with
-a new ID after cooldown. REGISTER completion never returns its Session token on
-replay: keep the original device private key and use ordinary device login if
-the first completion response is lost or the commit outcome is unknown. BIND
-completion can recover its historical result with the original code and a valid
-same-account Session; query returns the current binding.
+## Current campus certification (UC031)
 
-Mongo uses `auth_email_bindings`, `auth_email_operations`, `auth_email_quotas` and
-`auth_email_audit`, plus the shared authentication operation collection for
-REGISTER_WITH_EMAIL encrypted association snapshots. Unique indexes guard owner
-and activated email. All activation/revocation checks and quota debits use the
-shared authentication transaction fence. TTL removes retained operation history
-and expired quota buckets; expiry/state checks never rely on TTL timing. A cold
-HMAC key change closes old pending operations and clears association ciphertext,
-without changing activated bindings or releasing retained request IDs. Completed
-registration markers survive the key change. Association-key rotation includes
-both ordinary and email registration snapshots.
+`AUTH_CAMPUS_CERTIFICATION_ENABLED` controls the retained three exact campus
+verification/query routes. They require the v3/password runtime, use the ADD key
+and budget, and derive membership from current verified exact WHUT addresses.
+They can add a second campus binding; already-certified status is not a blocker.
+The old campus code key is retired and ignored. No periodic revalidation or
+student/enrollment/administrator authority is implied. Removing the last basis
+removes certification immediately; old permanent facts never restore it.
 
-SMTP sending occurs once, after a confirmed Begin transaction, and uses fixed
-purpose templates. No plaintext code, student association token, signing payload
-or Session secret is persisted. Audit contains only account/operation IDs,
-revision, timestamp and result. SMTP failures never return server response text.
-Tests use only loopback TLS SMTP capture and `.test` addresses, never real users.
-Public vectors, real Mongo rollback/concurrency/rotation/quota tests and production
-Wire HTTP/gRPC tests cover the implementation. UC012 email login is described
-below; UC013 Developer enrollment is described next. Public client delivery remains separate.
-
+OAuth `campus.whut` remains USERINFO_CAMPUS. Current client/grant/token/catalog,
+account and channel gates control its minimal `iwut_campus` disclosure. It
+contains no email, timestamp, authId or counter, and never enters the ID Token.
+Consent, pairwise sub and application-owned benefits are not implicitly erased.
 
 ## Email login and device authorization (UC012)
 
 `AUTH_EMAIL_LOGIN_ENABLED` defaults to `false`. When enabled it requires
 `AUTH_USER_ENDPOINTS_ENABLED=true`, `AUTH_EMAIL_LOGIN_CODE_KEY` (canonical standard
 Base64 of an independent random 32-byte key), and the SMTP settings documented
-above. The login key must differ from association keys and the binding HMAC key
+above. The login key must differ from the binding and password HMAC keys
 when both email capabilities are enabled. Login can be enabled without binding
 routes or the binding HMAC key. Disabled HTTP routes are absent; the two gRPC
 methods return UNIMPLEMENTED.
@@ -446,7 +477,7 @@ Gateway routing remains a separate delivery; the intended policy is DIRECT.
 
 The client supplies its persistent device public key and email, then the emailed
 code and the independent `iwut-email-login-v1` signature. The server keeps the
-original email ownership/revision and eligibility fixed for the operation,
+original primary-email role/revision and eligibility fixed for the operation,
 rechecks them at commit, and atomically registers or reuses the device credential,
 consumes the operation, applies Session LRU and inserts the Session and audit.
 No USER or student association is created. Unknown/disabled targets receive the
@@ -454,7 +485,7 @@ same challenge/mail shape and cannot become eligible during that operation.
 
 The resulting Session uses `EMAIL_CODE_AND_DEVICE`, a required device credential
 reference and positive `emailBindingRevision` provenance. All Session consumers
-support it, including revocation, binding and identity issuance. An email change
+support it, including revocation, binding and identity issuance. A login-role change
 invalidates pending login operations but does not revoke authorized devices or
 their Sessions; revoke the device credential to remove that access. Later UC007
 automatic login uses the ordinary `DEVICE_CREDENTIAL` method. The same account-wide
@@ -616,6 +647,37 @@ publication clearing, stale codes and route-channel restrictions.
 Its isolated App build uses a deterministic public DNS resolver through a
 Go build overlay; it does not alter App source or system DNS.
 
+## Application user storage (UC-AUTH-030)
+
+`AUTH_APPLICATION_USER_STORAGE_ENABLED=false` by default. Setting it to `true`
+requires both the OAuth runtime with `resourceScopesReady=true` and user endpoints;
+startup also requires enabled, exactly bound `storage.read` and `storage.write`
+catalog entries. It enables two Auth-owned, HTTP-only resource endpoints for third-party applications:
+
+- `POST /v1/application-user-storage:batchGet`, requiring an opaque access token
+  with the current `iwut-auth-center` audience and `storage.read`;
+- `POST /v1/application-user-storage:mutate`, requiring the same audience and
+  `storage.write`, plus whole-namespace `expectedRevision` CAS.
+
+The same switch registers the user's generated HTTP/native gRPC
+`DELETE /v1/users/me/application-user-storage/{application_id}` method. That method
+uses the normal trusted Auth user identity, deletes all TEST/GREY/STABLE namespaces
+for the caller and Application, and neither reads values nor revokes OAuth grants.
+
+Namespaces are isolated by `(authId, applicationId, channel)`. Limits are fixed at
+128 keys, 8 KiB per UTF-8 value, 64 KiB total key/value bytes, 64 unique operations
+per request and a 16 KiB HTTP body. Third-party JSON rejects unknown or duplicate
+names at every depth. Stale mutations return HTTP 409 with `minimumRevision`; the
+caller must read again before retrying. Responses are `no-store`; PUBLIC browser
+CORS uses the currently approved callback origin and CONFIDENTIAL clients do not
+receive browser CORS.
+
+Account closure includes this collection in its bounded cleanup plan. Application
+closure creates a unique cleanup task in the same transaction as the permanent
+tombstone and audit, then a lifecycle worker deletes at most 500 namespaces per
+tick. Startup reconciles old tombstones before listeners start. These lifecycle
+tasks run even while the public storage switch is off.
+
 ## Platform administrator management (UC-AUTH-021)
 
 `AUTH_PLATFORM_ADMIN_ENDPOINTS_ENABLED` defaults to false; enabling it requires
@@ -662,6 +724,34 @@ create a fresh disposable database; never delete production consumed markers.
 Normal credential recovery uses email login. A separate audited offline break-glass
 recovery procedure for loss of all administrator login methods is still a production
 readiness dependency and is not implemented by this UC.
+
+## Academic-year schedule management (UC-AUTH-029)
+
+The Mongo-authoritative schedule is provisioned whenever user endpoints start, even
+when its management API is disabled. It initially advances at September 1 00:00 in
+Asia/Shanghai. Profile grade editing and scoped UserInfo disclosure use the same
+schedule inside the shared authentication transaction; neither relies on a local
+file or a cron write.
+
+`AUTH_ACADEMIC_YEAR_POLICY_ENDPOINTS_ENABLED=false` by default. Enabling it requires
+user endpoints and Auth-audience identity issuance, and registers:
+
+- `GET /v1/academic-year-policy/schedule`, returning the current academic year,
+  strictly future next rollover, observation time and configuration revision;
+- `PUT /v1/academic-year-policy/schedule/next-rollover`, accepting a complete future
+  Timestamp, positive expected revision and trimmed 1–1024-byte reason.
+
+Both methods require the current complete platform-administrator bundle. Updates do
+not change the current academic year immediately. The configured Instant becomes the
+next boundary, and later boundaries recur by one Shanghai calendar year; February 29
+normalizes to March 1 in the following non-leap year and remains March 1. Reads and
+no-op updates do not advance the configuration revision or append audit records.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `AUTH_ACADEMIC_YEAR_POLICY_READ_PER_MINUTE` | 60 | Reads per authenticated actor |
+| `AUTH_ACADEMIC_YEAR_POLICY_WRITE_PER_MINUTE` | 10 | Writes per authenticated actor |
+| `AUTH_ACADEMIC_YEAR_POLICY_MAX_BUCKETS` | 4096 | Bounded combined read/write buckets |
 
 ## Application operations permissions (UC-AUTH-027)
 
@@ -828,8 +918,13 @@ summaries are the authority used by App recovery after a restart.
 
 ### Account closure (UC025)
 
+Both listeners use an explicit 15-second bounded request timeout so the shared
+password executor (at most 2 seconds queueing), App coordination (5-second RPC
+deadline) and final Auth transactions can complete. A caller's shorter deadline
+still applies; this does not extend proof, Session or token lifetimes.
+
 `AUTH_ACCOUNT_CLOSURE_ENABLED=true` enables the five dedicated HTTP/native gRPC
-account-closure methods. It requires user endpoints, the independent owner-exit
+account-closure methods. It requires the configured password runtime, user endpoints, the independent owner-exit
 manifest above, `AUTH_CLOSURE_DATA_POLICY_READY=true`, and
 `AUTH_TERMINATION_LEDGER_DIR` pointing to an existing private (`0700`), absolute,
 non-symlink directory. The application does not create a missing mount. The
@@ -838,7 +933,14 @@ readiness assertion means the operator has actually implemented the documented
 local tests do not establish that operational readiness. Public closure is off by
 default. No normal Session, JWS or OAuth carrier is accepted on these methods.
 
-A fresh device signature authorizes the preview. Confirm/Cancel use only
+A fresh registered-device signature and the current password jointly authorize
+the preview (`PrepareAccountClosure.current_password`, field 3). An omitted
+password is rejected, not treated as a signature-only legacy request. ACTIVE and
+DISABLED users can use this dedicated proof, but disabled users receive no normal
+Session. Password/signature failures share the operation's five-attempt ceiling.
+Password verification uses the process-wide bounded executor and persistent
+quota; Prepare/Ready/Confirm recheck password/account versions and the credential
+cutoff in the final Auth transaction. Confirm/Cancel use only
 `x-iwut-closure-confirmation`; status uses only `x-iwut-closure-receipt`. Never log
 these values or put them in a URL. Confirm irreversibly commits CLOSED and a
 persistent cleanup task; the response remains TERMINATION_PENDING until the

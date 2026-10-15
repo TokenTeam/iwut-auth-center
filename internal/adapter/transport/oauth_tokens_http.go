@@ -6,6 +6,7 @@ import (
 	d "iwut-auth-center/internal/oauth/domain"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -239,10 +240,25 @@ func (h *OAuthHTTP) userinfo(w http.ResponseWriter, r *http.Request) {
 		oauthError(w, e)
 		return
 	}
+	response, e := userInfoResponse(out)
+	if e != nil {
+		oauthError(w, e)
+		return
+	}
+	oauthJSON(w, 200, response)
+}
+
+func userInfoResponse(out d.UserInfo) (map[string]any, error) {
 	response := map[string]any{"sub": out.Subject}
 	if out.EmailVerified {
 		response["email"] = out.Email
 		response["email_verified"] = true
+	}
+	if out.Campus != nil {
+		if out.Campus.Institution != "WHUT" || out.Campus.CertifiedAt.UnixMilli() <= 0 {
+			return nil, d.ErrUnavailable
+		}
+		response["iwut_campus"] = map[string]any{"institution": "WHUT", "certified": true}
 	}
 	if len(out.Profile) > 0 {
 		profile := map[string]any{}
@@ -254,12 +270,18 @@ func (h *OAuthHTTP) userinfo(w http.ResponseWriter, r *http.Request) {
 				profile[entry.Key] = entry.Value.Integer
 			case "BOOLEAN":
 				profile[entry.Key] = entry.Value.Boolean
+			case "STRING_SET":
+				profile[entry.Key] = append([]string(nil), entry.Value.Strings...)
+			case "ACADEMIC_GRADE":
+				if entry.Value.Academic == nil {
+					return nil, d.ErrUnavailable
+				}
+				profile[entry.Key] = entry.Value.Academic.Stage + "_" + strconv.FormatInt(int64(entry.Value.Integer), 10)
 			default:
-				oauthError(w, d.ErrUnavailable)
-				return
+				return nil, d.ErrUnavailable
 			}
 		}
 		response["iwut_profile"] = profile
 	}
-	oauthJSON(w, 200, response)
+	return response, nil
 }

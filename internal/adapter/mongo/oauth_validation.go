@@ -25,7 +25,7 @@ func validOAuthDocument[T any](doc oauthDocument[T]) bool {
 		profileFields := map[string]bool{}
 		for _, s := range v.Scopes {
 			names = append(names, s.Name)
-			if s.Label == "" || s.Description == "" || s.Kind != "RESOURCE" && s.Kind != "PROTOCOL" && s.Kind != "USERINFO_PROFILE" || s.Kind == "RESOURCE" && (s.Audience == "" || s.ProfileField != "" || s.ProfileValueType != "") || s.Kind == "PROTOCOL" && (s.Audience != "" || s.ProfileField != "" || s.ProfileValueType != "") || s.Kind == "USERINFO_PROFILE" && (s.Audience != "" || s.Name != "profile."+s.ProfileField || !d.ValidProfileValueType(s.ProfileValueType)) {
+			if s.Label == "" || s.Description == "" || !s.ValidMetadata() {
 				return false
 			}
 			if s.Kind == "USERINFO_PROFILE" {

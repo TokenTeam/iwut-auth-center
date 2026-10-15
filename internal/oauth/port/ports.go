@@ -17,12 +17,17 @@ type Store interface {
 	Transaction(context.Context, func(Tx) error) error
 }
 type Tx interface {
+	AcademicYear(time.Time) (int32, error)
 	ApplicationOpen(string) (bool, error)
 	Registrations(string, string) ([]d.Registration, error)
 	SaveRegistration(d.Registration) error
 	Session(string, time.Time) (d.Session, error)
 	User(string) (d.User, error)
 	Profile(string) (d.Profile, error)
+	CampusCertification(string) (d.CampusCertification, error)
+	ApplicationUserStorage(string, string, string) (d.StorageNamespace, error)
+	SaveApplicationUserStorage(int64, d.StorageNamespace) error
+	ClearApplicationUserStorage(string, string, time.Time) (bool, error)
 	Catalog() (d.Catalog, error)
 	Interaction(string) (d.Interaction, error)
 	SaveInteraction(d.Interaction) error

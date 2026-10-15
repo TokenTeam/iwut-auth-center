@@ -16,7 +16,6 @@ import (
 	authpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 	pb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_application"
 	statuspb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_status"
-	emailpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_binding"
 	loginpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_login"
 	identitypb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/identity"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
@@ -74,6 +73,7 @@ func TestE2E_DeveloperApplication_ProductionWireAndAppCenter(t *testing.T) {
 	dbName := "uc013_wire_" + uuid.NewString()
 	env := map[string]string{config.UserEndpointsEnabledEnv: "true", config.IdentityIssuanceEnabledEnv: "true", config.MongoURIEnv: uri, config.MongoDatabaseEnv: dbName, config.ServiceCallersEnv: callers, config.HTTPAddrEnv: reserveAddress(t), config.GRPCAddrEnv: reserveAddress(t), "AUTH_AUTHENTICATION_SERVICE_ID": "iwut-auth-center:test", "AUTH_SESSION_TTL": "24h", "AUTH_ASSOC_KEY_VERSION": "v1", "AUTH_ASSOC_ENCRYPT_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32)), "AUTH_ASSOC_LOOKUP_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, 32)), "AUTH_PROFILE_CATALOG_FILE": catalog, "AUTH_USER_IDENTITY_ISSUER": "identity-test", "AUTH_USER_IDENTITY_PUBLIC_KEYS_JSON": string(keys), "AUTH_USER_IDENTITY_SIGNING_KID": "identity-k1", "AUTH_USER_IDENTITY_PRIVATE_KEY_PEM_B64": base64.StdEncoding.EncodeToString(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})), "AUTH_EMAIL_BINDING_ENABLED": "true", "AUTH_EMAIL_BINDING_HMAC_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{3}, 32)), "AUTH_EMAIL_LOGIN_ENABLED": "true", "AUTH_EMAIL_LOGIN_CODE_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)), "AUTH_SMTP_ADDR": capture.Address, "AUTH_SMTP_FROM": "auth@example.test", "AUTH_SMTP_TLS_MODE": "implicit_tls", "AUTH_SMTP_CA_FILE": ca, "AUTH_DEVELOPER_APPLICATION_ENABLED": "true", "AUTH_EMAIL_RECOVERY_READY": "true", "AUTH_DEVELOPER_ACCOUNT_PER_MINUTE": "1000", "AUTH_DEVELOPER_SOURCE_PER_MINUTE": "1000", "AUTH_DEVELOPER_GLOBAL_PER_MINUTE": "10000"}
 	env["AUTH_DEVELOPER_MANAGEMENT_ENDPOINTS_ENABLED"] = "true"
+	enableEmailRegistrationFixture(t, env, capture)
 	load := func() config.Config {
 		c, e := config.Load(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
 		if e != nil {
@@ -94,16 +94,12 @@ func TestE2E_DeveloperApplication_ProductionWireAndAppCenter(t *testing.T) {
 	conn, stop := startUserApp(t, app, cleanup, env[config.GRPCAddrEnv])
 	defer stop()
 	client := pb.NewDeveloperApplicationServiceClient(conn)
-	auth := authpb.NewAuthenticationServiceClient(conn)
 	device, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	user, _ := registerUser(t, auth, device, bytes.Repeat([]byte{9}, 32))
+	user, _ := registerUser(t, conn, device, bytes.Repeat([]byte{9}, 32))
 	ctx := sessionCallContext(t.Context(), user.Session.SessionToken)
 	query, e := client.GetOwnDeveloperEligibility(ctx, &pb.GetOwnDeveloperEligibilityRequest{})
-	if e != nil || query.DeveloperStatus != nil || query.ActivatedAtUnixMs != nil || query.DeveloperHandle != nil || query.CanApply || len(query.Blockers) != 1 || query.Blockers[0] != pb.DeveloperApplicationBlocker_DEVELOPER_APPLICATION_BLOCKER_EMAIL_REQUIRED {
+	if e != nil || query.DeveloperStatus != nil || query.ActivatedAtUnixMs != nil || query.DeveloperHandle != nil || !query.CanApply || len(query.Blockers) != 0 {
 		t.Fatal(query, e)
-	}
-	if _, e = client.ApplyForDeveloper(ctx, &pb.ApplyForDeveloperRequest{DeveloperHandle: "Alice"}); status.Code(e) != codes.FailedPrecondition {
-		t.Fatal(e)
 	}
 	base := "http://" + env[config.HTTPAddrEnv]
 	rawHTTP := func(method, path, body string, headers http.Header) (int, http.Header, []byte) {
@@ -126,8 +122,8 @@ func TestE2E_DeveloperApplication_ProductionWireAndAppCenter(t *testing.T) {
 		return resp.StatusCode, resp.Header, b
 	}
 	headers := http.Header{"X-Iwut-Session": []string{user.Session.SessionToken}}
-	code, h, body := rawHTTP("POST", "/v1/users/me/developer-application", `{"developerHandle":"Alice"}`, headers)
-	if code != 409 || !bytes.Contains(body, []byte("DEVELOPER_EMAIL_REQUIRED")) || h.Get("Cache-Control") != "no-store" {
+	code, h, body := rawHTTP("GET", "/v1/users/me/developer-eligibility", ``, headers)
+	if code != 200 || h.Get("Cache-Control") != "no-store" {
 		t.Fatal(code, string(body), h)
 	}
 	for _, values := range [][]string{nil, {""}, {"bad"}, {user.Session.SessionToken, user.Session.SessionToken}} {
@@ -187,15 +183,7 @@ func TestE2E_DeveloperApplication_ProductionWireAndAppCenter(t *testing.T) {
 		}
 		return matches[1]
 	}
-	revision := int64(0)
-	emailClient := emailpb.NewEmailBindingServiceClient(conn)
-	challenge, e := emailClient.BeginSetEmail(ctx, &emailpb.BeginSetEmailRequest{RequestId: uuid.NewString(), Email: "developer@example.test", Intent: &emailpb.BeginSetEmailRequest_Binding{Binding: &emailpb.BindEmailIntent{ExpectedRevision: &revision}}})
-	if e != nil {
-		t.Fatal(e)
-	}
-	if _, e = emailClient.CompleteSetEmail(ctx, &emailpb.CompleteSetEmailRequest{OperationId: challenge.OperationId, Code: nextCode()}); e != nil {
-		t.Fatal(e)
-	}
+	addAndSwitchLoginEmail(t, conn, user.Session.SessionToken, "developer@example.test")
 	query, e = client.GetOwnDeveloperEligibility(ctx, &pb.GetOwnDeveloperEligibilityRequest{})
 	if e != nil || !query.CanApply || query.DeveloperStatus != nil {
 		t.Fatal(query, e)
@@ -285,15 +273,9 @@ func TestE2E_DeveloperApplication_ProductionWireAndAppCenter(t *testing.T) {
 	// Simulate an imported APPROVED principal without activation history, then
 	// bind through the actual email flow and explicitly claim its first handle.
 	legacyDevice, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	legacy, _ := registerUser(t, auth, legacyDevice, bytes.Repeat([]byte{6}, 32))
+	legacy, _ := registerUser(t, conn, legacyDevice, bytes.Repeat([]byte{6}, 32))
 	legacyCtx := sessionCallContext(t.Context(), legacy.Session.SessionToken)
-	legacyEmail, e := emailClient.BeginSetEmail(legacyCtx, &emailpb.BeginSetEmailRequest{RequestId: uuid.NewString(), Email: "legacy@example.test", Intent: &emailpb.BeginSetEmailRequest_Binding{Binding: &emailpb.BindEmailIntent{ExpectedRevision: &revision}}})
-	if e != nil {
-		t.Fatal(e)
-	}
-	if _, e = emailClient.CompleteSetEmail(legacyCtx, &emailpb.CompleteSetEmailRequest{OperationId: legacyEmail.OperationId, Code: nextCode()}); e != nil {
-		t.Fatal(e)
-	}
+	addAndSwitchLoginEmail(t, conn, legacy.Session.SessionToken, "legacy@example.test")
 	if _, e = db.Collection(mongo.PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": legacy.AuthId}, bson.M{"$set": bson.M{"developerStatus": "APPROVED", "developerRevision": int64(1)}}); e != nil {
 		t.Fatal(e)
 	}
@@ -323,6 +305,7 @@ func TestE2E_DeveloperApplication_ProductionWireAndAppCenter(t *testing.T) {
 	// but blocks first application. Disabled registration is a separate gate.
 	env[config.HTTPAddrEnv] = reserveAddress(t)
 	env[config.GRPCAddrEnv] = reserveAddress(t)
+	rememberRegistrationSMTP(t, env[config.GRPCAddrEnv], capture)
 	env["AUTH_EMAIL_LOGIN_ENABLED"] = "false"
 	env["AUTH_EMAIL_RECOVERY_READY"] = "false"
 	env["AUTH_DEVELOPER_ACCOUNT_PER_MINUTE"] = "2"
@@ -346,10 +329,10 @@ func TestE2E_DeveloperApplication_ProductionWireAndAppCenter(t *testing.T) {
 	}
 	runDeveloperManagementRecoveryClosed(t, closedConn, user.AuthId, managementIdentity)
 	newDevice, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	ordinary, _ := registerUser(t, authpb.NewAuthenticationServiceClient(closedConn), newDevice, bytes.Repeat([]byte{8}, 32))
+	ordinary, _ := registerUser(t, closedConn, newDevice, bytes.Repeat([]byte{8}, 32))
 	ordinaryCtx := sessionCallContext(t.Context(), ordinary.Session.SessionToken)
 	blocked, e := closedClient.GetOwnDeveloperEligibility(ordinaryCtx, &pb.GetOwnDeveloperEligibilityRequest{})
-	if e != nil || len(blocked.Blockers) != 2 || blocked.Blockers[0] != pb.DeveloperApplicationBlocker_DEVELOPER_APPLICATION_BLOCKER_EMAIL_REQUIRED || blocked.Blockers[1] != pb.DeveloperApplicationBlocker_DEVELOPER_APPLICATION_BLOCKER_EMAIL_LOGIN_UNAVAILABLE {
+	if e != nil || len(blocked.Blockers) != 1 || blocked.Blockers[0] != pb.DeveloperApplicationBlocker_DEVELOPER_APPLICATION_BLOCKER_EMAIL_LOGIN_UNAVAILABLE {
 		t.Fatal(blocked, e)
 	}
 	// Historical APPROVED stays nullable and does not manufacture activation history.

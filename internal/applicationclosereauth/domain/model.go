@@ -21,7 +21,7 @@ var (
 type Operation struct {
 	OperationID, AuthID, SessionID, CredentialID, ApplicationID string
 	Challenge, PublicKey, SignatureDigest                       []byte
-	AccountRevision, FailedAttempts                             int64
+	AccountRevision, PasswordRevision, FailedAttempts           int64
 	State                                                       string
 	CreatedAt, ExpiresAt                                        time.Time
 	JTI                                                         string

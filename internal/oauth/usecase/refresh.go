@@ -4,16 +4,28 @@ import (
 	"context"
 	d "iwut-auth-center/internal/oauth/domain"
 	"iwut-auth-center/internal/oauth/port"
+	"time"
 )
 
 func (s *Service) current(ctx context.Context, tx port.Tx, f d.Family) (d.Runtime, d.Grant, d.Catalog, error) {
+	return s.currentAt(ctx, tx, f, s.now())
+}
+
+func (s *Service) currentAt(ctx context.Context, tx port.Tx, f d.Family, observedAt time.Time) (d.Runtime, d.Grant, d.Catalog, error) {
+	if f.Revoked || !f.IdleExpiresAt.After(observedAt) || !f.AbsoluteExpiresAt.After(observedAt) || f.GrantEpoch < 1 || f.ClientEpoch < 1 {
+		return d.Runtime{}, d.Grant{}, d.Catalog{}, d.ErrGrant
+	}
+	return s.currentSnapshot(ctx, tx, f)
+}
+
+func (s *Service) currentSnapshot(ctx context.Context, tx port.Tx, f d.Family) (d.Runtime, d.Grant, d.Catalog, error) {
 	var rt d.Runtime
 	var g d.Grant
 	var c d.Catalog
 	if err := applicationOpen(tx, f.ApplicationID); err != nil {
 		return rt, g, c, d.ErrGrant
 	}
-	if f.Revoked || !f.IdleExpiresAt.After(s.now()) || !f.AbsoluteExpiresAt.After(s.now()) || f.GrantEpoch < 1 || f.ClientEpoch < 1 {
+	if f.Revoked || f.GrantEpoch < 1 || f.ClientEpoch < 1 {
 		return rt, g, c, d.ErrGrant
 	}
 	user, e := tx.User(f.AuthID)

@@ -9,8 +9,10 @@ import (
 	"time"
 )
 
-// ProfileConfig retains raw deployment data; the catalog adapter validates domain rules.
-type ProfileConfig struct{ JSON []byte }
+// ProfileConfig retains raw deployment data; catalog adapters validate domain rules.
+type ProfileConfig struct {
+	JSON []byte
+}
 
 func LoadProfileConfig() (ProfileConfig, error) {
 	return ParseProfileConfig(os.LookupEnv)

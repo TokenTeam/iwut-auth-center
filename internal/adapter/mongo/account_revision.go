@@ -7,6 +7,7 @@ import (
 	m "go.mongodb.org/mongo-driver/v2/mongo"
 	account "iwut-auth-center/internal/account/domain"
 	"iwut-auth-center/internal/authentication/port"
+	password "iwut-auth-center/internal/password/domain"
 )
 
 // AccountRevisionTx reads authoritative account state in the caller's transaction.
@@ -22,17 +23,41 @@ func (r *AuthenticationRepository) AccountRevisionTx(ctx context.Context, authID
 	if v := raw.Lookup("principalType"); v.Type == bson.TypeString && v.StringValue() == "SYSTEM" {
 		return 0, port.ErrAuthenticationFailed
 	}
-	if !identityFields(raw, map[string]bson.Type{"principalType": bson.TypeString, "accountStatus": bson.TypeString, "accountRevision": bson.TypeInt64}) {
+	// A legitimate CLOSED tombstone deliberately has no credential bounds.
+	// Reject its authority without treating that minimal schema as corruption.
+	if v := raw.Lookup("accountStatus"); v.Type == bson.TypeString && v.StringValue() == "CLOSED" {
+		if !validClosedPrincipal(raw) {
+			return 0, port.ErrUnavailable
+		}
+		return 0, port.ErrAuthenticationFailed
+	}
+	if !identityFields(raw, map[string]bson.Type{"principalType": bson.TypeString, "accountStatus": bson.TypeString, "accountRevision": bson.TypeInt64, "minimumCredentialRevision": bson.TypeInt64}) {
 		return 0, port.ErrUnavailable
 	}
 	revision := raw.Lookup("accountRevision").Int64()
-	if revision <= 0 {
+	if !password.EligibleCredential(revision, raw.Lookup("minimumCredentialRevision").Int64(), revision) {
 		return 0, port.ErrUnavailable
 	}
 	if raw.Lookup("principalType").StringValue() != "USER" || raw.Lookup("accountStatus").StringValue() != "ACTIVE" {
 		return 0, port.ErrAuthenticationFailed
 	}
 	return revision, nil
+}
+
+func (r *AuthenticationRepository) CredentialBoundsTx(ctx context.Context, authID string) (int64, int64, error) {
+	revision, err := r.AccountRevisionTx(ctx, authID)
+	if err != nil {
+		return 0, 0, err
+	}
+	var raw bson.Raw
+	if err = r.database.Collection(PrincipalCollection).FindOne(ctx, bson.M{"authId": authID}).Decode(&raw); err != nil {
+		return 0, 0, err
+	}
+	minimum := raw.Lookup("minimumCredentialRevision")
+	if minimum.Type != bson.TypeInt64 || !password.EligibleCredential(revision, minimum.Int64(), revision) {
+		return 0, 0, port.ErrUnavailable
+	}
+	return revision, minimum.Int64(), nil
 }
 func (r *AuthenticationRepository) ConfirmAccountTx(ctx context.Context, authID string, revision int64) error {
 	current, err := r.AccountRevisionTx(ctx, authID)

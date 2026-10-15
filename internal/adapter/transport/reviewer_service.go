@@ -8,6 +8,7 @@ import (
 	kt "github.com/go-kratos/kratos/v2/transport"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/proto"
+	academicyear "iwut-auth-center/internal/academicyear/domain"
 	account "iwut-auth-center/internal/account/domain"
 	admin "iwut-auth-center/internal/administrator/domain"
 	applicationoperations "iwut-auth-center/internal/applicationoperations/domain"
@@ -34,7 +35,7 @@ func UserCapabilityIdentityMiddleware(v *UserIdentityVerifier) middleware.Middle
 			if accountManagementMethod(tr.Operation()) {
 				return accountManagementIdentity(v)(next)(ctx, req)
 			}
-			if !isReviewerOperation(tr.Operation()) && !isPlatformAdministratorOperation(tr.Operation()) && !isDeveloperManagementOperation(tr.Operation()) && !applicationOperationsPermissionMethod(tr.Operation()) {
+			if !isReviewerOperation(tr.Operation()) && !isPlatformAdministratorOperation(tr.Operation()) && !academicYearPolicyMethod(tr.Operation()) && !isDeveloperManagementOperation(tr.Operation()) && !applicationOperationsPermissionMethod(tr.Operation()) {
 				return UserProfileIdentityMiddleware(v)(next)(ctx, req)
 			}
 			values := tr.RequestHeader().Values(UserIdentityHeader)
@@ -50,7 +51,7 @@ func UserCapabilityIdentityMiddleware(v *UserIdentityVerifier) middleware.Middle
 				return nil, transportStatus(codes.Unauthenticated, "INVALID_USER_IDENTITY", "invalid user identity")
 			}
 			required := domain.Manager
-			if isPlatformAdministratorOperation(tr.Operation()) || applicationOperationsPermissionMethod(tr.Operation()) {
+			if isPlatformAdministratorOperation(tr.Operation()) || academicYearPolicyMethod(tr.Operation()) || applicationOperationsPermissionMethod(tr.Operation()) {
 				required = admin.Manager
 			}
 			if isDeveloperManagementOperation(tr.Operation()) {
@@ -65,6 +66,9 @@ func UserCapabilityIdentityMiddleware(v *UserIdentityVerifier) middleware.Middle
 				}
 				if isPlatformAdministratorOperation(tr.Operation()) {
 					return nil, platformAdministratorError(admin.ErrForbidden)
+				}
+				if academicYearPolicyMethod(tr.Operation()) {
+					return nil, academicYearPolicyError(academicyear.ErrForbidden)
 				}
 				return nil, reviewerError(domain.ErrForbidden)
 			}

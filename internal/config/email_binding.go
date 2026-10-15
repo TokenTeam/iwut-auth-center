@@ -1,7 +1,6 @@
 package config
 
 import (
-	"bytes"
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
@@ -44,11 +43,6 @@ func loadEmailCapability(lookup LookupEnv, user *UserEndpoints, enabledKey, keyN
 	c.HMACKey, e = base64.StdEncoding.Strict().DecodeString(raw)
 	if e != nil || len(c.HMACKey) != 32 || base64.StdEncoding.EncodeToString(c.HMACKey) != raw {
 		return nil, fmt.Errorf("%w: invalid email HMAC key", ErrInvalidConfiguration)
-	}
-	for _, k := range []*AssociationKey{&user.Association.Current, user.Association.Previous} {
-		if k != nil && (bytes.Equal(c.HMACKey, k.Encrypt) || bytes.Equal(c.HMACKey, k.Lookup)) {
-			return nil, fmt.Errorf("%w: email key must be independent", ErrInvalidConfiguration)
-		}
 	}
 	c.SMTPAddress, _ = lookup("AUTH_SMTP_ADDR")
 	c.SMTPFrom, _ = lookup("AUTH_SMTP_FROM")

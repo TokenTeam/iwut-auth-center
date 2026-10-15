@@ -19,29 +19,30 @@ const (
 )
 
 type closeReauthDocument struct {
-	OperationID     string    `bson:"operationid"`
-	AuthID          string    `bson:"authid"`
-	SessionID       string    `bson:"sessionid"`
-	CredentialID    string    `bson:"credentialid"`
-	ApplicationID   string    `bson:"applicationid"`
-	Challenge       []byte    `bson:"challenge"`
-	PublicKey       []byte    `bson:"publickey"`
-	SignatureDigest []byte    `bson:"signaturedigest,omitempty"`
-	AccountRevision int64     `bson:"accountrevision"`
-	FailedAttempts  int64     `bson:"failedattempts"`
-	State           string    `bson:"state"`
-	CreatedAt       time.Time `bson:"createdat"`
-	ExpiresAt       time.Time `bson:"expiresat"`
-	PurgeAt         time.Time `bson:"purgeat"`
-	JTI             string    `bson:"jti,omitempty"`
-	AuthTime        time.Time `bson:"authtime,omitempty"`
-	IssuedAt        time.Time `bson:"issuedat,omitempty"`
-	NotBefore       time.Time `bson:"notbefore,omitempty"`
-	ProofExpiresAt  time.Time `bson:"proofexpiresat,omitempty"`
+	OperationID      string    `bson:"operationid"`
+	AuthID           string    `bson:"authid"`
+	SessionID        string    `bson:"sessionid"`
+	CredentialID     string    `bson:"credentialid"`
+	ApplicationID    string    `bson:"applicationid"`
+	Challenge        []byte    `bson:"challenge"`
+	PublicKey        []byte    `bson:"publickey"`
+	SignatureDigest  []byte    `bson:"signaturedigest,omitempty"`
+	PasswordRevision int64     `bson:"passwordrevision"`
+	AccountRevision  int64     `bson:"accountrevision"`
+	FailedAttempts   int64     `bson:"failedattempts"`
+	State            string    `bson:"state"`
+	CreatedAt        time.Time `bson:"createdat"`
+	ExpiresAt        time.Time `bson:"expiresat"`
+	PurgeAt          time.Time `bson:"purgeat"`
+	JTI              string    `bson:"jti,omitempty"`
+	AuthTime         time.Time `bson:"authtime,omitempty"`
+	IssuedAt         time.Time `bson:"issuedat,omitempty"`
+	NotBefore        time.Time `bson:"notbefore,omitempty"`
+	ProofExpiresAt   time.Time `bson:"proofexpiresat,omitempty"`
 }
 
 func (v closeReauthDocument) domain() domain.Operation {
-	return domain.Operation{OperationID: v.OperationID, AuthID: v.AuthID, SessionID: v.SessionID, CredentialID: v.CredentialID, ApplicationID: v.ApplicationID, Challenge: v.Challenge, PublicKey: v.PublicKey, SignatureDigest: v.SignatureDigest, AccountRevision: v.AccountRevision, FailedAttempts: v.FailedAttempts, State: v.State, CreatedAt: v.CreatedAt, ExpiresAt: v.ExpiresAt, JTI: v.JTI, AuthTime: v.AuthTime, IssuedAt: v.IssuedAt, NotBefore: v.NotBefore, ProofExpiresAt: v.ProofExpiresAt}
+	return domain.Operation{OperationID: v.OperationID, AuthID: v.AuthID, SessionID: v.SessionID, CredentialID: v.CredentialID, ApplicationID: v.ApplicationID, Challenge: v.Challenge, PublicKey: v.PublicKey, SignatureDigest: v.SignatureDigest, AccountRevision: v.AccountRevision, PasswordRevision: v.PasswordRevision, FailedAttempts: v.FailedAttempts, State: v.State, CreatedAt: v.CreatedAt, ExpiresAt: v.ExpiresAt, JTI: v.JTI, AuthTime: v.AuthTime, IssuedAt: v.IssuedAt, NotBefore: v.NotBefore, ProofExpiresAt: v.ProofExpiresAt}
 }
 
 type ApplicationCloseReauthRepository struct {
@@ -67,9 +68,9 @@ func EnsureApplicationCloseReauthSchema(ctx context.Context, db *m.Database) err
 	if db == nil {
 		return domain.ErrUnavailable
 	}
-	operationValidator := bson.M{"$jsonSchema": bson.M{"bsonType": "object", "required": bson.A{"operationid", "authid", "sessionid", "credentialid", "applicationid", "challenge", "publickey", "accountrevision", "failedattempts", "state", "createdat", "expiresat", "purgeat"}, "additionalProperties": false, "properties": bson.M{
+	operationValidator := bson.M{"$jsonSchema": bson.M{"bsonType": "object", "required": bson.A{"operationid", "authid", "sessionid", "credentialid", "applicationid", "challenge", "publickey", "accountrevision", "passwordrevision", "failedattempts", "state", "createdat", "expiresat", "purgeat"}, "additionalProperties": false, "properties": bson.M{
 		"_id": bson.M{"bsonType": "objectId"}, "operationid": bson.M{"bsonType": "string"}, "authid": bson.M{"bsonType": "string"}, "sessionid": bson.M{"bsonType": "string"}, "credentialid": bson.M{"bsonType": "string"}, "applicationid": bson.M{"bsonType": "string"},
-		"challenge": bson.M{"bsonType": "binData"}, "publickey": bson.M{"bsonType": "binData"}, "signaturedigest": bson.M{"bsonType": "binData"}, "accountrevision": bson.M{"bsonType": bson.A{"long", "int"}}, "failedattempts": bson.M{"bsonType": bson.A{"long", "int"}},
+		"challenge": bson.M{"bsonType": "binData"}, "publickey": bson.M{"bsonType": "binData"}, "signaturedigest": bson.M{"bsonType": "binData"}, "accountrevision": bson.M{"bsonType": "long", "minimum": int64(1)}, "passwordrevision": bson.M{"bsonType": "long", "minimum": int64(1)}, "failedattempts": bson.M{"bsonType": "long", "minimum": int64(0), "maximum": int64(5)},
 		"state": bson.M{"enum": bson.A{domain.Pending, domain.Completed}}, "createdat": bson.M{"bsonType": "date"}, "expiresat": bson.M{"bsonType": "date"}, "purgeat": bson.M{"bsonType": "date"}, "jti": bson.M{"bsonType": "string"}, "authtime": bson.M{"bsonType": "date"}, "issuedat": bson.M{"bsonType": "date"}, "notbefore": bson.M{"bsonType": "date"}, "proofexpiresat": bson.M{"bsonType": "date"},
 	}}}
 	var command m.CommandError
@@ -84,7 +85,7 @@ func EnsureApplicationCloseReauthSchema(ctx context.Context, db *m.Database) err
 	}
 	auditValidator := bson.M{"$jsonSchema": bson.M{"bsonType": "object", "required": bson.A{"operationId", "authId", "credentialId", "applicationId", "result", "occurredAt"}, "additionalProperties": false, "properties": bson.M{
 		"_id": bson.M{"bsonType": "objectId"}, "operationId": bson.M{"bsonType": "string"}, "authId": bson.M{"bsonType": "string"}, "credentialId": bson.M{"bsonType": "string"}, "applicationId": bson.M{"bsonType": "string"},
-		"result": bson.M{"enum": bson.A{"BEGUN", "SIGNATURE_REJECTED", "COMPLETED"}}, "attempt": bson.M{"bsonType": bson.A{"long", "int"}}, "jti": bson.M{"bsonType": "string"}, "occurredAt": bson.M{"bsonType": "date"},
+		"result": bson.M{"enum": bson.A{"BEGUN", "AUTHENTICATION_REJECTED", "COMPLETED"}}, "attempt": bson.M{"bsonType": bson.A{"long", "int"}}, "jti": bson.M{"bsonType": "string"}, "occurredAt": bson.M{"bsonType": "date"},
 	}}}
 	err = db.CreateCollection(ctx, ApplicationCloseReauthAuditCollection, options.CreateCollection().SetValidator(auditValidator).SetValidationLevel("strict"))
 	if err != nil && (!errors.As(err, &command) || command.Code != 48) {
@@ -112,7 +113,7 @@ func EnsureApplicationCloseReauthSchema(ctx context.Context, db *m.Database) err
 }
 
 func validReauth(v closeReauthDocument) bool {
-	if v.OperationID == "" || v.AuthID == "" || v.SessionID == "" || v.CredentialID == "" || v.ApplicationID == "" || len(v.Challenge) != 32 || len(v.PublicKey) != 65 || v.AccountRevision <= 0 || v.FailedAttempts < 0 || v.FailedAttempts > 5 || v.CreatedAt.IsZero() || !v.ExpiresAt.After(v.CreatedAt) || v.PurgeAt.IsZero() {
+	if v.OperationID == "" || v.AuthID == "" || v.SessionID == "" || v.CredentialID == "" || v.ApplicationID == "" || len(v.Challenge) != 32 || len(v.PublicKey) != 65 || v.AccountRevision <= 0 || v.PasswordRevision <= 0 || v.FailedAttempts < 0 || v.FailedAttempts > 5 || v.CreatedAt.IsZero() || !v.ExpiresAt.After(v.CreatedAt) || v.PurgeAt.IsZero() {
 		return false
 	}
 	if v.State == domain.Pending {
@@ -191,7 +192,11 @@ func (r *ApplicationCloseReauthRepository) Begin(ctx context.Context, digest []b
 		if err = r.allowAccountWrite(tx, ss.AuthID, now); err != nil {
 			return err
 		}
-		doc := closeReauthDocument{OperationID: operation, AuthID: ss.AuthID, SessionID: ss.SessionID, CredentialID: ss.CredentialID, ApplicationID: app, Challenge: bytes.Clone(challenge), PublicKey: bytes.Clone(credential.PublicKey), AccountRevision: ss.AccountRevision, State: domain.Pending, CreatedAt: now, ExpiresAt: expires, PurgeAt: expires}
+		password, err := (&PasswordRepository{auth: r.auth}).readPasswordTx(tx, ss.AuthID)
+		if err != nil {
+			return domain.ErrUnavailable
+		}
+		doc := closeReauthDocument{PasswordRevision: password.Revision, OperationID: operation, AuthID: ss.AuthID, SessionID: ss.SessionID, CredentialID: ss.CredentialID, ApplicationID: app, Challenge: bytes.Clone(challenge), PublicKey: bytes.Clone(credential.PublicKey), AccountRevision: ss.AccountRevision, State: domain.Pending, CreatedAt: now, ExpiresAt: expires, PurgeAt: expires}
 		if !validReauth(doc) {
 			return domain.ErrUnavailable
 		}
@@ -209,14 +214,15 @@ func (r *ApplicationCloseReauthRepository) Begin(ctx context.Context, digest []b
 
 func (r *ApplicationCloseReauthRepository) read(tx context.Context, id string) (closeReauthDocument, error) {
 	var doc closeReauthDocument
-	err := r.auth.database.Collection(ApplicationCloseReauthOperationCollection).FindOne(tx, bson.M{"operationid": id}).Decode(&doc)
+	var raw bson.Raw
+	err := r.auth.database.Collection(ApplicationCloseReauthOperationCollection).FindOne(tx, bson.M{"operationid": id}).Decode(&raw)
 	if errors.Is(err, m.ErrNoDocuments) {
 		return doc, domain.ErrFailed
 	}
 	if err != nil {
 		return doc, err
 	}
-	if !validReauth(doc) {
+	if !identityFields(raw, map[string]bson.Type{"passwordrevision": bson.TypeInt64, "accountrevision": bson.TypeInt64, "failedattempts": bson.TypeInt64}) || bson.Unmarshal(raw, &doc) != nil || !validReauth(doc) {
 		return doc, domain.ErrInconsistent
 	}
 	return doc, nil
@@ -233,6 +239,13 @@ func (r *ApplicationCloseReauthRepository) ReadForComplete(ctx context.Context, 
 		if err != nil {
 			return err
 		}
+		password, err := (&PasswordRepository{auth: r.auth}).readPasswordTx(tx, ss.AuthID)
+		if err != nil {
+			return domain.ErrUnavailable
+		}
+		if password.Revision != doc.PasswordRevision {
+			return domain.ErrFailed
+		}
 		if doc.ApplicationID != app || doc.AuthID != ss.AuthID || doc.SessionID != ss.SessionID || doc.CredentialID != ss.CredentialID || doc.AccountRevision != ss.AccountRevision || !bytes.Equal(doc.PublicKey, credential.PublicKey) {
 			return domain.ErrFailed
 		}
@@ -245,7 +258,7 @@ func (r *ApplicationCloseReauthRepository) ReadForComplete(ctx context.Context, 
 	return out, err
 }
 
-func (r *ApplicationCloseReauthRepository) Complete(ctx context.Context, digest []byte, id, app string, signatureDigest []byte, claims domain.Claims, now time.Time) (domain.Operation, error) {
+func (r *ApplicationCloseReauthRepository) Complete(ctx context.Context, digest []byte, id, app string, signatureDigest []byte, passwordRevision int64, claims domain.Claims, now time.Time) (domain.Operation, error) {
 	var out domain.Operation
 	err := r.semanticTx(ctx, func(tx context.Context) error {
 		ss, credential, err := r.session(tx, digest, now)
@@ -256,11 +269,18 @@ func (r *ApplicationCloseReauthRepository) Complete(ctx context.Context, digest 
 		if err != nil {
 			return err
 		}
+		password, err := (&PasswordRepository{auth: r.auth}).readPasswordTx(tx, ss.AuthID)
+		if err != nil {
+			return domain.ErrUnavailable
+		}
+		if passwordRevision <= 0 || passwordRevision != doc.PasswordRevision || password.Revision != doc.PasswordRevision {
+			return domain.ErrFailed
+		}
 		if doc.ApplicationID != app || doc.AuthID != ss.AuthID || doc.SessionID != ss.SessionID || doc.CredentialID != ss.CredentialID || doc.AccountRevision != ss.AccountRevision || !bytes.Equal(doc.PublicKey, credential.PublicKey) {
 			return domain.ErrFailed
 		}
 		if doc.State == domain.Completed {
-			if !bytes.Equal(doc.SignatureDigest, signatureDigest) {
+			if !now.Before(doc.ProofExpiresAt) || !bytes.Equal(doc.SignatureDigest, signatureDigest) {
 				return domain.ErrFailed
 			}
 			out = doc.domain()
@@ -316,7 +336,7 @@ func (r *ApplicationCloseReauthRepository) Fail(ctx context.Context, id string, 
 		if result.MatchedCount != 1 {
 			return domain.ErrFailed
 		}
-		_, err = r.auth.database.Collection(ApplicationCloseReauthAuditCollection).InsertOne(tx, bson.M{"operationId": id, "authId": doc.AuthID, "credentialId": doc.CredentialID, "applicationId": doc.ApplicationID, "result": "SIGNATURE_REJECTED", "attempt": doc.FailedAttempts + 1, "occurredAt": now})
+		_, err = r.auth.database.Collection(ApplicationCloseReauthAuditCollection).InsertOne(tx, bson.M{"operationId": id, "authId": doc.AuthID, "credentialId": doc.CredentialID, "applicationId": doc.ApplicationID, "result": "AUTHENTICATION_REJECTED", "attempt": doc.FailedAttempts + 1, "occurredAt": now})
 		if err != nil {
 			return err
 		}

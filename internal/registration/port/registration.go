@@ -1,11 +1,8 @@
 package port
 
 import (
-	"context"
 	"errors"
 	auth "iwut-auth-center/internal/authentication/domain"
-	"iwut-auth-center/internal/registration/domain"
-	"time"
 )
 
 var (
@@ -20,15 +17,7 @@ var (
 )
 
 type RegistrationCommit struct {
-	Operation   auth.Operation
-	Credential  auth.Credential
-	Session     auth.Session
-	Association domain.Association
-}
-
-type RegistrationRepository interface {
-	CreateOperation(context.Context, auth.Operation, time.Time) error
-	GetOperation(context.Context, string) (auth.Operation, error)
-	RecordFailure(context.Context, string, time.Time) error
-	CompleteRegistration(context.Context, RegistrationCommit, time.Time) error
+	Operation  auth.Operation
+	Credential auth.Credential
+	Session    auth.Session
 }

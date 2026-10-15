@@ -19,7 +19,7 @@ type Repository interface {
 	Begin(context.Context, d.Operation) (d.Operation, error)
 	Read(context.Context, string) (d.Operation, error)
 	FailProof(context.Context, string, time.Time) error
-	Prepare(context.Context, string, time.Time) (d.Operation, owner.Operation, error)
+	Prepare(context.Context, string, int64, time.Time) (d.Operation, owner.Operation, error)
 	Ready(context.Context, string, []byte, []byte, time.Time) (d.Operation, error)
 	Confirm(context.Context, string, []byte, time.Time) (d.Operation, error)
 	Cancel(context.Context, string, []byte, time.Time) (d.Operation, error)

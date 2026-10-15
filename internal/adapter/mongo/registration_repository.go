@@ -3,7 +3,6 @@ package mongo
 import (
 	"bytes"
 	"context"
-	"errors"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -26,38 +25,18 @@ func NewRegistrationRepository(db *drivermongo.Database, authentication *Authent
 }
 
 func (r *RegistrationRepository) CompleteRegistration(ctx context.Context, c port.RegistrationCommit, now time.Time) error {
-	return r.WithAuthTransaction(ctx, func(tx context.Context) error {
-		now := r.currentTime(now)
-		op, err := r.GetOperation(tx, c.Operation.OperationID)
-		if err != nil {
-			return err
-		}
-		if op.Purpose != auth.Register {
-			return authport.ErrAuthenticationFailed
-		}
-		if op.Status == auth.Completed {
-			return authport.ErrAlreadyCompleted
-		}
-		if !op.Acceptable || !sameRegistrationSnapshot(op, c.Operation) {
-			return authport.ErrAuthenticationFailed
-		}
-		if c.Credential.AuthID == "" || c.Credential.CredentialID == "" || c.Credential.AuthID != c.Session.AuthID || c.Credential.CredentialID != c.Session.CredentialID || !bytes.Equal(c.Credential.PublicKey, op.PublicKey) || !bytes.Equal(c.Credential.Fingerprint, op.LocatorValue) || c.Association.KeyVersion != op.KeyVersion || c.Association.SchemeVersion != op.SchemeVersion || !bytes.Equal(c.Association.LookupKey, op.LookupKey) {
-			return authport.ErrAuthenticationFailed
-		}
-		if err := r.ConsumeOperationTx(tx, op.OperationID, auth.Register, c.Credential.AuthID, c.Credential.CredentialID, c.Session.SessionID, now); err != nil {
-			return err
-		}
-		return r.CreateRegisteredUserTx(tx, c, now)
-	})
+	// The no-email completion path is permanently retired, including direct
+	// repository calls. Only verified EmailRepository.Complete may create a USER.
+	return authport.ErrAuthenticationFailed
 }
 
 func sameRegistrationSnapshot(a, b auth.Operation) bool {
-	return a.AccountRevision == b.AccountRevision && a.OperationID == b.OperationID && a.ProtocolVersion == b.ProtocolVersion && a.ServiceID == b.ServiceID && a.ApplicationID == b.ApplicationID && a.ExpiresAt.Equal(b.ExpiresAt) && a.LocatorKind == b.LocatorKind && a.SchemeVersion == b.SchemeVersion && a.KeyVersion == b.KeyVersion && bytes.Equal(a.Challenge, b.Challenge) && bytes.Equal(a.PublicKey, b.PublicKey) && bytes.Equal(a.LocatorValue, b.LocatorValue) && bytes.Equal(a.LookupKey, b.LookupKey) && bytes.Equal(a.Nonce, b.Nonce) && bytes.Equal(a.Ciphertext, b.Ciphertext)
+	return a.AccountRevision == b.AccountRevision && a.OperationID == b.OperationID && a.Purpose == b.Purpose && a.ProtocolVersion == b.ProtocolVersion && a.ServiceID == b.ServiceID && a.ApplicationID == b.ApplicationID && a.ExpiresAt.Equal(b.ExpiresAt) && a.LocatorKind == b.LocatorKind && bytes.Equal(a.Challenge, b.Challenge) && bytes.Equal(a.PublicKey, b.PublicKey) && bytes.Equal(a.LocatorValue, b.LocatorValue)
 }
 
-// CreateRegisteredUserTx is shared by device and email registration; the caller owns the transaction and proof consumption.
+// CreateRegisteredUserTx initializes a verified email registration; its caller
+// owns the complete email transaction and proof consumption.
 func (r *RegistrationRepository) CreateRegisteredUserTx(tx context.Context, c port.RegistrationCommit, now time.Time) error {
-	op := c.Operation
 	var err error
 	// The shared transaction fence serializes concurrent registrations; the
 	// fingerprint index remains the durable guard after operation cleanup.
@@ -69,7 +48,7 @@ func (r *RegistrationRepository) CreateRegisteredUserTx(tx context.Context, c po
 		return authport.ErrCredentialRegistered
 	}
 	_, err = r.db.Collection(PrincipalCollection).InsertOne(tx, bson.M{
-		"authId": c.Credential.AuthID, "principalType": "USER", "accountStatus": "ACTIVE", "accountRevision": int64(1), "developerRevision": int64(0), "developerStatus": nil, "permissions": bson.A{}, "permissionRevision": int64(1), "createdAt": now, "updatedAt": now,
+		"authId": c.Credential.AuthID, "principalType": "USER", "accountStatus": "ACTIVE", "accountRevision": int64(1), "minimumCredentialRevision": int64(1), "developerRevision": int64(0), "developerStatus": nil, "permissions": bson.A{}, "permissionRevision": int64(1), "createdAt": now, "updatedAt": now,
 		"profile": bson.M{"entries": bson.A{}, "revision": int64(1), "updatedAt": now},
 	})
 	if err != nil {
@@ -79,23 +58,6 @@ func (r *RegistrationRepository) CreateRegisteredUserTx(tx context.Context, c po
 		if drivermongo.IsDuplicateKeyError(err) {
 			return authport.ErrCredentialRegistered
 		}
-		return err
-	}
-	var group associationDocument
-	err = r.db.Collection(AssociationCollection).FindOne(tx, bson.M{"keyVersion": c.Association.KeyVersion, "lookupKey": c.Association.LookupKey}).Decode(&group)
-	if errors.Is(err, drivermongo.ErrNoDocuments) {
-		group = associationDoc(c.Association)
-		if _, err = r.db.Collection(AssociationCollection).InsertOne(tx, group); err != nil {
-			return err
-		}
-	} else if err != nil {
-		return err
-	}
-	if group.AssociationID == "" || group.SchemeVersion != op.SchemeVersion || len(group.Nonce) != 12 || len(group.Ciphertext) != 48 {
-		return authport.ErrUnavailable
-	}
-	_, err = r.db.Collection(AssociationMemberCollection).InsertOne(tx, bson.M{"authId": c.Credential.AuthID, "associationId": group.AssociationID, "trustLevel": "CLIENT_ASSERTED", "createdAt": now})
-	if err != nil {
 		return err
 	}
 	c.Session.AccountRevision = 1

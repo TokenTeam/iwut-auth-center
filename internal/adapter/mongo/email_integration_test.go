@@ -10,14 +10,15 @@ import (
 	"errors"
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
-	"iwut-auth-center/internal/adapter/associationcrypto"
+	drivermongo "go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"iwut-auth-center/internal/adapter/deviceprotocol"
 	"iwut-auth-center/internal/adapter/emailprotocol"
 	auth "iwut-auth-center/internal/authentication/domain"
 	d "iwut-auth-center/internal/emailbinding/domain"
 	emailport "iwut-auth-center/internal/emailbinding/port"
 	uc "iwut-auth-center/internal/emailbinding/usecase"
-	reg "iwut-auth-center/internal/registration/usecase"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -53,7 +54,31 @@ type emailFixture struct {
 
 func newEmailFixture(t *testing.T) *emailFixture {
 	t.Helper()
-	f := newRegistrationFixture(t)
+	uri := os.Getenv("MONGODB_INTEGRATION_URI")
+	if uri == "" {
+		t.Skip("MONGODB_INTEGRATION_URI is required")
+	}
+	client, err := drivermongo.Connect(options.Client().ApplyURI(uri))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := client.Database("uc011_" + uuid.NewString())
+	t.Cleanup(func() { db.Drop(context.Background()); client.Disconnect(context.Background()) })
+	for _, ensure := range []func(context.Context, *drivermongo.Database) error{EnsurePrincipalSchema, EnsureAuthenticationSchema, EnsureCampusSchema} {
+		if err = ensure(t.Context(), db); err != nil {
+			t.Fatal(err)
+		}
+	}
+	authRepo, err := NewAuthenticationRepository(db, 10000, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	regRepo, err := NewRegistrationRepository(db, authRepo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	device, _ := deviceprotocol.New("iwut-auth-center:test")
+	f := &registrationFixture{db: db, repo: regRepo, protocol: device}
 	p, _ := emailprotocol.New(bytes.Repeat([]byte{3}, 32), "iwut-auth-center:test")
 	ep := fixedEmailProtocol{p}
 	repo, e := NewEmailRepository(f.repo, p.KeyID(), EmailLimits{5, 5, 20, 1000})
@@ -65,14 +90,14 @@ func newEmailFixture(t *testing.T) *emailFixture {
 	}
 	sender := &emailCapture{}
 	limiter, _ := deviceprotocol.NewLimiter(deviceprotocol.RateLimits{BeginGlobal: 100000, CompleteGlobal: 100000, BeginSource: 100000, CompleteLocator: 100000, MaxBuckets: 10000})
-	service, e := uc.New(repo, ep, f.protocol, f.crypto, sender, limiter, "iwut-auth-center:test", time.Hour)
+	service, e := uc.New(repo, ep, f.protocol, sender, limiter, "iwut-auth-center:test", time.Hour)
 	if e != nil {
 		t.Fatal(e)
 	}
 	return &emailFixture{f, repo, service, sender, ep}
 }
 func emailBegin(key *ecdsa.PrivateKey, email string) d.Begin {
-	return d.Begin{RequestID: uuid.NewString(), Mode: d.Register, Email: email, ProtocolVersion: auth.ProtocolVersion, PublicKey: elliptic.Marshal(elliptic.P256(), key.X, key.Y), Scheme: "iwut-student-association-v1", Token: bytes.Repeat([]byte{9}, 32), Source: "controlled-peer"}
+	return d.Begin{RequestID: uuid.NewString(), Mode: d.Register, Email: email, ProtocolVersion: auth.ProtocolVersion, PublicKey: elliptic.Marshal(elliptic.P256(), key.X, key.Y), Source: "controlled-peer"}
 }
 func emailSignature(t *testing.T, key *ecdsa.PrivateKey, s emailport.Started) []byte {
 	t.Helper()
@@ -119,9 +144,14 @@ func TestEmailRegistrationBindingReplayPrivacy(t *testing.T) {
 	if e != nil || a.Registration == nil || a.Revision != 1 {
 		t.Fatalf("complete: %v", e)
 	}
-	for _, c := range []string{PrincipalCollection, CredentialCollection, SessionCollection, AssociationCollection, AssociationMemberCollection, EmailBindingCollection, EmailAuditCollection} {
+	for _, c := range []string{PrincipalCollection, CredentialCollection, SessionCollection, EmailBindingCollection, EmailAuditCollection} {
 		if n := countEmail(t, f, c); n != 1 {
 			t.Fatalf("%s = %d", c, n)
+		}
+	}
+	for _, c := range []string{AssociationCollection, AssociationMemberCollection} {
+		if n := countEmail(t, f, c); n != 0 {
+			t.Fatalf("retired %s written: %d", c, n)
 		}
 	}
 	if _, e = completeEmail(t, f, key, s); !errors.Is(e, d.ErrCompleted) {
@@ -209,7 +239,7 @@ func TestEmailConcurrentProofFailuresAndNoPartialAccount(t *testing.T) {
 		t.Fatal("failed proof created user")
 	}
 }
-func TestEmailConcurrentAndOneClickCredentialUniqueness(t *testing.T) {
+func TestEmailConcurrentCompletionCredentialUniqueness(t *testing.T) {
 	f := newEmailFixture(t)
 	key := newSigningKey(t)
 	b := emailBegin(key, "race@example.test")
@@ -217,11 +247,9 @@ func TestEmailConcurrentAndOneClickCredentialUniqueness(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	ordinary := beginRegistration(t, f.registrationFixture, key, b.Token)
-	sig := signChallenge(t, key, ordinary)
 	results := make(chan error, 2)
 	go func() { _, e := completeEmail(t, f, key, s); results <- e }()
-	go func() { _, e := f.uc.Complete(context.Background(), ordinary.OperationID, sig); results <- e }()
+	go func() { _, e := completeEmail(t, f, key, s); results <- e }()
 	winners := 0
 	for range 2 {
 		if e := <-results; e == nil {
@@ -264,7 +292,7 @@ func TestEmailRollbackAuditAndRetry(t *testing.T) {
 		t.Fatal(e)
 	}
 }
-func TestEmailKeyAndAssociationRotation(t *testing.T) {
+func TestEmailKeyRotationIndependentOfRetiredAssociation(t *testing.T) {
 	f := newEmailFixture(t)
 	key := newSigningKey(t)
 	b := emailBegin(key, "rotation@example.test")
@@ -287,25 +315,15 @@ func TestEmailKeyAndAssociationRotation(t *testing.T) {
 	if e != nil || op.Proof.Status != auth.Closed || len(op.Proof.Ciphertext) != 0 {
 		t.Fatal("HMAC rotation retained proposal")
 	}
-	// A separate fixture exercises the association migration gate, including email snapshots.
-	g := newEmailFixture(t)
-	pending, e := g.service.Begin(t.Context(), emailBegin(newSigningKey(t), "assoc@example.test"), nil)
+	// New operation snapshots never contain retired school identity material.
+	raw, e := f.db.Collection(AuthenticationOperationCollection).FindOne(t.Context(), bson.M{"operationId": s.Operation.Proof.OperationID}).Raw()
 	if e != nil {
 		t.Fatal(e)
 	}
-	current := associationcrypto.Key{Version: "v2", Encrypt: bytes.Repeat([]byte{5}, 32), Lookup: bytes.Repeat([]byte{6}, 32)}
-	previous := associationcrypto.Key{Version: "v1", Encrypt: bytes.Repeat([]byte{1}, 32), Lookup: bytes.Repeat([]byte{2}, 32)}
-	cipher, e := associationcrypto.New(current, &previous)
-	if e != nil {
-		t.Fatal(e)
-	}
-	migration, _ := NewAssociationMigrationRepository(g.db)
-	if e = reg.MigrateAssociations(t.Context(), migration, cipher, time.Now()); e != nil {
-		t.Fatal(e)
-	}
-	op, e = g.email.Get(t.Context(), pending.Operation.Proof.OperationID)
-	if e != nil || op.Proof.Status != auth.Closed || len(op.Proof.Ciphertext) != 0 {
-		t.Fatal("association rotation omitted email snapshot")
+	for _, field := range []string{"schemeVersion", "keyVersion", "lookupKey", "nonce", "ciphertext"} {
+		if _, e = raw.LookupErr(field); e == nil {
+			t.Fatalf("retired snapshot field %s persisted", field)
+		}
 	}
 }
 func TestEmailDeliveryFailureRetainsIdempotencyAndQuota(t *testing.T) {
@@ -341,7 +359,7 @@ func TestEmailUnknownCommitNeverReturnsTokenOrSends(t *testing.T) {
 		t.Fatal(e)
 	}
 	limiter, _ := deviceprotocol.NewLimiter(deviceprotocol.RateLimits{BeginGlobal: 100000, CompleteGlobal: 100000, BeginSource: 100000, CompleteLocator: 100000, MaxBuckets: 10000})
-	service, e := uc.New(repo, f.ep, f.protocol, f.crypto, f.sender, limiter, "iwut-auth-center:test", time.Hour)
+	service, e := uc.New(repo, f.ep, f.protocol, f.sender, limiter, "iwut-auth-center:test", time.Hour)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -406,13 +424,16 @@ func TestEmailCompetingModesUniqueAddress(t *testing.T) {
 				if mode == d.Register {
 					b = emailBegin(key, "shared@example.test")
 				} else {
-					c := beginRegistration(t, f.registrationFixture, key, bytes.Repeat([]byte{9}, 32))
-					a, e := f.uc.Complete(t.Context(), c.OperationID, signChallenge(t, key, c))
+					registration, e := f.service.Begin(t.Context(), emailBegin(key, uuid.NewString()+"@example.test"), nil)
 					if e != nil {
 						t.Fatal(e)
 					}
-					digest, _ = f.protocol.TokenDigest(a.SessionToken)
-					revision := int64(0)
+					a, e := completeEmail(t, f, key, registration)
+					if e != nil {
+						t.Fatal(e)
+					}
+					digest, _ = f.protocol.TokenDigest(a.Registration.SessionToken)
+					revision := int64(1)
 					b = d.Begin{Mode: d.Bind, RequestID: uuid.NewString(), Email: "shared@example.test", Revision: &revision, Source: "controlled-peer"}
 				}
 				f.repo.clock = func() time.Time { return time.Now().Add(time.Duration(i) * 61 * time.Second) }

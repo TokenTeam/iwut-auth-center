@@ -7,7 +7,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	account "iwut-auth-center/internal/account/domain"
 	ap "iwut-auth-center/internal/authentication/port"
-	emaildomain "iwut-auth-center/internal/emailbinding/domain"
+	emaildomain "iwut-auth-center/internal/emailaccount/domain"
 	loginDomain "iwut-auth-center/internal/emaillogin/domain"
 	oauth "iwut-auth-center/internal/oauth/domain"
 	profile "iwut-auth-center/internal/profile/domain"
@@ -145,9 +145,10 @@ func TestAccountRevisionEmailLoginAndBindingNeverRevive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	digest, _ := f.protocol.TokenDigest(f.owner.SessionToken)
-	revision := int64(1)
-	pendingBind, err := f.service.Begin(t.Context(), emaildomain.Begin{Mode: emaildomain.Bind, RequestID: uuid.NewString(), Email: "new@example.test", Revision: &revision, Source: "account-revision"}, digest)
+	// These proposals exercise account-generation races, not the separately
+	// verified shared owner mail cooldown across LOGIN and ADD.
+	clearMailCooldown(t, f)
+	pendingBind, err := f.accounts.Begin(t.Context(), f.owner.SessionToken, emaildomain.Begin{RequestID: uuid.NewString(), Email: "new@example.test", ExpectedDirectoryRevision: 1, Source: "127.0.0.1"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +160,7 @@ func TestAccountRevisionEmailLoginAndBindingNeverRevive(t *testing.T) {
 	}
 	accountTransition(t, f.repo.AuthenticationRepository, f.owner.AuthID, "ACTIVE")
 	for _, c := range []loginDomain.Challenge{oldLogin, placeholder} {
-		if _, err = f.login.Complete(t.Context(), c.OperationID, "00005678", loginSignature(t, key, c), "account-revision"); !errors.Is(err, loginDomain.ErrFailed) {
+		if _, err = f.login.Complete(t.Context(), c.OperationID, "00005678", loginSignature(t, key, c), "127.0.0.1"); !errors.Is(err, loginDomain.ErrFailed) {
 			t.Fatal("email proof revived", err)
 		}
 	}
@@ -168,12 +169,12 @@ func TestAccountRevisionEmailLoginAndBindingNeverRevive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fresh, err := f.login.Complete(t.Context(), freshChallenge.OperationID, "00005678", loginSignature(t, key, freshChallenge), "account-revision")
+	fresh, err := f.login.Complete(t.Context(), freshChallenge.OperationID, "00005678", loginSignature(t, key, freshChallenge), "127.0.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	freshDigest, _ := f.protocol.TokenDigest(fresh.SessionToken)
-	if _, err = f.service.Complete(t.Context(), pendingBind.Operation.Proof.OperationID, "00001234", nil, false, freshDigest); !errors.Is(err, emaildomain.ErrVerification) {
+	if _, err = f.accounts.Complete(t.Context(), fresh.SessionToken, pendingBind.Operation.OperationID, "00001234", "", nil, false, "127.0.0.1"); !errors.Is(err, emaildomain.ErrSession) {
 		t.Fatal("old email binding revived with fresh Session", err)
 	}
 	ss, err := f.repo.CheckSession(t.Context(), freshDigest, time.Now())

@@ -76,7 +76,7 @@ func (state *readinessState) check(ctx context.Context) error {
 }
 
 func provideServerConfig(configuration config.Config, endpoints *transport.UserEndpoints, oauth *oauthRuntime, owner *ownerExitRuntime, closure *accountClosureRuntime, applicationClosure *applicationClosureRuntime) transport.ServerConfig {
-	return transport.ServerConfig{ApplicationClosure: applicationClosure.Closure, ApplicationCloseReauth: applicationClosure.Reauth, AccountClosure: closure.Service, OwnerExitDecision: owner.Decision, DeveloperWithdrawal: owner.Withdrawal, HTTPAddr: configuration.HTTPAddr, GRPCAddr: configuration.GRPCAddr, UserEndpoints: endpoints, OAuth: oauth.HTTP, OAuthGrant: oauth.Grant, OAuthDelegation: oauth.Delegation}
+	return transport.ServerConfig{ApplicationClosure: applicationClosure.Closure, ApplicationCloseReauth: applicationClosure.Reauth, Background: applicationClosure.Worker, AccountClosure: closure.Service, OwnerExitDecision: owner.Decision, DeveloperWithdrawal: owner.Withdrawal, HTTPAddr: configuration.HTTPAddr, GRPCAddr: configuration.GRPCAddr, UserEndpoints: endpoints, OAuth: oauth.HTTP, OAuthGrant: oauth.Grant, OAuthDelegation: oauth.Delegation}
 }
 
 func provideServerConfigWithObservability(configuration config.Config, endpoints *transport.UserEndpoints, oauth *oauthRuntime, owner *ownerExitRuntime, closure *accountClosureRuntime, applicationClosure *applicationClosureRuntime, observability *observabilityRuntime, readiness *readinessState) transport.ServerConfig {
@@ -91,13 +91,19 @@ func provideServerConfigWithObservability(configuration config.Config, endpoints
 	return serverConfig
 }
 
-func provideApp(servers *transport.Servers, owner *ownerExitRuntime, closure *accountClosureRuntime) *kratos.App {
+func provideApp(servers *transport.Servers, owner *ownerExitRuntime, closure *accountClosureRuntime, credentials *credentialManagementRuntime) *kratos.App {
 	all := []kt.Server{servers.HTTP, servers.GRPC}
+	if credentials.Worker != nil {
+		all = append(all, credentials.Worker)
+	}
 	if closure.Worker != nil {
 		all = append(all, closure.Worker)
 	}
 	if owner.Worker != nil {
 		all = append(all, owner.Worker)
+	}
+	if servers.Background != nil {
+		all = append(all, servers.Background)
 	}
 	return kratos.New(
 		kratos.Name("iwut-auth-center"),

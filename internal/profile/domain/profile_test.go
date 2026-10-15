@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -61,5 +62,46 @@ func TestSnapshotCorruption(t *testing.T) {
 	s.Entries = append(s.Entries, s.Entries[0])
 	if ValidateSnapshot(s) != ErrUnavailable {
 		t.Fatal("duplicate persisted key accepted")
+	}
+}
+
+func TestProductionValueConstraintsAndAcademicYear(t *testing.T) {
+	minOne, maxSix := int32(1), int32(6)
+	maxPhone := int64(11)
+	minPhone := int64(11)
+	phone := Definition{Key: "contact.phone", Label: "Phone", Description: "Self supplied", ValueType: String, Constraints: &Constraints{MinLength: &minPhone, MaxLength: &maxPhone, CharacterSet: ASCIICharacters}}
+	if ValidateDefinitions([]Definition{phone}) != nil || ValidateAssignment(Entry{Key: phone.Key, Value: Value{Type: String, Text: "01234567890"}}, phone) != nil {
+		t.Fatal("valid digit string rejected")
+	}
+	if ValidateAssignment(Entry{Key: phone.Key, Value: Value{Type: String, Text: "0123456789０"}}, phone) != ErrInvalidValue {
+		t.Fatal("non-ASCII digit accepted")
+	}
+	set := Definition{Key: "education.campus_areas", Label: "Campus", Description: "Self supplied", ValueType: StringSet, Constraints: &Constraints{Options: []Option{{Value: "NANHU", Label: "南湖"}, {Value: "JIANHU", Label: "鉴湖"}}, MinItems: &minOne, MaxItems: &maxSix}}
+	if ValidateDefinitions([]Definition{set}) != ErrCatalog {
+		t.Fatal("maxItems beyond options accepted")
+	}
+	maxTwo := int32(2)
+	set.Constraints.MaxItems = &maxTwo
+	value := Value{Type: StringSet, Strings: []string{"NANHU", "JIANHU"}}
+	if ValidateAssignment(Entry{Key: set.Key, Value: value}, set) != nil || !slices.Equal(Canonicalize(value).Strings, []string{"JIANHU", "NANHU"}) {
+		t.Fatal("valid unordered set rejected or not canonicalized")
+	}
+	if ValidateAssignment(Entry{Key: set.Key, Value: Value{Type: StringSet, Strings: []string{"NANHU", "NANHU"}}}, set) != ErrInvalidValue {
+		t.Fatal("duplicate set member accepted")
+	}
+	todayOnly := true
+	birthday := Definition{Key: "personal.birthday", Label: "Birthday", Description: "Self supplied", ValueType: Date, Constraints: &Constraints{NotAfterToday: &todayOnly}}
+	shanghaiBoundary := time.Date(2026, 1, 1, 16, 30, 0, 0, time.UTC)
+	if ValidateAssignment(Entry{Key: birthday.Key, Value: Value{Type: Date, Text: "2026-01-03"}}, birthday, shanghaiBoundary) != ErrInvalidValue || ValidateAssignment(Entry{Key: birthday.Key, Value: Value{Type: Date, Text: "2026-01-02"}}, birthday, shanghaiBoundary) != nil {
+		t.Fatal("birthday did not use Asia/Shanghai date")
+	}
+
+	confirmed := time.Date(2025, 9, 1, 0, 0, 0, 0, time.UTC)
+	grade := Grade{Stage: "UNDERGRADUATE", Year: 3, FinalYear: 4, AcademicYear: 2025, ConfirmedAt: &confirmed}
+	if year, err := grade.EffectiveYear(2027); err != nil || year != 4 {
+		t.Fatalf("grade cap = %d, %v", year, err)
+	}
+	if _, err := grade.EffectiveYear(2024); err != ErrAcademicYear {
+		t.Fatal("calendar before anchor accepted")
 	}
 }

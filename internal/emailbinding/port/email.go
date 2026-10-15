@@ -21,7 +21,7 @@ type Protocol interface {
 	ValidID(string) bool
 	RequestMAC(domain.Begin, string) []byte
 	CodeMAC(Operation, string) []byte
-	Payload(Operation, []byte) ([]byte, error)
+	Payload(Operation) ([]byte, error)
 	NewCode() (string, error)
 }
 type Sender interface {

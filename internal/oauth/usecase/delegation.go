@@ -29,7 +29,7 @@ func (s *Service) Delegate(ctx context.Context, raw string, q d.DelegationReques
 	}
 	err := s.transaction(ctx, func(tx port.Tx) error {
 		out = d.Delegation{}
-		a, f, rt, g, scopes, err := s.access(ctx, tx, raw)
+		a, f, _, g, scopes, now, err := s.access(ctx, tx, raw)
 		if err != nil {
 			return err
 		}
@@ -51,7 +51,6 @@ func (s *Service) Delegate(ctx context.Context, raw string, q d.DelegationReques
 				return d.ErrInsufficient
 			}
 		}
-		now := s.now()
 		exp := earliest(now.Add(5*time.Second), a.ExpiresAt)
 		if exp.Unix() <= now.Unix() {
 			return d.ErrToken
@@ -68,7 +67,7 @@ func (s *Service) Delegate(ctx context.Context, raw string, q d.DelegationReques
 		if !s.cfg.SigningHealthy() {
 			return d.ErrUnavailable
 		}
-		return s.fresh(rt)
+		return nil
 	})
 	if err != nil {
 		return d.Delegation{}, err

@@ -29,25 +29,24 @@ type CredentialRevocationRPC interface {
 
 type AuthenticationService struct {
 	authv1.UnimplementedAuthenticationServiceServer
-	registration RegistrationRPC
-	login        DeviceLoginRPC
-	sessions     SessionRevocationRPC
-	credentials  CredentialRevocationRPC
+	login       DeviceLoginRPC
+	sessions    SessionRevocationRPC
+	credentials CredentialRevocationRPC
 }
 
-func NewAuthenticationService(registration RegistrationRPC, login DeviceLoginRPC, sessions SessionRevocationRPC, credentials CredentialRevocationRPC) (*AuthenticationService, error) {
-	if registration == nil || login == nil || sessions == nil || credentials == nil {
+func NewAuthenticationService(_ RegistrationRPC, login DeviceLoginRPC, sessions SessionRevocationRPC, credentials CredentialRevocationRPC) (*AuthenticationService, error) {
+	if login == nil || sessions == nil || credentials == nil {
 		return nil, errors.New("all authentication handlers are required")
 	}
-	return &AuthenticationService{registration: registration, login: login, sessions: sessions, credentials: credentials}, nil
+	return &AuthenticationService{login: login, sessions: sessions, credentials: credentials}, nil
 }
 
 func (s *AuthenticationService) BeginUserRegistration(ctx context.Context, request *authv1.BeginUserRegistrationRequest) (*authv1.AuthenticationChallenge, error) {
-	return s.registration.BeginUserRegistration(ctx, request)
+	return s.UnimplementedAuthenticationServiceServer.BeginUserRegistration(ctx, request)
 }
 
 func (s *AuthenticationService) CompleteUserRegistration(ctx context.Context, request *authv1.CompleteUserRegistrationRequest) (*authv1.UserRegistrationResult, error) {
-	return s.registration.CompleteUserRegistration(ctx, request)
+	return s.UnimplementedAuthenticationServiceServer.CompleteUserRegistration(ctx, request)
 }
 
 func (s *AuthenticationService) BeginDeviceLogin(ctx context.Context, request *authv1.BeginDeviceLoginRequest) (*authv1.AuthenticationChallenge, error) {

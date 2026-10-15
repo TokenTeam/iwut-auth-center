@@ -16,8 +16,12 @@ import (
 	"iwut-auth-center/internal/adapter/deviceprotocol"
 	"iwut-auth-center/internal/authentication/domain"
 	"iwut-auth-center/internal/authentication/port"
+	campus "iwut-auth-center/internal/campuscertification/domain"
+	credentialmanagement "iwut-auth-center/internal/credentialmanagement/domain"
+	emailaccount "iwut-auth-center/internal/emailaccount/domain"
 	email "iwut-auth-center/internal/emailbinding/domain"
 	emaillogin "iwut-auth-center/internal/emaillogin/domain"
+	password "iwut-auth-center/internal/password/domain"
 )
 
 const (
@@ -56,16 +60,21 @@ type OperationDocument struct {
 }
 
 type CredentialDocument struct {
-	CredentialID    string     `bson:"credentialId"`
-	AuthID          string     `bson:"authId"`
-	ProtocolVersion string     `bson:"protocolVersion"`
-	PublicKey       []byte     `bson:"publicKey"`
-	Fingerprint     []byte     `bson:"fingerprint"`
-	CreatedAt       time.Time  `bson:"createdAt"`
-	RevokedAt       *time.Time `bson:"revokedAt,omitempty"`
+	Label              string     `bson:"label"`
+	LabelRevision      int64      `bson:"labelRevision"`
+	CredentialRevision int64      `bson:"credentialRevision"`
+	CredentialID       string     `bson:"credentialId"`
+	AuthID             string     `bson:"authId"`
+	ProtocolVersion    string     `bson:"protocolVersion"`
+	PublicKey          []byte     `bson:"publicKey"`
+	Fingerprint        []byte     `bson:"fingerprint"`
+	CreatedAt          time.Time  `bson:"createdAt"`
+	RevokedAt          *time.Time `bson:"revokedAt,omitempty"`
 }
 
 type SessionDocument struct {
+	PasswordRevision     int64      `bson:"passwordRevision,omitempty"`
+	SourceSessionID      string     `bson:"sourceSessionId,omitempty"`
 	AccountRevision      int64      `bson:"accountRevision"`
 	SessionID            string     `bson:"sessionId"`
 	AuthID               string     `bson:"authId"`
@@ -148,9 +157,11 @@ func (r *AuthenticationRepository) WithAuthTransaction(ctx context.Context, fn f
 		return nil, fn(tx)
 	}, options.Transaction().SetReadConcern(readconcern.Snapshot()).SetWriteConcern(writeconcern.Majority()).SetReadPreference(readpref.Primary()))
 	if err != nil {
-		for _, known := range append(append(append([]error{}, email.Errors...), emaillogin.Errors...), port.ErrCredentialRegistered, port.ErrAuthenticationFailed, port.ErrSessionInvalid, port.ErrAlreadyCompleted, port.ErrLimitExceeded, port.ErrNotFound) {
-			if errors.Is(err, known) {
-				return known
+		for _, group := range [][]error{email.Errors, emailaccount.Errors, emaillogin.Errors, campus.Errors, password.Errors, {port.ErrCredentialRegistered, port.ErrAuthenticationFailed, port.ErrSessionInvalid, port.ErrAlreadyCompleted, port.ErrLimitExceeded, port.ErrNotFound, port.ErrCredentialReauthRequired}} {
+			for _, known := range group {
+				if errors.Is(err, known) {
+					return known
+				}
 			}
 		}
 		return port.ErrUnavailable
@@ -170,12 +181,8 @@ func (r *AuthenticationRepository) CreateOperation(ctx context.Context, op domai
 		if err != nil {
 			return err
 		}
-		count, err := r.database.Collection(AuthenticationOperationCollection).CountDocuments(tx, bson.M{"status": domain.Pending, "expiresAt": bson.M{"$gt": now}})
-		if err != nil {
+		if err = sharedOperationCapacityTx(tx, r.database, now, min(10000, r.maxPending), true); err != nil {
 			return err
-		}
-		if count >= int64(r.maxPending) {
-			return port.ErrLimitExceeded
 		}
 		_, err = r.database.Collection(AuthenticationOperationCollection).InsertOne(tx, operationDocument(op))
 		return err
@@ -246,6 +253,11 @@ func (r *AuthenticationRepository) ResolveCredential(ctx context.Context, locato
 		if err != nil {
 			return err
 		}
+		if err := r.ConfirmPrincipalCredentialTx(tx, doc.AuthID, doc.CredentialID, time.Now()); errors.Is(err, port.ErrAuthenticationFailed) {
+			return nil
+		} else if err != nil {
+			return err
+		}
 		credential = doc.Domain()
 		credential.AccountRevision = revision
 		acceptable = true
@@ -280,6 +292,9 @@ func (r *AuthenticationRepository) ConsumeOperationTx(ctx context.Context, id, p
 }
 
 func (r *AuthenticationRepository) InsertCredentialTx(ctx context.Context, credential domain.Credential) error {
+	if !validCredential(credentialDocument(credential)) {
+		return port.ErrUnavailable
+	}
 	occupied, err := r.database.Collection(CredentialTombstoneCollection).CountDocuments(ctx, bson.M{"fingerprint": credential.Fingerprint})
 	if err != nil {
 		return err
@@ -292,6 +307,10 @@ func (r *AuthenticationRepository) InsertCredentialTx(ctx context.Context, crede
 }
 
 func (r *AuthenticationRepository) ConfirmPrincipalCredentialTx(ctx context.Context, authID, credentialID string, now time.Time) error {
+	revision, minimum, err := r.CredentialBoundsTx(ctx, authID)
+	if err != nil {
+		return err
+	}
 	result, err := r.database.Collection(PrincipalCollection).UpdateOne(ctx, bson.M{"authId": authID, "principalType": "USER", "accountStatus": "ACTIVE"}, bson.M{"$inc": bson.M{"authenticationFence": int64(1)}})
 	if err != nil {
 		return err
@@ -299,7 +318,7 @@ func (r *AuthenticationRepository) ConfirmPrincipalCredentialTx(ctx context.Cont
 	if result.MatchedCount != 1 {
 		return port.ErrAuthenticationFailed
 	}
-	result, err = r.database.Collection(CredentialCollection).UpdateOne(ctx, bson.M{"credentialId": credentialID, "authId": authID, "revokedAt": nil, "protocolVersion": domain.ProtocolVersion}, bson.M{"$inc": bson.M{"authenticationFence": int64(1)}})
+	result, err = r.database.Collection(CredentialCollection).UpdateOne(ctx, bson.M{"credentialId": credentialID, "authId": authID, "revokedAt": nil, "protocolVersion": domain.ProtocolVersion, "credentialRevision": bson.M{"$gte": minimum, "$lte": revision, "$type": "long"}}, bson.M{"$inc": bson.M{"authenticationFence": int64(1)}})
 	if err != nil {
 		return err
 	}
@@ -366,7 +385,11 @@ func (r *AuthenticationRepository) CreateSessionTx(ctx context.Context, session 
 	if err := r.ConfirmPrincipalCredentialTx(ctx, session.AuthID, session.CredentialID, now); err != nil {
 		return err
 	}
-	credentials, err := r.database.Collection(CredentialCollection).Find(ctx, bson.M{"authId": session.AuthID, "revokedAt": nil, "protocolVersion": domain.ProtocolVersion})
+	revision, minimum, err := r.CredentialBoundsTx(ctx, session.AuthID)
+	if err != nil {
+		return err
+	}
+	credentials, err := r.database.Collection(CredentialCollection).Find(ctx, bson.M{"authId": session.AuthID, "revokedAt": nil, "protocolVersion": domain.ProtocolVersion, "credentialRevision": bson.M{"$gte": minimum, "$lte": revision}})
 	if err != nil {
 		return err
 	}
@@ -384,7 +407,7 @@ func (r *AuthenticationRepository) CreateSessionTx(ctx context.Context, session 
 	if err := credentials.Err(); err != nil {
 		return err
 	}
-	cursor, err := r.database.Collection(SessionCollection).Find(ctx, bson.M{"authId": session.AuthID, "accountRevision": session.AccountRevision, "revokedAt": nil, "expiresAt": bson.M{"$gt": now}, "credentialId": bson.M{"$in": ids}, "authenticationMethod": bson.M{"$in": bson.A{"DEVICE_CREDENTIAL", emaillogin.AuthenticationMethod}}}, options.Find().SetSort(bson.D{{Key: "lastUsedAt", Value: 1}, {Key: "createdAt", Value: 1}, {Key: "sessionId", Value: 1}}))
+	cursor, err := r.database.Collection(SessionCollection).Find(ctx, bson.M{"authId": session.AuthID, "accountRevision": session.AccountRevision, "revokedAt": nil, "expiresAt": bson.M{"$gt": now}, "credentialId": bson.M{"$in": ids}, "authenticationMethod": bson.M{"$in": bson.A{"DEVICE_CREDENTIAL", emaillogin.AuthenticationMethod, password.PasswordAndDevice, password.PasswordAndSession}}}, options.Find().SetSort(bson.D{{Key: "lastUsedAt", Value: 1}, {Key: "createdAt", Value: 1}, {Key: "sessionId", Value: 1}}))
 	if err != nil {
 		return err
 	}
@@ -435,9 +458,13 @@ func (r *AuthenticationRepository) currentTime(floor time.Time) time.Time {
 }
 
 func validCredential(doc CredentialDocument) bool {
+	label, labelErr := credentialmanagement.Label(doc.Label)
+	if labelErr != nil || label != doc.Label || doc.LabelRevision < 0 {
+		return false
+	}
 	protocol, _ := deviceprotocol.New("storage-validation")
 	fingerprint, err := protocol.Fingerprint(doc.PublicKey)
-	return err == nil && bytes.Equal(fingerprint, doc.Fingerprint) && deviceprotocol.ValidID(doc.CredentialID) && doc.AuthID != "" && doc.ProtocolVersion == domain.ProtocolVersion && !doc.CreatedAt.IsZero() && doc.RevokedAt == nil
+	return doc.CredentialRevision > 0 && err == nil && bytes.Equal(fingerprint, doc.Fingerprint) && deviceprotocol.ValidID(doc.CredentialID) && doc.AuthID != "" && doc.ProtocolVersion == domain.ProtocolVersion && !doc.CreatedAt.IsZero() && doc.RevokedAt == nil
 }
 func validSession(doc SessionDocument) bool {
 	return doc.AccountRevision > 0 && deviceprotocol.ValidID(doc.SessionID) && doc.AuthID != "" && validSessionMethod(doc) && len(doc.TokenDigest) == 32 && !doc.CreatedAt.IsZero() && doc.AuthenticatedAt.Equal(doc.CreatedAt) && !doc.LastUsedAt.Before(doc.CreatedAt) && doc.LastUsedAt.Before(doc.ExpiresAt) && doc.ExpiresAt.After(doc.CreatedAt) && doc.RevokedAt == nil
@@ -485,6 +512,19 @@ func (r *AuthenticationRepository) checkSessionTx(tx context.Context, digest []b
 	} else if err != nil {
 		return domain.Session{}, err
 	}
+	if doc.AuthenticationMethod == password.PasswordAndDevice || doc.AuthenticationMethod == password.PasswordAndSession {
+		var raw bson.Raw
+		if err := r.database.Collection(PasswordCollection).FindOne(tx, bson.M{"authId": doc.AuthID}).Decode(&raw); err != nil {
+			return domain.Session{}, port.ErrSessionInvalid
+		}
+		record, err := decodePassword(raw)
+		if err != nil {
+			return domain.Session{}, port.ErrUnavailable
+		}
+		if record.Revision != doc.PasswordRevision {
+			return domain.Session{}, port.ErrSessionInvalid
+		}
+	}
 	if !touch {
 		return doc.Domain(), nil
 	}
@@ -502,5 +542,19 @@ func (r *AuthenticationRepository) checkSessionTx(tx context.Context, digest []b
 }
 
 func validSessionMethod(doc SessionDocument) bool {
-	return deviceprotocol.ValidID(doc.CredentialID) && (doc.AuthenticationMethod == "DEVICE_CREDENTIAL" || doc.AuthenticationMethod == emaillogin.AuthenticationMethod && doc.EmailBindingRevision > 0)
+	if !deviceprotocol.ValidID(doc.CredentialID) {
+		return false
+	}
+	switch doc.AuthenticationMethod {
+	case "DEVICE_CREDENTIAL":
+		return doc.EmailBindingRevision == 0 && doc.PasswordRevision == 0 && doc.SourceSessionID == ""
+	case emaillogin.AuthenticationMethod:
+		return doc.EmailBindingRevision > 0 && doc.PasswordRevision == 0 && doc.SourceSessionID == ""
+	case password.PasswordAndDevice:
+		return doc.PasswordRevision > 0 && doc.EmailBindingRevision == 0 && doc.SourceSessionID == ""
+	case password.PasswordAndSession:
+		return doc.PasswordRevision > 0 && doc.EmailBindingRevision == 0 && deviceprotocol.ValidID(doc.SourceSessionID) && doc.SourceSessionID != doc.SessionID
+	default:
+		return false
+	}
 }

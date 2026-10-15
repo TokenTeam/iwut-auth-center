@@ -15,7 +15,8 @@ func TestProfileConfigurationRequiresExplicitSource(t *testing.T) {
 	if e := os.WriteFile(file, []byte(`{"definitions":[]}`), 0600); e != nil {
 		t.Fatal(e)
 	}
-	c, e := ParseProfileConfig(func(key string) (string, bool) { return file, key == "AUTH_PROFILE_CATALOG_FILE" })
+	env := map[string]string{"AUTH_PROFILE_CATALOG_FILE": file, "AUTH_ACADEMIC_CALENDAR_FILE": filepath.Join(t.TempDir(), "missing-is-ignored.json")}
+	c, e := ParseProfileConfig(func(key string) (string, bool) { value, ok := env[key]; return value, ok })
 	if e != nil || string(c.JSON) != `{"definitions":[]}` {
 		t.Fatal("explicit source not retained", e)
 	}

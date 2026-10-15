@@ -16,7 +16,7 @@ import (
 )
 
 func TestPublicVectors(t *testing.T) {
-	data, e := os.ReadFile("testdata/auth-email-binding-v1.json")
+	data, e := os.ReadFile("testdata/auth-email-binding-v2.json")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -64,8 +64,8 @@ func TestPublicVectors(t *testing.T) {
 		device, _ := deviceprotocol.New(str(x, "serviceId"))
 		var expiry int64
 		json.Unmarshal(x["expiresAtUnixMs"], &expiry)
-		op := emailport.Operation{Mode: d.Register, Email: str(x, "normalizedEmail"), Proof: auth.Operation{OperationID: str(x, "operationId"), Purpose: d.RegistrationPurpose, ProtocolVersion: auth.ProtocolVersion, ServiceID: str(x, "serviceId"), ApplicationID: auth.ApplicationID, Challenge: unhex(str(x, "challenge_hex")), PublicKey: unhex(str(x, "publicKey65_hex")), ExpiresAt: time.UnixMilli(expiry)}}
-		payload, e := p.Payload(op, unhex(str(x, "associationDigest_hex")))
+		op := emailport.Operation{Mode: d.Register, Email: str(x, "normalizedEmail"), Proof: auth.Operation{OperationID: str(x, "operationId"), Purpose: d.RegistrationPurpose, ProtocolVersion: d.ProtocolVersion, ServiceID: str(x, "serviceId"), ApplicationID: auth.ApplicationID, Challenge: unhex(str(x, "challenge_hex")), PublicKey: unhex(str(x, "publicKey65_hex")), ExpiresAt: time.UnixMilli(expiry)}}
+		payload, e := p.Payload(op)
 		if e != nil || !bytes.Equal(payload, unhex(str(x, "signingPayload_hex"))) {
 			t.Fatalf("payload mismatch: %v", e)
 		}
@@ -100,6 +100,12 @@ func TestHMACDomains(t *testing.T) {
 	h.Write(deviceprotocol.Frame([]byte("iwut-email-request-v1"), []byte("BIND"), []byte(b.RequestID), []byte(b.Email), []byte("test"), []byte("iwut-client"), []byte("user"), make([]byte, 8)))
 	if !hmac.Equal(actual, h.Sum(nil)) {
 		t.Fatal("request HMAC encoding")
+	}
+	registration := d.Begin{Mode: d.Register, RequestID: b.RequestID, Email: b.Email, ProtocolVersion: auth.ProtocolVersion, PublicKey: []byte{4, 1, 2, 3}}
+	h = hmac.New(sha256.New, key)
+	h.Write(deviceprotocol.Frame([]byte("iwut-email-request-v2"), []byte("REGISTER"), []byte(registration.RequestID), []byte(registration.Email), []byte("test"), []byte("iwut-client"), []byte(auth.ProtocolVersion), registration.PublicKey))
+	if !hmac.Equal(p.RequestMAC(registration, ""), h.Sum(nil)) {
+		t.Fatal("v2 registration HMAC encoding")
 	}
 	op := emailport.Operation{RequestMAC: actual, Proof: auth.Operation{Purpose: d.BindingPurpose, OperationID: b.RequestID, ExpiresAt: time.UnixMilli(10000)}}
 	first := p.CodeMAC(op, "00000001")

@@ -64,6 +64,7 @@ func TestE2E_SessionManagement_ProductionWire(t *testing.T) {
 		env["AUTH_ASSOC_LOOKUP_KEY"] = base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{lookup}, 32))
 	}
 	setKeys("v1", 1, 2)
+	enableEmailRegistrationFixture(t, env)
 	load := func() config.Config {
 		t.Helper()
 		c, e := config.Load(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
@@ -96,10 +97,10 @@ func TestE2E_SessionManagement_ProductionWire(t *testing.T) {
 	client := pb.NewSessionManagementServiceClient(connection)
 	device, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	association := sha256.Sum256([]byte("same-student"))
-	first, _ := registerUser(t, authClient, device, association[:])
+	first, _ := registerUser(t, connection, device, association[:])
 	second := loginUser(t, authClient, device, first.CredentialId)
 	otherDevice, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	other, _ := registerUser(t, authClient, otherDevice, association[:])
+	other, _ := registerUser(t, connection, otherDevice, association[:])
 	ctx := sessionCallContext(t.Context(), first.Session.SessionToken)
 	// Pin an older use time to make accidental authentication middleware touches visible.
 	lastUsed := time.Now().UTC().Truncate(time.Millisecond)

@@ -9,6 +9,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	m "go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	academicyear "iwut-auth-center/internal/academicyear/domain"
 	"iwut-auth-center/internal/adapter/deviceprotocol"
 	ap "iwut-auth-center/internal/authentication/port"
 	d "iwut-auth-center/internal/oauth/domain"
@@ -42,6 +43,18 @@ func (r *OAuthRepository) Transaction(ctx context.Context, fn func(p.Tx) error) 
 type oauthTx struct {
 	ctx context.Context
 	r   *OAuthRepository
+}
+
+func (tx *oauthTx) AcademicYear(observedAt time.Time) (int32, error) {
+	state, err := readAcademicYearState(tx.ctx, tx.r.db)
+	if err != nil {
+		return 0, d.ErrUnavailable
+	}
+	schedule, err := academicyear.Project(state, observedAt)
+	if err != nil {
+		return 0, d.ErrUnavailable
+	}
+	return schedule.CurrentAcademicYear, nil
 }
 
 func (tx *oauthTx) ApplicationOpen(applicationID string) (bool, error) {
@@ -150,15 +163,12 @@ func (tx *oauthTx) User(id string) (d.User, error) {
 		return d.User{}, d.ErrUnavailable
 	}
 	user := d.User{AccountRevision: revision, AuthID: id, DeveloperApproved: raw.Lookup("developerStatus").Type == bson.TypeString && raw.Lookup("developerStatus").StringValue() == "APPROVED"}
-	var binding bindingDocument
-	err = tx.r.db.Collection(EmailBindingCollection).FindOne(tx.ctx, bson.M{"authId": id}).Decode(&binding)
-	if err != nil && !errors.Is(err, m.ErrNoDocuments) {
+	binding, _, err := ReadPrimaryEmailTx(tx.ctx, tx.r.db, id)
+	if err != nil {
 		return user, d.ErrUnavailable
 	}
-	if err == nil && binding.Email != "" && !binding.VerifiedAt.IsZero() && binding.Revision > 0 {
-		user.Email = binding.Email
-		user.EmailVerified = true
-	}
+	user.Email = binding.Email
+	user.EmailVerified = true
 	if user.DeveloperApproved {
 		var owner struct {
 			Handle string `bson:"developerHandle"`
@@ -189,7 +199,11 @@ func (tx *oauthTx) Profile(id string) (d.Profile, error) {
 	}
 	out := d.Profile{Revision: principal.Profile.Revision, UpdatedAt: principal.Profile.UpdatedAt, Entries: make([]d.ProfileEntry, 0, len(principal.Profile.Entries))}
 	for _, entry := range principal.Profile.Entries {
-		out.Entries = append(out.Entries, d.ProfileEntry{Key: entry.Key, Value: d.ProfileValue{Type: string(entry.Value.Type), Text: entry.Value.Text, Integer: entry.Value.Integer, Boolean: entry.Value.Boolean}})
+		value := d.ProfileValue{Type: string(entry.Value.Type), Text: entry.Value.Text, Integer: entry.Value.Integer, Boolean: entry.Value.Boolean, Strings: append([]string(nil), entry.Value.Strings...)}
+		if entry.Value.Academic != nil {
+			value.Academic = &d.ProfileGrade{Stage: entry.Value.Academic.Stage, Year: entry.Value.Academic.Year, FinalYear: entry.Value.Academic.FinalYear, AcademicYear: entry.Value.Academic.AcademicYear, ConfirmedAt: entry.Value.Academic.ConfirmedAt}
+		}
+		out.Entries = append(out.Entries, d.ProfileEntry{Key: entry.Key, Value: value})
 	}
 	return out, nil
 }

@@ -14,7 +14,7 @@ func accountClosureWire(data []byte, value any) error {
 		maxField = 3
 		begin = true
 	case *pb.PrepareAccountClosureRequest:
-		maxField = 2
+		maxField = 3
 	case *pb.ConfirmAccountClosureRequest:
 		maxField = 3
 	case *pb.CancelAccountClosureRequest, *pb.GetAccountClosureRequest:

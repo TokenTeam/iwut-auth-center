@@ -41,10 +41,16 @@ func (s *Service) AccessClient(ctx context.Context, raw string) (string, error) 
 	e := s.transaction(ctx, func(tx port.Tx) error {
 		a, e := tx.Access(s.crypto.Digest("access", raw))
 		if e != nil {
+			if missing(e) {
+				return d.ErrToken
+			}
 			return e
 		}
 		f, e := tx.Family(a.FamilyID)
 		if e != nil {
+			if missing(e) {
+				return d.ErrToken
+			}
 			return e
 		}
 		if e = applicationOpen(tx, f.ApplicationID); e != nil {

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	decisionpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/account_owner_exit"
-	authpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"google.golang.org/grpc/codes"
@@ -46,7 +45,7 @@ func TestAccountClosureRecoveryActualApp(t *testing.T) {
 			key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 			association := make([]byte, 32)
 			_, _ = rand.Read(association)
-			user, _ := registerUser(t, authpb.NewAuthenticationServiceClient(f.Conn), key, association)
+			user, _ := registerUser(t, f.Conn, key, association)
 			now := time.Now().UTC().Truncate(time.Millisecond)
 			op := owner.Operation{OperationID: uuid.NewString(), AuthID: user.AuthId, Purpose: owner.Closure, Decision: owner.Pending, AccountRevision: 1, DeveloperRevision: 0, PermissionRevision: 1, CreatedAt: now, ExpiresAt: now.Add(5 * time.Minute), NextAttemptAt: now.Add(4 * time.Minute)}
 			if e := auth.WithAuthTransaction(t.Context(), func(tx context.Context) error { _, e := auth.CreateOwnerExitTx(tx, op); return e }); e != nil {

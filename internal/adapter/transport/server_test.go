@@ -18,54 +18,26 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/test/bufconn"
-	auth "iwut-auth-center/internal/authentication/domain"
 	profiledomain "iwut-auth-center/internal/profile/domain"
 )
 
 var defaultServeMuxProbeSequence atomic.Uint64
 
-type httpRegistration struct {
-	source string
-	calls  int
-}
-
-func (r *httpRegistration) Begin(_ context.Context, _ string, _ []byte, _ string, _ []byte, source string) (auth.Challenge, error) {
-	r.source = source
-	r.calls++
-	return auth.Challenge{}, nil
-}
-func (r *httpRegistration) Complete(context.Context, string, []byte) (auth.Established, error) {
-	return auth.Established{}, nil
-}
-
-func TestHTTPRegistrationUsesSocketPeerAndStrictJSON(t *testing.T) {
-	uc := &httpRegistration{}
-	server := newHTTPServer(ServerConfig{HTTPAddr: "127.0.0.1:0", UserEndpoints: &UserEndpoints{Authentication: &AuthenticationService{registration: NewRegistrationHandler(uc)}, Profile: &UserProfileServer{}, MaxAuthenticationMessageBytes: 16384}}, nil)
-	for _, tc := range []struct {
-		body, path string
-		status     int
-	}{
-		{`{"credentialProposal":{},"association":{}}`, "/v1/registrations", 200},
-		{`{"credentialProposal":{},"association":{},"unknown":"secret"}`, "/v1/registrations", 400},
-		{`{"credentialProposal":{},"credential_proposal":{},"association":{}}`, "/v1/registrations", 400},
-		{`{"credentialProposal":{},"association":{}}`, "/v1/registrations?association.schemeVersion=spoofed", 400},
-		{strings.Repeat(" ", 16385), "/v1/registrations", 413},
-	} {
-		req := httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Forwarded-For", "192.0.2.200")
-		req.RemoteAddr = "192.0.2.1:12345"
-		recorder := httptest.NewRecorder()
-		server.ServeHTTP(recorder, req)
-		if recorder.Code != tc.status {
-			t.Fatalf("%s: %d %s", tc.path, recorder.Code, recorder.Body.String())
+func TestHTTPNoEmailRegistrationIsRetired(t *testing.T) {
+	server := newHTTPServer(ServerConfig{HTTPAddr: "127.0.0.1:0", UserEndpoints: &UserEndpoints{Authentication: &AuthenticationService{}, Profile: &UserProfileServer{}, MaxAuthenticationMessageBytes: 16384}}, nil)
+	for _, path := range []string{"/v1/registrations", "/v1/registrations/11111111-1111-4111-8111-111111111111/completion"} {
+		for _, body := range []string{`{"credentialProposal":{},"association":{}}`, `{"unknown":"secret"}`, strings.Repeat(" ", 16385)} {
+			req := httptest.NewRequest("POST", path, strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+			server.ServeHTTP(recorder, req)
+			if recorder.Code != http.StatusNotFound {
+				t.Fatalf("%s still callable: %d %s", path, recorder.Code, recorder.Body.String())
+			}
+			if strings.Contains(recorder.Body.String(), "secret") {
+				t.Fatal("raw input leaked")
+			}
 		}
-		if strings.Contains(recorder.Body.String(), "secret") {
-			t.Fatal("raw input leaked")
-		}
-	}
-	if uc.calls != 1 || uc.source != "192.0.2.1" {
-		t.Fatalf("calls=%d source=%s", uc.calls, uc.source)
 	}
 }
 

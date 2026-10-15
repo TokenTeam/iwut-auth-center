@@ -72,6 +72,7 @@ type Operation struct {
 	CredentialID         string
 	PublicKey            []byte
 	AccountRevision      int64
+	PasswordRevision     int64
 	DeveloperRevision    int64
 	PermissionRevision   int64
 	MutationDigest       []byte

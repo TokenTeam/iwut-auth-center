@@ -44,7 +44,8 @@ func (p *Protocol) mac(fields ...[]byte) []byte {
 func (p *Protocol) RequestMAC(b domain.Begin, authID string) []byte {
 	f := [][]byte{[]byte("iwut-email-request-v1"), []byte(b.Mode), []byte(b.RequestID), []byte(b.Email), []byte(p.service), []byte(auth.ApplicationID)}
 	if b.Mode == domain.Register {
-		f = append(f, []byte(b.ProtocolVersion), b.PublicKey, []byte(b.Scheme), b.Token)
+		f[0] = []byte("iwut-email-request-v2")
+		f = append(f, []byte(b.ProtocolVersion), b.PublicKey)
 	} else {
 		f = append(f, []byte(authID), u64(*b.Revision))
 	}
@@ -53,9 +54,9 @@ func (p *Protocol) RequestMAC(b domain.Begin, authID string) []byte {
 func (p *Protocol) CodeMAC(o emailport.Operation, code string) []byte {
 	return p.mac([]byte("iwut-email-code-v1"), []byte(o.Proof.Purpose), []byte(o.Proof.OperationID), u64(o.Proof.ExpiresAt.UnixMilli()), o.RequestMAC, []byte(code))
 }
-func (p *Protocol) Payload(o emailport.Operation, digest []byte) ([]byte, error) {
+func (p *Protocol) Payload(o emailport.Operation) ([]byte, error) {
 	a := o.Proof
-	if o.Mode != domain.Register || a.Purpose != domain.RegistrationPurpose || a.ProtocolVersion != auth.ProtocolVersion || a.ServiceID != p.service || a.ApplicationID != auth.ApplicationID || !deviceprotocol.ValidID(a.OperationID) || len(a.Challenge) != 32 || len(digest) != 32 || a.ExpiresAt.UnixMilli() < 0 {
+	if o.Mode != domain.Register || a.Purpose != domain.RegistrationPurpose || a.ProtocolVersion != domain.ProtocolVersion || a.ServiceID != p.service || a.ApplicationID != auth.ApplicationID || !deviceprotocol.ValidID(a.OperationID) || len(a.Challenge) != 32 || a.ExpiresAt.UnixMilli() < 0 || a.SchemeVersion != "" || a.KeyVersion != "" || len(a.LookupKey) != 0 || len(a.Nonce) != 0 || len(a.Ciphertext) != 0 {
 		return nil, domain.ErrInvalid
 	}
 	d, _ := deviceprotocol.New(p.service)
@@ -66,7 +67,7 @@ func (p *Protocol) Payload(o emailport.Operation, digest []byte) ([]byte, error)
 	if e != nil || email != o.Email {
 		return nil, domain.ErrInvalid
 	}
-	payload := deviceprotocol.Frame([]byte("iwut-email-registration-proof-v1"), []byte(domain.ProtocolVersion), []byte(domain.RegistrationPurpose), []byte(p.service), []byte(auth.ApplicationID), []byte(a.OperationID), a.Challenge, u64(a.ExpiresAt.UnixMilli()), a.PublicKey, digest, []byte(email))
+	payload := deviceprotocol.Frame([]byte("iwut-email-registration-proof-v2"), []byte(domain.ProtocolVersion), []byte(domain.RegistrationPurpose), []byte(p.service), []byte(auth.ApplicationID), []byte(a.OperationID), a.Challenge, u64(a.ExpiresAt.UnixMilli()), a.PublicKey, []byte(email))
 	if len(payload) > 1024 {
 		return nil, domain.ErrInvalid
 	}

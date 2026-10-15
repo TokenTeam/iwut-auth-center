@@ -227,7 +227,12 @@ func (r *AccountClosureRepository) Cleanup(ctx context.Context, id string, now t
 			n := 0
 			for cur.Next(tx) {
 				var c CredentialDocument
-				if cur.Decode(&c) != nil || !validCredential(c) {
+				if cur.Decode(&c) != nil {
+					return d.ErrUnavailable
+				}
+				valid := c
+				valid.RevokedAt = nil
+				if !validCredential(valid) {
 					return d.ErrUnavailable
 				}
 				_, e = r.auth.database.Collection(CredentialTombstoneCollection).UpdateOne(tx, bson.M{"fingerprint": c.Fingerprint}, bson.M{"$setOnInsert": bson.M{"authId": authID}}, options.UpdateOne().SetUpsert(true))
@@ -333,7 +338,7 @@ func (r *AccountClosureRepository) Cleanup(ctx context.Context, id string, now t
 				_, e = r.auth.database.Collection(SessionCollection).DeleteMany(tx, bson.M{"authId": authID, "sessionId": bson.M{"$in": sessionIDs}})
 			}
 		case 11:
-			done, e = r.cleanupAssociationTx(tx, id, authID, now)
+			done, e = r.deleteBatch(tx, CampusCertificationCollection, bson.M{"authId": authID}, limit)
 		case 12:
 			var raw bson.Raw
 			e = r.auth.database.Collection(DeveloperHandleCollection).FindOne(tx, bson.M{"authId": authID}).Decode(&raw)
@@ -353,6 +358,24 @@ func (r *AccountClosureRepository) Cleanup(ctx context.Context, id string, now t
 			done, e = r.deleteBatch(tx, AccountClosureCollection, bson.M{"authId": authID, "operationId": bson.M{"$ne": id}}, limit)
 		case 14:
 			done, e = r.deleteBatch(tx, OwnerExitRequestCollection, bson.M{"authId": authID}, limit)
+		case 15:
+			done, e = r.deleteBatch(tx, ApplicationUserStorageCollection, bson.M{"authId": authID}, limit)
+		case 16:
+			done, e = r.deleteBatch(tx, CampusVerificationCollection, bson.M{"authId": authID}, limit)
+		case 17:
+			done, e = r.deleteBatch(tx, PasswordCollection, bson.M{"authId": authID}, limit)
+		case 18:
+			done, e = r.deleteBatch(tx, PasswordChangeCollection, bson.M{"authId": authID}, limit)
+		case 19:
+			done, e = r.deleteBatch(tx, PasswordNotificationCollection, bson.M{"authId": authID}, limit)
+		case 20:
+			done, e = r.deleteBatch(tx, EmailAccountOperationCollection, bson.M{"authId": authID}, limit)
+		case 21:
+			done, e = r.deleteBatch(tx, EmailAccountMutationCollection, bson.M{"authId": authID}, limit)
+		case 22:
+			done, e = r.deleteBatch(tx, EmailDirectoryCollection, bson.M{"authId": authID}, limit)
+		case 23:
+			done, e = r.deleteBatch(tx, CredentialManagementOperationCollection, bson.M{"authId": authID}, limit)
 		default:
 			complete = true
 		}
@@ -362,7 +385,7 @@ func (r *AccountClosureRepository) Cleanup(ctx context.Context, id string, now t
 		if done {
 			task.Step++
 		}
-		if task.Step > 14 {
+		if task.Step > 23 {
 			complete = true
 		}
 		_, e = r.auth.database.Collection(AccountClosureTaskCollection).UpdateOne(tx, bson.M{"operationId": id}, bson.M{"$set": bson.M{"step": task.Step, "localComplete": complete, "lastAttemptAt": now}})
@@ -375,52 +398,6 @@ func (r *AccountClosureRepository) Cleanup(ctx context.Context, id string, now t
 		return e
 	})
 	return complete, err
-}
-func (r *AccountClosureRepository) cleanupAssociationTx(ctx context.Context, id, authID string, now time.Time) (bool, error) {
-	var member struct {
-		AssociationID string `bson:"associationId"`
-	}
-	e := r.auth.database.Collection(AssociationMemberCollection).FindOne(ctx, bson.M{"authId": authID}).Decode(&member)
-	if errors.Is(e, m.ErrNoDocuments) {
-		if e = r.auth.database.Collection(AccountClosureTaskCollection).FindOne(ctx, bson.M{"operationId": id}).Decode(&member); e != nil {
-			return false, e
-		}
-		if member.AssociationID == "" {
-			return true, nil
-		}
-	} else if e != nil || member.AssociationID == "" {
-		return false, d.ErrUnavailable
-	}
-	var group associationDocument
-	e = r.auth.database.Collection(AssociationCollection).FindOne(ctx, bson.M{"associationId": member.AssociationID}).Decode(&group)
-	if errors.Is(e, m.ErrNoDocuments) {
-		return true, nil
-	}
-	if e != nil {
-		return false, e
-	}
-	if _, e = r.auth.database.Collection(AccountClosureTaskCollection).UpdateOne(ctx, bson.M{"operationId": id}, bson.M{"$set": bson.M{"associationId": member.AssociationID}}); e != nil {
-		return false, e
-	}
-	if _, e = r.auth.database.Collection(AssociationMemberCollection).DeleteOne(ctx, bson.M{"authId": authID, "associationId": member.AssociationID}); e != nil {
-		return false, e
-	}
-	n, e := r.auth.database.Collection(AssociationMemberCollection).CountDocuments(ctx, bson.M{"associationId": member.AssociationID})
-	if e != nil {
-		return false, e
-	}
-	if n > 0 {
-		return true, nil
-	}
-	pending, e := r.auth.database.Collection(AuthenticationOperationCollection).CountDocuments(ctx, bson.M{"status": "PENDING", "expiresAt": bson.M{"$gt": now}, "keyVersion": group.KeyVersion, "lookupKey": group.LookupKey})
-	if e != nil {
-		return false, e
-	}
-	if pending > 0 {
-		return false, nil
-	}
-	_, e = r.auth.database.Collection(AssociationCollection).DeleteOne(ctx, bson.M{"associationId": member.AssociationID})
-	return e == nil, e
 }
 func (r *AccountClosureRepository) Attempt(ctx context.Context, id string, now time.Time) error {
 	return r.transaction(ctx, func(tx context.Context) error {

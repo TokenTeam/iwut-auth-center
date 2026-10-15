@@ -29,7 +29,17 @@ func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 		cleanup()
 		return nil, nil, err
 	}
-	userEndpoints, err := provideUserEndpoints(configuration, database)
+	mainPasswordRuntime, err := providePasswordRuntime(configuration, database)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	mainCredentialManagementRuntime, err := provideCredentialManagement(configuration, database, mainPasswordRuntime)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	userEndpoints, err := provideUserEndpoints(configuration, database, mainPasswordRuntime, mainCredentialManagementRuntime)
 	if err != nil {
 		cleanup()
 		return nil, nil, err
@@ -52,7 +62,7 @@ func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 		cleanup()
 		return nil, nil, err
 	}
-	mainAccountClosureRuntime, err := provideAccountClosure(configuration, database, userEndpoints, mainOwnerExitRuntime)
+	mainAccountClosureRuntime, err := provideAccountClosure(configuration, database, userEndpoints, mainOwnerExitRuntime, mainPasswordRuntime)
 	if err != nil {
 		cleanup4()
 		cleanup3()
@@ -60,7 +70,7 @@ func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 		cleanup()
 		return nil, nil, err
 	}
-	mainApplicationClosureRuntime, err := provideApplicationClosure(configuration, database)
+	mainApplicationClosureRuntime, err := provideApplicationClosure(configuration, database, mainPasswordRuntime)
 	if err != nil {
 		cleanup4()
 		cleanup3()
@@ -108,7 +118,7 @@ func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 		cleanup()
 		return nil, nil, err
 	}
-	app := provideApp(servers, mainOwnerExitRuntime, mainAccountClosureRuntime)
+	app := provideApp(servers, mainOwnerExitRuntime, mainAccountClosureRuntime, mainCredentialManagementRuntime)
 	return app, func() {
 		cleanup4()
 		cleanup3()

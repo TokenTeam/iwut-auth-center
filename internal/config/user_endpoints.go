@@ -9,7 +9,6 @@ const UserEndpointsEnabledEnv = "AUTH_USER_ENDPOINTS_ENABLED"
 
 type UserEndpoints struct {
 	Authentication Authentication
-	Association    Association
 	Profile        ProfileConfig
 	UserIdentity   UserIdentityConfig
 }
@@ -28,9 +27,6 @@ func loadUserEndpoints(lookup LookupEnv) (*UserEndpoints, error) {
 	}
 	c := &UserEndpoints{}
 	if c.Authentication, err = LoadAuthentication(lookup); err != nil {
-		return nil, err
-	}
-	if c.Association, err = LoadAssociation(lookup); err != nil {
 		return nil, err
 	}
 	if c.Profile, err = ParseProfileConfig(lookup); err != nil {

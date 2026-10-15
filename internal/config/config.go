@@ -42,6 +42,8 @@ var ErrInvalidConfiguration = errors.New("invalid auth center configuration")
 type LookupEnv func(key string) (value string, found bool)
 
 type Config struct {
+	CredentialManagement            *CredentialManagement
+	Password                        *Password
 	ApplicationOperationsPermission *ApplicationOperationsPermission
 	ApplicationClosure              *ApplicationClosure
 	ApplicationCloseReauth          *ApplicationCloseReauth
@@ -52,9 +54,12 @@ type Config struct {
 	AccountManagement               *AccountManagement
 	OAuth                           *OAuth
 	PlatformAdministrator           *PlatformAdministrator
+	AcademicYearPolicy              *AcademicYearPolicy
+	ApplicationUserStorage          *ApplicationUserStorage
 	DeveloperApplication            *DeveloperApplication
 	EmailBinding                    *EmailBinding
 	EmailLogin                      *EmailBinding
+	CampusCertification             *EmailBinding
 	IdentityIssuance                *IdentityIssuance
 	UserEndpoints                   *UserEndpoints
 	HTTPAddr                        string
@@ -205,8 +210,21 @@ func Load(lookup LookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	password, err := loadPassword(lookup, userEndpoints, emailBinding, emailLogin)
+	if err != nil {
+		return Config{}, err
+	}
 	if emailBinding != nil && emailLogin != nil && string(emailBinding.HMACKey) == string(emailLogin.HMACKey) {
 		return Config{}, fmt.Errorf("%w: email login key must be independent", ErrInvalidConfiguration)
+	}
+	campusCertification, err := loadCampusCertification(lookup, userEndpoints)
+	if err != nil {
+		return Config{}, err
+	}
+	if campusCertification != nil {
+		if password == nil {
+			return Config{}, fmt.Errorf("%w: campus alias requires password/email-account v3", ErrInvalidConfiguration)
+		}
 	}
 	issuance, err := loadIdentityIssuance(lookup, userEndpoints, callers)
 	if err != nil {
@@ -232,6 +250,10 @@ func Load(lookup LookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	academicYearPolicy, err := loadAcademicYearPolicy(lookup, userEndpoints, issuance)
+	if err != nil {
+		return Config{}, err
+	}
 	accountManagement, err := loadAccountManagement(lookup, userEndpoints)
 	if err != nil {
 		return Config{}, err
@@ -244,8 +266,15 @@ func Load(lookup LookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	credentialManagement, err := loadCredentialManagement(lookup, userEndpoints, password)
+	if err != nil {
+		return Config{}, err
+	}
 	accountClosure, err := loadAccountClosure(lookup, userEndpoints)
 	if err != nil {
+		return Config{}, err
+	}
+	if err := validateDangerPasswordDependencies(password, accountClosure, applicationCloseReauth); err != nil {
 		return Config{}, err
 	}
 	oauth, err := loadOAuth(lookup)
@@ -255,11 +284,16 @@ func Load(lookup LookupEnv) (Config, error) {
 	if oauth != nil && userEndpoints == nil {
 		return Config{}, ErrInvalidConfiguration
 	}
+	applicationUserStorage, err := loadApplicationUserStorage(lookup, oauth, userEndpoints)
+	if err != nil {
+		return Config{}, err
+	}
 	ownerExit, err := loadOwnerExit(lookup, userEndpoints, callers)
 	if err != nil {
 		return Config{}, err
 	}
 	return Config{
+		CredentialManagement:            credentialManagement,
 		ApplicationOperationsPermission: applicationOperationsPermission,
 		ApplicationClosure:              applicationClosure,
 		ApplicationCloseReauth:          applicationCloseReauth,
@@ -269,10 +303,14 @@ func Load(lookup LookupEnv) (Config, error) {
 		OwnerExit:                       ownerExit,
 		AccountManagement:               accountManagement,
 		PlatformAdministrator:           platformAdministrator,
+		AcademicYearPolicy:              academicYearPolicy,
+		ApplicationUserStorage:          applicationUserStorage,
 		OAuth:                           oauth,
 		DeveloperApplication:            developerApplication,
 		EmailBinding:                    emailBinding,
+		Password:                        password,
 		EmailLogin:                      emailLogin,
+		CampusCertification:             campusCertification,
 		IdentityIssuance:                issuance,
 		UserEndpoints:                   userEndpoints,
 		HTTPAddr:                        httpAddress, GRPCAddr: address, LogLevel: logLevel,

@@ -7,7 +7,7 @@ import (
 )
 
 func TestEmailLoginIndependentConfigurationGate(t *testing.T) {
-	user := &UserEndpoints{Association: Association{Current: AssociationKey{Version: "v1", Encrypt: bytes.Repeat([]byte{1}, 32), Lookup: bytes.Repeat([]byte{2}, 32)}}}
+	user := &UserEndpoints{}
 	env := map[string]string{}
 	lookup := func(k string) (string, bool) { v, ok := env[k]; return v, ok }
 	load := func(u *UserEndpoints) (*EmailBinding, error) {
@@ -29,7 +29,7 @@ func TestEmailLoginIndependentConfigurationGate(t *testing.T) {
 	if c, e := loadEmailBinding(lookup, user); e != nil || c != nil {
 		t.Fatal("login enabled binding")
 	}
-	for _, bad := range []struct{ k, v string }{{"AUTH_EMAIL_LOGIN_ENABLED", "bad"}, {"AUTH_EMAIL_LOGIN_CODE_KEY", ""}, {"AUTH_EMAIL_LOGIN_CODE_KEY", base64.StdEncoding.EncodeToString(user.Association.Current.Encrypt)}, {"AUTH_EMAIL_LOGIN_CODE_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 31))}, {"AUTH_SMTP_TLS_MODE", "plaintext"}} {
+	for _, bad := range []struct{ k, v string }{{"AUTH_EMAIL_LOGIN_ENABLED", "bad"}, {"AUTH_EMAIL_LOGIN_CODE_KEY", ""}, {"AUTH_EMAIL_LOGIN_CODE_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 31))}, {"AUTH_SMTP_TLS_MODE", "plaintext"}} {
 		old := env[bad.k]
 		env[bad.k] = bad.v
 		if _, e := load(user); e == nil {

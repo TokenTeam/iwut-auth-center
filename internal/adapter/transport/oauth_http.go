@@ -28,6 +28,7 @@ type OAuthHTTP struct {
 	Service                                            *usecase.Service
 	Issuer, Origin, LoginURL, SectorSuffix             string
 	Enabled                                            bool
+	StorageEnabled                                     bool
 	mu                                                 sync.Mutex
 	buckets                                            map[string]oauthBucket
 }
@@ -37,6 +38,9 @@ type oauthBucket struct {
 }
 
 func (h *OAuthHTTP) Handles(r *http.Request) bool {
+	if r.URL.Path == "/v1/application-user-storage:batchGet" || r.URL.Path == "/v1/application-user-storage:mutate" {
+		return true
+	}
 	u, _ := url.Parse(h.Issuer)
 	if r.URL.Path == "/redirect-uris.json" && strings.HasSuffix(r.Host, "."+h.SectorSuffix) {
 		return true
@@ -58,6 +62,12 @@ func (h *OAuthHTTP) Handles(r *http.Request) bool {
 // Handles accepts. It deliberately never returns the request path, host,
 // interaction id, client id or any other caller-controlled value.
 func (h *OAuthHTTP) ObservableOperation(r *http.Request) string {
+	switch r.URL.Path {
+	case "/v1/application-user-storage:batchGet":
+		return "application_user_storage.batch_get"
+	case "/v1/application-user-storage:mutate":
+		return "application_user_storage.mutate"
+	}
 	if r.URL.Path == "/redirect-uris.json" && strings.HasSuffix(r.Host, "."+h.SectorSuffix) {
 		return "oauth.redirect_uris"
 	}
@@ -118,6 +128,14 @@ func (h *OAuthHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+	if r.URL.Path == "/v1/application-user-storage:batchGet" || r.URL.Path == "/v1/application-user-storage:mutate" {
+		if !h.StorageEnabled {
+			http.NotFound(w, r)
+			return
+		}
+		h.applicationUserStorage(w, r)
+		return
+	}
 	if !h.Enabled {
 		http.NotFound(w, r)
 		return

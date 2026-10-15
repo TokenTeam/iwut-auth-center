@@ -69,7 +69,7 @@ func TestDeveloperManagementMongoAtomicCancellationAndPreservation(t *testing.T)
 	}
 	r.recoveryReady = true
 	_, _ = db.Collection(EmailBindingCollection).DeleteOne(ctx, bson.M{"authId": "developer"})
-	if _, e = r.ManageDeveloperStatus(ctx, d.ManageDeveloperCommand{ActorAuthID: actor, SubjectAuthID: "developer", Action: "RESTORE", Reason: "done", ExpectedRevision: 2}); !errors.Is(e, d.ErrRestoreBlocked) {
+	if _, e = r.ManageDeveloperStatus(ctx, d.ManageDeveloperCommand{ActorAuthID: actor, SubjectAuthID: "developer", Action: "RESTORE", Reason: "done", ExpectedRevision: 2}); !errors.Is(e, d.ErrManagementUnavailable) {
 		t.Fatal(e)
 	}
 	adminVerifiedEmail(t, db, "developer")

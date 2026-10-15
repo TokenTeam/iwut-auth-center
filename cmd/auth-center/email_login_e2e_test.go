@@ -14,6 +14,7 @@ import (
 	authpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 	pb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_binding"
 	loginpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_login"
+	accountpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v3/email_account"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -55,6 +56,7 @@ func TestE2E_EmailLogin_ProductionWireTLS(t *testing.T) {
 	keys, _ := json.Marshal(map[string]string{"test": keyFile})
 	dbName := "uc012_wire_" + uuid.NewString()
 	env := map[string]string{config.UserEndpointsEnabledEnv: "true", config.MongoURIEnv: uri, config.MongoDatabaseEnv: dbName, config.ServiceCallersEnv: callers, config.HTTPAddrEnv: reserveAddress(t), config.GRPCAddrEnv: reserveAddress(t), "AUTH_AUTHENTICATION_SERVICE_ID": "iwut-auth-center:test", "AUTH_SESSION_TTL": "24h", "AUTH_ASSOC_KEY_VERSION": "v1", "AUTH_ASSOC_ENCRYPT_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32)), "AUTH_ASSOC_LOOKUP_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, 32)), "AUTH_PROFILE_CATALOG_FILE": catalog, "AUTH_USER_IDENTITY_ISSUER": "test", "AUTH_USER_IDENTITY_PUBLIC_KEYS_JSON": string(keys), "AUTH_EMAIL_BINDING_ENABLED": "true", "AUTH_EMAIL_BINDING_HMAC_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{3}, 32)), "AUTH_SMTP_ADDR": capture.Address, "AUTH_SMTP_FROM": "auth@example.test", "AUTH_SMTP_TLS_MODE": "implicit_tls", "AUTH_SMTP_CA_FILE": ca}
+	enableEmailRegistrationFixture(t, env, capture)
 	load := func() config.Config {
 		c, e := config.Load(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
 		if e != nil {
@@ -97,11 +99,12 @@ func TestE2E_EmailLogin_ProductionWireTLS(t *testing.T) {
 		return matches[1]
 	}
 	oldDevice, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	registered, e := emailClient.BeginSetEmail(t.Context(), &pb.BeginSetEmailRequest{RequestId: uuid.NewString(), Email: "login@example.test", Intent: &pb.BeginSetEmailRequest_Registration{Registration: &pb.RegisterEmailIntent{CredentialProposal: &authpb.CredentialRegistrationProposal{ProtocolVersion: "iwut-device-v1", PublicKey: elliptic.Marshal(elliptic.P256(), oldDevice.X, oldDevice.Y)}, Association: &authpb.StudentAssociationDeclaration{SchemeVersion: "iwut-student-association-v1", AssociationToken: bytes.Repeat([]byte{9}, 32)}}}})
+	accountClient := accountpb.NewEmailAccountServiceClient(conn)
+	registered, e := accountClient.BeginEmailRegistration(t.Context(), &accountpb.BeginEmailRegistrationRequest{RequestId: uuid.NewString(), Email: "login@example.test", CredentialProposal: &authpb.CredentialRegistrationProposal{ProtocolVersion: "iwut-device-v1", PublicKey: elliptic.Marshal(elliptic.P256(), oldDevice.X, oldDevice.Y)}})
 	if e != nil {
 		t.Fatal(e)
 	}
-	activated, e := emailClient.CompleteSetEmail(t.Context(), &pb.CompleteSetEmailRequest{OperationId: registered.OperationId, Code: nextCode(), RegistrationProof: &authpb.CredentialProof{Signature: signDevice(t, oldDevice, registered.RegistrationChallenge.SigningPayload)}})
+	activated, e := accountClient.CompleteEmailRegistration(t.Context(), &accountpb.CompleteEmailRegistrationRequest{OperationId: registered.OperationId, Code: nextCode(), Password: "a long fixture password 123", Proof: &authpb.CredentialProof{Signature: signDevice(t, oldDevice, registered.SigningPayload)}})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -199,6 +202,7 @@ func TestE2E_EmailLogin_ProductionWireTLS(t *testing.T) {
 	stop()
 	// A login-only deployment needs the common SMTP and directory, but no binding key/routes.
 	env["AUTH_EMAIL_BINDING_ENABLED"] = "false"
+	env["AUTH_PASSWORD_ENABLED"] = "false"
 	delete(env, "AUTH_EMAIL_BINDING_HMAC_KEY")
 	env[config.HTTPAddrEnv] = reserveAddress(t)
 	env[config.GRPCAddrEnv] = reserveAddress(t)

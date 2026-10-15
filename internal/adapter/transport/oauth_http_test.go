@@ -1,11 +1,14 @@
 package transport
 
 import (
+	"encoding/json"
+	d "iwut-auth-center/internal/oauth/domain"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestOAuthStrictFormsAndClientCarriers(t *testing.T) {
@@ -32,6 +35,54 @@ func TestOAuthStrictFormsAndClientCarriers(t *testing.T) {
 	v, e := oauthConsentForm(r)
 	if e != nil || len(v["scope"]) != 2 {
 		t.Fatal(e)
+	}
+}
+
+func TestUserInfoResponseExtendedProfileJSON(t *testing.T) {
+	confirmed := time.Now()
+	response, err := userInfoResponse(d.UserInfo{Subject: "sub", Profile: []d.ProfileEntry{
+		{Key: "education.campus_areas", Value: d.ProfileValue{Type: "STRING_SET", Strings: []string{"JIANHU", "NANHU"}}},
+		{Key: "education.current_grade", Value: d.ProfileValue{Type: "ACADEMIC_GRADE", Integer: 4, Academic: &d.ProfileGrade{Stage: "UNDERGRADUATE", Year: 3, FinalYear: 4, AcademicYear: 2025, ConfirmedAt: &confirmed}}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(encoded)
+	if !strings.Contains(body, `"education.campus_areas":["JIANHU","NANHU"]`) || !strings.Contains(body, `"education.current_grade":"UNDERGRADUATE_4"`) {
+		t.Fatal("extended values missing", body)
+	}
+	for _, forbidden := range []string{"academicYear", "finalYear", "confirmedAt", "2025"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("grade anchor leaked (%s): %s", forbidden, body)
+		}
+	}
+}
+
+func TestUserInfoCampusResponseOnlyExposesMinimalFact(t *testing.T) {
+	response, err := userInfoResponse(d.UserInfo{Subject: "pairwise", Campus: &d.CampusCertification{AuthID: "internal-auth-id", Institution: "WHUT", CertifiedAt: time.Now()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(encoded) != `{"iwut_campus":{"certified":true,"institution":"WHUT"},"sub":"pairwise"}` {
+		t.Fatalf("campus claim leaked extra fields: %s", encoded)
+	}
+	response, err = userInfoResponse(d.UserInfo{Subject: "pairwise"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := response["iwut_campus"]; exists {
+		t.Fatal("absent certification exposed")
+	}
+	if _, err = userInfoResponse(d.UserInfo{Subject: "pairwise", Campus: &d.CampusCertification{Institution: "OTHER", CertifiedAt: time.Now()}}); err == nil {
+		t.Fatal("bad campus fact serialized")
 	}
 }
 func TestOAuthDefaultClosedAndPathIsolation(t *testing.T) {

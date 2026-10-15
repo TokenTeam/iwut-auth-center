@@ -32,11 +32,11 @@ func sessionRevocationFixture(t *testing.T) (*AuthenticationRepository, *driverm
 	fingerprint, _ := protocol.Fingerprint(public)
 	credentialID, _ := protocol.NewID()
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	credential := CredentialDocument{CredentialID: credentialID, AuthID: "session-revocation-user", ProtocolVersion: domain.ProtocolVersion, PublicKey: public, Fingerprint: fingerprint, CreatedAt: now}
+	credential := CredentialDocument{CredentialRevision: 1, CredentialID: credentialID, AuthID: "session-revocation-user", ProtocolVersion: domain.ProtocolVersion, PublicKey: public, Fingerprint: fingerprint, CreatedAt: now}
 	if _, err := db.Collection(CredentialCollection).InsertOne(t.Context(), credential); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Collection(PrincipalCollection).InsertOne(t.Context(), bson.M{"authId": credential.AuthID, "principalType": "USER", "accountStatus": "ACTIVE", "accountRevision": int64(1), "profile": bson.M{"name": "keep"}}); err != nil {
+	if _, err := db.Collection(PrincipalCollection).InsertOne(t.Context(), bson.M{"authId": credential.AuthID, "principalType": "USER", "accountStatus": "ACTIVE", "accountRevision": int64(1), "minimumCredentialRevision": int64(1), "profile": bson.M{"name": "keep"}}); err != nil {
 		t.Fatal(err)
 	}
 	sessions := make([]SessionDocument, 2)

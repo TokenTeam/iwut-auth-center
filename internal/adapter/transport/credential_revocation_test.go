@@ -40,7 +40,7 @@ func (revokeTestRepository) RevokeOwnCredential(_ context.Context, caller domain
 		return errors.New("untrusted caller")
 	}
 	if id != revokeTestCredential {
-		return port.ErrNotFound
+		return port.ErrCredentialReauthRequired
 	}
 	return nil
 }
@@ -92,7 +92,7 @@ func TestCredentialRevocationTransportSessionBoundary(t *testing.T) {
 		{"invalid-session", []string{"x-iwut-session", strings.Repeat("B", 42) + "A"}, revokeTestCredential, codes.Unauthenticated},
 		{"no-target", []string{"x-iwut-session", revokeTestToken}, "", codes.InvalidArgument},
 		{"uppercase-id", []string{"x-iwut-session", revokeTestToken}, strings.ToUpper(revokeTestCredential), codes.InvalidArgument},
-		{"unknown-target", []string{"x-iwut-session", revokeTestToken}, "87654321-1234-4234-8234-123456789abc", codes.NotFound},
+		{"other-target", []string{"x-iwut-session", revokeTestToken}, "87654321-1234-4234-8234-123456789abc", codes.PermissionDenied},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

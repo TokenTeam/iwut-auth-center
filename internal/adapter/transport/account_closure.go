@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"time"
+	"unicode/utf8"
 
 	pb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/account_closure"
 	kt "github.com/go-kratos/kratos/v2/transport"
@@ -23,7 +24,7 @@ const closureMessageLimit = 16 * 1024
 
 type AccountClosureHandler interface {
 	Begin(context.Context, d.BeginInput) (d.Challenge, error)
-	Prepare(context.Context, string, []byte) (d.Preparation, error)
+	Prepare(context.Context, string, []byte, string, string) (d.Preparation, error)
 	Confirm(context.Context, string, string, string, string) (d.Status, error)
 	Cancel(context.Context, string, string) (d.Status, error)
 	Get(context.Context, string, string) (d.Status, error)
@@ -125,7 +126,10 @@ func (s *AccountClosureService) PrepareAccountClosure(ctx context.Context, r *pb
 	if _, err := s.authorize(ctx, r, "", true); err != nil {
 		return nil, err
 	}
-	out, err := s.handler.Prepare(ctx, r.OperationId, r.Signature)
+	if r.CurrentPassword == "" || len(r.CurrentPassword) > 1024 || !utf8.ValidString(r.CurrentPassword) {
+		return nil, closureError(d.ErrInvalid)
+	}
+	out, err := s.handler.Prepare(ctx, r.OperationId, r.Signature, r.CurrentPassword, authenticationPeer(ctx))
 	if err != nil {
 		return nil, closureError(err)
 	}

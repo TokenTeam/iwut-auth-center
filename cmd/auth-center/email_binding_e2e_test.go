@@ -11,9 +11,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
-	"fmt"
 	authpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
-	pb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_binding"
+	oldpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_binding"
+	pb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v3/email_account"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
@@ -54,6 +54,7 @@ func TestE2E_EmailBinding_ProductionWireTLS(t *testing.T) {
 	keys, _ := json.Marshal(map[string]string{"test": keyFile})
 	dbName := "uc011_wire_" + uuid.NewString()
 	env := map[string]string{config.UserEndpointsEnabledEnv: "true", config.MongoURIEnv: uri, config.MongoDatabaseEnv: dbName, config.ServiceCallersEnv: callers, config.HTTPAddrEnv: reserveAddress(t), config.GRPCAddrEnv: reserveAddress(t), "AUTH_AUTHENTICATION_SERVICE_ID": "iwut-auth-center:test", "AUTH_SESSION_TTL": "24h", "AUTH_ASSOC_KEY_VERSION": "v1", "AUTH_ASSOC_ENCRYPT_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32)), "AUTH_ASSOC_LOOKUP_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, 32)), "AUTH_PROFILE_CATALOG_FILE": catalog, "AUTH_USER_IDENTITY_ISSUER": "test", "AUTH_USER_IDENTITY_PUBLIC_KEYS_JSON": string(keys), "AUTH_EMAIL_BINDING_ENABLED": "true", "AUTH_EMAIL_BINDING_HMAC_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{3}, 32)), "AUTH_SMTP_ADDR": capture.Address, "AUTH_SMTP_FROM": "auth@example.test", "AUTH_SMTP_TLS_MODE": "implicit_tls", "AUTH_SMTP_CA_FILE": ca}
+	enableEmailRegistrationFixture(t, env, capture)
 	load := func() config.Config {
 		c, e := config.Load(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
 		if e != nil {
@@ -75,28 +76,28 @@ func TestE2E_EmailBinding_ProductionWireTLS(t *testing.T) {
 	}
 	connection, stop := startUserApp(t, app, cleanup, env[config.GRPCAddrEnv])
 	defer stop()
-	client := pb.NewEmailBindingServiceClient(connection)
+	client := pb.NewEmailAccountServiceClient(connection)
 	base := "http://" + env[config.HTTPAddrEnv]
 	httpTransport, e := khttp.NewClient(t.Context(), khttp.WithEndpoint(base))
 	if e != nil {
 		t.Fatal(e)
 	}
 	defer httpTransport.Close()
-	httpClient := pb.NewEmailBindingServiceHTTPClient(httpTransport)
+	httpClient := pb.NewEmailAccountServiceHTTPClient(httpTransport)
 	device, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	request := &pb.BeginSetEmailRequest{RequestId: uuid.NewString(), Email: " User+TAG@EXAMPLE.TEST ", Intent: &pb.BeginSetEmailRequest_Registration{Registration: &pb.RegisterEmailIntent{CredentialProposal: &authpb.CredentialRegistrationProposal{ProtocolVersion: "iwut-device-v1", PublicKey: elliptic.Marshal(elliptic.P256(), device.X, device.Y)}, Association: &authpb.StudentAssociationDeclaration{SchemeVersion: "iwut-student-association-v1", AssociationToken: bytes.Repeat([]byte{9}, 32)}}}}
+	request := &pb.BeginEmailRegistrationRequest{RequestId: uuid.NewString(), Email: " User+TAG@EXAMPLE.TEST ", CredentialProposal: &authpb.CredentialRegistrationProposal{ProtocolVersion: "iwut-device-v1", PublicKey: elliptic.Marshal(elliptic.P256(), device.X, device.Y)}}
 	// Invalid provided carriers must be rejected before any anonymous fallback.
 	for _, values := range [][]string{{""}, {" "}, {"bad"}, {strings.Repeat("A", 43)}, {"a", "b"}} {
 		ctx := metadata.NewOutgoingContext(t.Context(), metadata.MD{"x-iwut-session": values})
-		if _, e = client.BeginSetEmail(ctx, request); status.Code(e) != codes.Unauthenticated {
+		if _, e = client.BeginEmailRegistration(ctx, request); status.Code(e) != codes.Unauthenticated {
 			t.Fatalf("invalid carrier: %v", e)
 		}
 	}
-	started, e := httpClient.BeginSetEmail(t.Context(), request)
+	started, e := httpClient.BeginEmailRegistration(t.Context(), request)
 	if e != nil {
 		t.Fatal(e)
 	}
-	if started.Mode != pb.EmailMode_EMAIL_MODE_REGISTER || started.RegistrationChallenge.ProtocolVersion != "iwut-email-registration-v1" {
+	if started.ProtocolVersion != "iwut-email-registration-v3" {
 		t.Fatal("incorrect registration response")
 	}
 	nextCode := func() string {
@@ -108,11 +109,30 @@ func TestE2E_EmailBinding_ProductionWireTLS(t *testing.T) {
 		return matches[1]
 	}
 	code := nextCode()
-	if again, e := client.BeginSetEmail(t.Context(), request); e != nil || again.OperationId != started.OperationId {
+	// Reserved student-association input is rejected in both native Proto and
+	// strict JSON, never silently dropped into a new registration.
+	deprecated := proto.Clone(request).(*pb.BeginEmailRegistrationRequest)
+	deprecated.CredentialProposal.ProtoReflect().SetUnknown([]byte{0x12, 0})
+	if _, e := client.BeginEmailRegistration(t.Context(), deprecated); status.Code(e) != codes.InvalidArgument {
+		t.Fatal("retired protobuf field accepted", e)
+	}
+	oldJSON, _ := protojson.Marshal(request)
+	oldJSON = bytes.Replace(oldJSON, []byte(`"credentialProposal":{`), []byte(`"credentialProposal":{"association":{},`), 1)
+	oldRequest, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, base+"/v3/email-registrations", bytes.NewReader(oldJSON))
+	oldRequest.Header.Set("Content-Type", "application/json")
+	oldResponse, e := http.DefaultClient.Do(oldRequest)
+	if e != nil {
+		t.Fatal(e)
+	}
+	oldResponse.Body.Close()
+	if oldResponse.StatusCode != 400 {
+		t.Fatal("retired JSON field accepted", oldResponse.StatusCode)
+	}
+	if again, e := client.BeginEmailRegistration(t.Context(), request); e != nil || again.OperationId != started.OperationId {
 		t.Fatalf("cross-transport idempotency: %v", e)
 	}
-	completion := &pb.CompleteSetEmailRequest{OperationId: started.OperationId, Code: code, RegistrationProof: &authpb.CredentialProof{Signature: signDevice(t, device, started.RegistrationChallenge.SigningPayload)}}
-	activated, e := client.CompleteSetEmail(t.Context(), completion)
+	completion := &pb.CompleteEmailRegistrationRequest{OperationId: started.OperationId, Code: code, Password: "a long fixture password 123", Proof: &authpb.CredentialProof{Signature: signDevice(t, device, started.SigningPayload)}}
+	activated, e := client.CompleteEmailRegistration(t.Context(), completion)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -121,29 +141,25 @@ func TestE2E_EmailBinding_ProductionWireTLS(t *testing.T) {
 	}
 	token := activated.RegistrationResult.Session.SessionToken
 	sessionCtx := sessionCallContext(t.Context(), token)
-	if _, e = client.CompleteSetEmail(sessionCtx, completion); status.Code(e) != codes.FailedPrecondition {
+	if _, e = client.CompleteEmailRegistration(sessionCtx, completion); status.Code(e) != codes.Unauthenticated {
 		t.Fatalf("REGISTER switched mode: %v", e)
 	}
-	if _, e = client.CompleteSetEmail(t.Context(), completion); status.Code(e) != codes.AlreadyExists {
+	if _, e = client.CompleteEmailRegistration(t.Context(), completion); status.Code(e) != codes.AlreadyExists {
 		t.Fatalf("token replay: %v", e)
 	}
-	own, e := client.GetOwnEmailBinding(sessionCtx, &pb.GetOwnEmailBindingRequest{})
-	if e != nil || own.Revision != 1 || own.ActiveEmail.Email != "user+tag@example.test" {
+	own, e := client.GetOwnEmails(sessionCtx, &pb.GetOwnEmailsRequest{})
+	if e != nil || own.DirectoryRevision != 1 || own.LoginRoleRevision != 1 || len(own.Emails) != 1 || own.Emails[0].Email != "user+tag@example.test" {
 		t.Fatalf("query: %v %v", own, e)
 	}
-	if _, e = client.GetOwnEmailBinding(t.Context(), &pb.GetOwnEmailBindingRequest{}); status.Code(e) != codes.Unauthenticated {
+	if _, e = client.GetOwnEmails(t.Context(), &pb.GetOwnEmailsRequest{}); status.Code(e) != codes.Unauthenticated {
 		t.Fatal("anonymous query accepted")
 	}
-	revision := int64(1)
-	bind := &pb.BeginSetEmailRequest{RequestId: uuid.NewString(), Email: "replace@example.test", Intent: &pb.BeginSetEmailRequest_Binding{Binding: &pb.BindEmailIntent{ExpectedRevision: &revision}}}
-	pending, e := client.BeginSetEmail(sessionCtx, bind)
+	pending, e := client.BeginAddOwnEmail(sessionCtx, &pb.BeginAddOwnEmailRequest{RequestId: uuid.NewString(), Email: "replace@example.test", ExpectedDirectoryRevision: 1})
 	if e != nil {
 		t.Fatal(e)
 	}
 	bindCode := nextCode()
-	if pending.RegistrationChallenge != nil {
-		t.Fatal("binding has signature challenge")
-	}
+
 	send := func(method, path, body string, headers http.Header, want int, out proto.Message) {
 		t.Helper()
 		r, e := http.NewRequest(method, base+path, strings.NewReader(body))
@@ -174,31 +190,63 @@ func TestE2E_EmailBinding_ProductionWireTLS(t *testing.T) {
 		}
 	}
 	headers := http.Header{"X-Iwut-Session": {token}}
-	var bound pb.EmailActivated
-	// Path must override the body operation ID; BIND success remains HTTP 200.
-	send("POST", "/v1/email-bindings/"+pending.OperationId+"/completion", fmt.Sprintf(`{"operationId":%q,"code":%q}`, uuid.NewString(), bindCode), headers, 200, &bound)
-	if bound.Revision != 2 || bound.RegistrationResult != nil {
-		t.Fatal("binding result mismatch")
+	var bound pb.OwnEmailAdded
+	send("POST", "/v3/users/me/email-verifications:complete", `{"operationId":"`+pending.OperationId+`","code":"`+bindCode+`"}`, headers, 200, &bound)
+	if bound.Emails.DirectoryRevision != 2 || bound.Emails.LoginRoleRevision != 1 || len(bound.Emails.Emails) != 2 {
+		t.Fatal("ADD changed role")
 	}
-	send("GET", "/v1/users/me/email-binding", "", headers, 200, nil)
+	send("GET", "/v3/users/me/emails", "", headers, 200, nil)
 	for _, v := range []string{"", "bad", token + "," + token} {
-		send("POST", "/v1/email-bindings", `{}`, http.Header{"X-Iwut-Session": {v}}, 401, nil)
+		send("GET", "/v3/users/me/emails", "", http.Header{"X-Iwut-Session": {v}}, 401, nil)
 	}
-	send("POST", "/v1/email-bindings", `{}`, http.Header{"X-Iwut-Session": {token, token}}, 401, nil)
-	for _, bad := range []string{`{"requestId":"a","request_id":"b"}`, `{"binding":{},"registration":{}}`, `{"unknown":"private-value"}`, `{"binding":{"expectedRevision":null}}`} {
-		send("POST", "/v1/email-bindings", bad, nil, 400, nil)
+	send("GET", "/v3/users/me/emails", "", http.Header{"X-Iwut-Session": {token, token}}, 401, nil)
+	for _, bad := range []string{`{"requestId":"a","request_id":"b"}`, `{"credentialProposal":{},"email":null,"requestId":"a"}`, `{"unknown":"private-value"}`, `{"requestId":"a","email":"a@example.test","credentialProposal":{"protocolVersion":"iwut-device-v1","publicKey":null}}`} {
+		send("POST", "/v3/email-registrations", bad, nil, 400, nil)
 	}
-	send("POST", "/v1/email-bindings", strings.Repeat(" ", 16*1024+1), nil, 413, nil)
-	send("GET", "/v1/users/me/email-binding?email=secret", "", headers, 400, nil)
+	send("POST", "/v3/email-registrations", strings.Repeat(" ", 16*1024+1), nil, 413, nil)
+	send("GET", "/v3/users/me/emails?email=secret", "", headers, 400, nil)
+	var target string
+	for _, b := range bound.Emails.Emails {
+		if b.Email == "replace@example.test" {
+			target = b.BindingId
+		}
+	}
+	switchRequest := &pb.SwitchOwnLoginEmailRequest{RequestId: uuid.NewString(), TargetBindingId: target, CurrentPassword: "wrong fixture password", ExpectedDirectoryRevision: 2, ExpectedLoginRoleRevision: 1}
+	if _, e = client.SwitchOwnLoginEmail(sessionCtx, switchRequest); status.Code(e) != codes.Unauthenticated {
+		t.Fatal("switch without password", e)
+	}
+	switchRequest.CurrentPassword = "a long fixture password 123"
+	switched, e := client.SwitchOwnLoginEmail(sessionCtx, switchRequest)
+	if e != nil || switched.Emails.DirectoryRevision != 3 || switched.Emails.LoginRoleRevision != 2 {
+		t.Fatal("switch", switched, e)
+	}
+	if _, e = client.GetOwnEmails(sessionCtx, &pb.GetOwnEmailsRequest{}); e != nil {
+		t.Fatal("switch cleared Session", e)
+	}
+	if _, e = client.RemoveOwnEmail(sessionCtx, &pb.RemoveOwnEmailRequest{RequestId: uuid.NewString(), BindingId: target, ExpectedDirectoryRevision: 3}); status.Code(e) != codes.AlreadyExists {
+		t.Fatal("removed primary", e)
+	}
+	oldClient := oldpb.NewEmailBindingServiceClient(connection)
+	if _, e = oldClient.BeginSetEmail(t.Context(), &oldpb.BeginSetEmailRequest{}); status.Code(e) != codes.Unimplemented {
+		t.Fatal("old registration bypass", e)
+	}
+	if _, e = oldClient.CompleteSetEmail(t.Context(), &oldpb.CompleteSetEmailRequest{}); status.Code(e) != codes.Unimplemented {
+		t.Fatal("old completion bypass", e)
+	}
+	send("POST", "/v1/email-bindings", "{}", nil, 404, nil)
+	projection, e := oldClient.GetOwnEmailBinding(sessionCtx, &oldpb.GetOwnEmailBindingRequest{})
+	if e != nil || projection.ActiveEmail.Email != "replace@example.test" || projection.Revision != 2 || projection.Pending != nil {
+		t.Fatal("read projection", projection, e)
+	}
 	// A valid Session paired with registration does not register another user.
 	request.RequestId = uuid.NewString()
-	if _, e = client.BeginSetEmail(sessionCtx, request); status.Code(e) != codes.FailedPrecondition {
+	if _, e = client.BeginEmailRegistration(sessionCtx, request); status.Code(e) != codes.Unauthenticated {
 		t.Fatal("session registration accepted")
 	}
 	if _, e = authpb.NewAuthenticationServiceClient(connection).RevokeCurrentSession(sessionCtx, &authpb.RevokeCurrentSessionRequest{}); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = client.BeginSetEmail(sessionCtx, request); status.Code(e) != codes.Unauthenticated {
+	if _, e = client.BeginEmailRegistration(sessionCtx, request); status.Code(e) != codes.Unauthenticated {
 		t.Fatal("revoked session became anonymous")
 	}
 	stop()
@@ -218,22 +266,22 @@ func TestE2E_EmailBinding_ProductionWireTLS(t *testing.T) {
 		t.Fatal(e)
 	}
 	uncertainConnection, uncertainStop := startUserApp(t, app, cleanup, env[config.GRPCAddrEnv])
-	uncertainClient := pb.NewEmailBindingServiceClient(uncertainConnection)
+	uncertainClient := pb.NewEmailAccountServiceClient(uncertainConnection)
 	newDevice, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	uncertainRequest := proto.Clone(request).(*pb.BeginSetEmailRequest)
+	uncertainRequest := proto.Clone(request).(*pb.BeginEmailRegistrationRequest)
 	uncertainRequest.RequestId = uuid.NewString()
 	uncertainRequest.Email = "uncertain@example.test"
-	uncertainRequest.GetRegistration().CredentialProposal.PublicKey = elliptic.Marshal(elliptic.P256(), newDevice.X, newDevice.Y)
-	if _, e = uncertainClient.BeginSetEmail(t.Context(), uncertainRequest); status.Code(e) != codes.Unavailable {
+	uncertainRequest.CredentialProposal.PublicKey = elliptic.Marshal(elliptic.P256(), newDevice.X, newDevice.Y)
+	if _, e = uncertainClient.BeginEmailRegistration(t.Context(), uncertainRequest); status.Code(e) != codes.Unavailable {
 		t.Fatalf("lost SMTP acknowledgement: %v", e)
 	}
 	uncertainMessage := uncertain.Next(t)
 	uncertainCode := regexp.MustCompile(`Verification code: ([0-9]{8})`).FindStringSubmatch(uncertainMessage.Body)[1]
-	recovered, e := uncertainClient.BeginSetEmail(t.Context(), uncertainRequest)
+	recovered, e := uncertainClient.BeginEmailRegistration(t.Context(), uncertainRequest)
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e = uncertainClient.CompleteSetEmail(t.Context(), &pb.CompleteSetEmailRequest{OperationId: recovered.OperationId, Code: uncertainCode, RegistrationProof: &authpb.CredentialProof{Signature: signDevice(t, newDevice, recovered.RegistrationChallenge.SigningPayload)}}); e != nil {
+	if _, e = uncertainClient.CompleteEmailRegistration(t.Context(), &pb.CompleteEmailRegistrationRequest{OperationId: recovered.OperationId, Code: uncertainCode, Password: "a long fixture password 123", Proof: &authpb.CredentialProof{Signature: signDevice(t, newDevice, recovered.SigningPayload)}}); e != nil {
 		t.Fatal(e)
 	}
 	select {
@@ -243,6 +291,7 @@ func TestE2E_EmailBinding_ProductionWireTLS(t *testing.T) {
 	}
 	uncertainStop()
 	env["AUTH_EMAIL_BINDING_ENABLED"] = "false"
+	env["AUTH_PASSWORD_ENABLED"] = "false"
 	env[config.HTTPAddrEnv] = reserveAddress(t)
 	env[config.GRPCAddrEnv] = reserveAddress(t)
 	app, cleanup, e = wireApp(load())
@@ -251,7 +300,7 @@ func TestE2E_EmailBinding_ProductionWireTLS(t *testing.T) {
 	}
 	connection, disabledStop := startUserApp(t, app, cleanup, env[config.GRPCAddrEnv])
 	defer disabledStop()
-	if _, e = pb.NewEmailBindingServiceClient(connection).GetOwnEmailBinding(t.Context(), &pb.GetOwnEmailBindingRequest{}); status.Code(e) != codes.Unimplemented {
+	if _, e = pb.NewEmailAccountServiceClient(connection).GetOwnEmails(t.Context(), &pb.GetOwnEmailsRequest{}); status.Code(e) != codes.Unimplemented {
 		t.Fatalf("disabled gRPC: %v", e)
 	}
 	resp, e := http.Get("http://" + env[config.HTTPAddrEnv] + "/v1/users/me/email-binding")

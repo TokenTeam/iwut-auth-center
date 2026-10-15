@@ -118,7 +118,7 @@ func (u *Login) Complete(ctx context.Context, id, code string, signature []byte,
 		return auth.Established{}, domain.ErrUnavailable
 	}
 	session := auth.Session{AccountRevision: op.AccountRevision, SessionID: sessionID, AuthID: op.AuthID, CredentialID: credentialID, TokenDigest: digest, AuthenticationMethod: domain.AuthenticationMethod, EmailBindingRevision: op.EmailBindingRevision, AuthenticatedAt: now, CreatedAt: now, LastUsedAt: now, ExpiresAt: now.Add(u.sessionTTL)}
-	credential := auth.Credential{CredentialID: credentialID, AuthID: op.AuthID, ProtocolVersion: auth.ProtocolVersion, PublicKey: op.PublicKey, Fingerprint: op.Fingerprint, CreatedAt: now}
+	credential := auth.Credential{CredentialRevision: op.AccountRevision, CredentialID: credentialID, AuthID: op.AuthID, ProtocolVersion: auth.ProtocolVersion, PublicKey: op.PublicKey, Fingerprint: op.Fingerprint, CreatedAt: now}
 	credentialID, err = u.repository.Complete(ctx, port.Commit{Operation: op, Credential: credential, Session: session}, now)
 	if err != nil {
 		return auth.Established{}, err

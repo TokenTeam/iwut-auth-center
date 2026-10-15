@@ -11,21 +11,26 @@ import (
 	"strings"
 	"time"
 
+	credentialpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/credential_management"
 	kerrors "github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/middleware"
+	kt "github.com/go-kratos/kratos/v2/transport"
 	kgrpc "github.com/go-kratos/kratos/v2/transport/grpc"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
+	academicyearpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/academic_year_policy"
 	closurepb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/account_closure"
 	accountpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/account_management"
 	ownerpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/account_owner_exit"
 	closurereauthpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/application_close_reauth"
 	applicationclosurepb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/application_closure"
 	applicationoperationspb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/application_operations_permission"
+	applicationuserstoragepb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/application_user_storage"
 	authv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
+	campuspb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/campus_certification"
 	developerapplicationpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_application"
 	developermanagementpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_management"
 	developerstatusv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/developer_status"
@@ -41,6 +46,7 @@ import (
 	sessionmanagementpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/session_management"
 	systemprincipalv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/system_principal"
 	profilev1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/user_profile"
+	emailaccountv3 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v3/email_account"
 	profiledomain "iwut-auth-center/internal/profile/domain"
 )
 
@@ -53,6 +59,7 @@ type ServerConfig struct {
 	OAuthGrant                   *OAuthGrantService
 	OAuthDelegation              *OAuthDelegationService
 	OAuth                        *OAuthHTTP
+	Background                   kt.Server
 	HTTPAddr                     string
 	GRPCAddr                     string
 	UserEndpoints                *UserEndpoints
@@ -67,14 +74,19 @@ type ServerConfig struct {
 
 // UserEndpoints is an optional, fully validated runtime assembled before listening.
 type UserEndpoints struct {
+	CredentialManagement          *CredentialManagementService
 	SessionManagement             *SessionManagementService
 	DeveloperManagement           *DeveloperManagementService
 	PlatformAdministrator         *PlatformAdministratorService
+	AcademicYearPolicy            *AcademicYearPolicyService
 	ApplicationOperations         *ApplicationOperationsPermissionService
+	ApplicationUserStorage        *ApplicationUserStorageService
 	AccountManagement             *AccountManagementService
 	DeveloperApplication          *DeveloperApplicationService
 	EmailBinding                  *EmailBindingService
+	EmailAccount                  *EmailAccountService
 	EmailLogin                    *EmailLoginService
+	CampusCertification           *CampusCertificationService
 	Reviewer                      *ReviewerPermissionService
 	IdentityIssuance              *UserIdentityService
 	Authentication                *AuthenticationService
@@ -88,8 +100,9 @@ type UserEndpoints struct {
 const ServicePrefix = "/auth-center"
 
 type Servers struct {
-	HTTP *khttp.Server
-	GRPC *kgrpc.Server
+	HTTP       *khttp.Server
+	GRPC       *kgrpc.Server
+	Background kt.Server
 }
 
 // NewServers validates the shared runtime before assembling both transports.
@@ -127,8 +140,13 @@ func NewServers(
 	httpServer := newHTTPServer(configuration, verifier)
 	grpcServer := newGRPCServer(configuration, verifier, service, developerStatusService, systemPrincipalService)
 	registerObservableOperations(configuration.RegisterObservableOperations, httpServer, grpcServer)
-	return &Servers{HTTP: httpServer, GRPC: grpcServer}, nil
+	return &Servers{HTTP: httpServer, GRPC: grpcServer, Background: configuration.Background}, nil
 }
+
+// Covers the bounded password executor queue (2s), App proof coordination (5s)
+// and final fenced transactions. Caller deadlines may still be shorter. Never
+// inherit Kratos' 1s default for password-bearing commands.
+const authRequestTimeout = 15 * time.Second
 
 func newGRPCServer(
 	configuration ServerConfig,
@@ -137,7 +155,7 @@ func newGRPCServer(
 	developerStatusService *DeveloperStatusService,
 	systemPrincipalService *SystemPrincipalService,
 ) *kgrpc.Server {
-	options := []kgrpc.ServerOption{kgrpc.Address(configuration.GRPCAddr)}
+	options := []kgrpc.ServerOption{kgrpc.Address(configuration.GRPCAddr), kgrpc.Timeout(authRequestTimeout)}
 	serverMiddleware := make([]middleware.Middleware, 0, 2)
 	if configuration.ObservabilityMiddleware != nil {
 		serverMiddleware = append(serverMiddleware, configuration.ObservabilityMiddleware)
@@ -178,14 +196,29 @@ func newGRPCServer(
 		emailService = endpoints.EmailBinding
 	}
 	emailv1.RegisterEmailBindingServiceServer(server, emailService)
+	emailAccount := NewEmailAccountService(nil)
+	if e := configuration.UserEndpoints; e != nil && e.EmailAccount != nil {
+		emailAccount = e.EmailAccount
+	}
+	emailaccountv3.RegisterEmailAccountServiceServer(server, emailAccount)
 	loginService := NewEmailLoginService(nil, 16*1024)
 	if endpoints := configuration.UserEndpoints; endpoints != nil && endpoints.EmailLogin != nil {
 		loginService = endpoints.EmailLogin
 	}
 	emailloginv1.RegisterEmailLoginServiceServer(server, loginService)
+	campusService := NewCampusCertificationService(nil)
+	if endpoints := configuration.UserEndpoints; endpoints != nil && endpoints.CampusCertification != nil {
+		campusService = endpoints.CampusCertification
+	}
+	campuspb.RegisterCampusCertificationServiceServer(server, campusService)
 	if endpoints := configuration.UserEndpoints; endpoints != nil {
 		if endpoints.SessionManagement != nil {
+			// Credential management uses its own no-touch authentication, not the
+			// ordinary Session middleware that updates LRU.
 			sessionmanagementpb.RegisterSessionManagementServiceServer(server, endpoints.SessionManagement)
+		}
+		if endpoints.CredentialManagement != nil {
+			credentialpb.RegisterCredentialManagementServiceServer(server, endpoints.CredentialManagement)
 		}
 		if endpoints.DeveloperApplication != nil {
 			developerapplicationpb.RegisterDeveloperApplicationServiceServer(server, endpoints.DeveloperApplication)
@@ -193,8 +226,14 @@ func newGRPCServer(
 		if endpoints.PlatformAdministrator != nil {
 			adminpb.RegisterPlatformAdministratorServiceServer(server, endpoints.PlatformAdministrator)
 		}
+		if endpoints.AcademicYearPolicy != nil {
+			academicyearpb.RegisterAcademicYearPolicyServiceServer(server, endpoints.AcademicYearPolicy)
+		}
 		if endpoints.ApplicationOperations != nil {
 			applicationoperationspb.RegisterApplicationOperationsPermissionServiceServer(server, endpoints.ApplicationOperations)
+		}
+		if endpoints.ApplicationUserStorage != nil {
+			applicationuserstoragepb.RegisterApplicationUserStorageServiceServer(server, endpoints.ApplicationUserStorage)
 		}
 		if endpoints.AccountManagement != nil {
 			accountpb.RegisterAccountManagementServiceServer(server, endpoints.AccountManagement)
@@ -232,6 +271,7 @@ func newHTTPServer(configuration ServerConfig, verifier *ServiceIdentityVerifier
 	}
 	options := []khttp.ServerOption{
 		khttp.Address(configuration.HTTPAddr),
+		khttp.Timeout(authRequestTimeout),
 		khttp.Filter(func(next http.Handler) http.Handler {
 			ordinary := authHTTPFilter(next)
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -280,6 +320,13 @@ func newHTTPServer(configuration ServerConfig, verifier *ServiceIdentityVerifier
 		gp.RegisterOAuthGrantServiceHTTPServer(server, configuration.OAuthGrant)
 	}
 	if endpoints != nil {
+		if endpoints.CampusCertification != nil {
+			// The v3 service has an exact DIRECT allowlist, not a package wildcard.
+			campuspb.RegisterCampusCertificationServiceHTTPServer(server, endpoints.CampusCertification)
+		}
+		if endpoints.EmailAccount != nil {
+			emailaccountv3.RegisterEmailAccountServiceHTTPServer(server, endpoints.EmailAccount)
+		}
 		if endpoints.EmailLogin != nil {
 			emailloginv1.RegisterEmailLoginServiceHTTPServer(server, endpoints.EmailLogin)
 		}
@@ -289,14 +336,23 @@ func newHTTPServer(configuration ServerConfig, verifier *ServiceIdentityVerifier
 		if endpoints.SessionManagement != nil {
 			sessionmanagementpb.RegisterSessionManagementServiceHTTPServer(server, endpoints.SessionManagement)
 		}
+		if endpoints.CredentialManagement != nil {
+			credentialpb.RegisterCredentialManagementServiceHTTPServer(server, endpoints.CredentialManagement)
+		}
 		if endpoints.DeveloperApplication != nil {
 			developerapplicationpb.RegisterDeveloperApplicationServiceHTTPServer(server, endpoints.DeveloperApplication)
 		}
 		if endpoints.PlatformAdministrator != nil {
 			adminpb.RegisterPlatformAdministratorServiceHTTPServer(server, endpoints.PlatformAdministrator)
 		}
+		if endpoints.AcademicYearPolicy != nil {
+			academicyearpb.RegisterAcademicYearPolicyServiceHTTPServer(server, endpoints.AcademicYearPolicy)
+		}
 		if endpoints.ApplicationOperations != nil {
 			applicationoperationspb.RegisterApplicationOperationsPermissionServiceHTTPServer(server, endpoints.ApplicationOperations)
+		}
+		if endpoints.ApplicationUserStorage != nil {
+			applicationuserstoragepb.RegisterApplicationUserStorageServiceHTTPServer(server, endpoints.ApplicationUserStorage)
 		}
 		if endpoints.AccountManagement != nil {
 			accountpb.RegisterAccountManagementServiceHTTPServer(server, endpoints.AccountManagement)
@@ -343,6 +399,9 @@ func authHTTPFilter(next http.Handler) http.Handler {
 func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 	return func(r *http.Request, value any) error {
 		limit := authenticationLimit
+		if credentialManagementRequest(value) != nil {
+			limit = min(limit, 16384)
+		}
 		switch value.(type) {
 		case *sessionmanagementpb.ListOwnSessionsRequest, *sessionmanagementpb.RevokeOwnSessionsRequest:
 			limit = sessionManagementLimit
@@ -353,6 +412,8 @@ func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 		case *developermanagementpb.ManageDeveloperStatusRequest, *developermanagementpb.GetManagedDeveloperStatusRequest:
 			limit = min(limit, 16*1024)
 		case *adminpb.ManagePlatformAdministratorRequest, *adminpb.GetPlatformAdministratorRequest, *adminpb.ListPlatformAdministratorsRequest:
+			limit = min(limit, 16*1024)
+		case *academicyearpb.GetAcademicYearScheduleRequest, *academicyearpb.UpdateNextAcademicYearRolloverRequest:
 			limit = min(limit, 16*1024)
 		case *applicationoperationspb.ManageApplicationOperationsPermissionRequest, *applicationoperationspb.GetApplicationOperationsPermissionsRequest:
 			limit = min(limit, 16*1024)
@@ -381,7 +442,16 @@ func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 				return err
 			}
 		}
+		if err := validateEmailAccountJSON(data, value); err != nil {
+			return err
+		}
+		if !dangerProofJSON(data, value) {
+			return invalidDangerProofInput(value)
+		}
 		if err := validateSessionManagementJSON(data, value); err != nil {
+			return err
+		}
+		if err := validateCredentialManagementJSON(data, value); err != nil {
 			return err
 		}
 		message, ok := value.(proto.Message)
@@ -400,6 +470,12 @@ func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 func invalidHTTPInput(r *http.Request) error {
 	reason := "INVALID_LOGIN_INPUT"
 	switch {
+	case credentialManagementHTTPPath(r.URL.Path):
+		reason = "INVALID_CREDENTIAL_MANAGEMENT_REQUEST"
+	case strings.HasPrefix(r.URL.Path, "/v1/application-close-reauth"):
+		reason = "ERROR_REASON_INVALID_APPLICATION_CLOSE_REAUTH_REQUEST"
+	case strings.HasPrefix(r.URL.Path, "/v1/users/me/campus-certification"):
+		reason = "INVALID_CAMPUS_CERTIFICATION_REQUEST"
 	case strings.HasPrefix(r.URL.Path, "/v1/users/me/sessions:"):
 		reason = "INVALID_SESSION_MANAGEMENT_REQUEST"
 	case strings.HasPrefix(r.URL.Path, "/v1/account-closures:"):
@@ -410,6 +486,8 @@ func invalidHTTPInput(r *http.Request) error {
 		reason = "INVALID_DEVELOPER_WITHDRAWAL_REQUEST"
 	case strings.HasPrefix(r.URL.Path, "/v1/platform-administrators:"):
 		reason = "INVALID_PLATFORM_ADMIN_REQUEST"
+	case strings.HasPrefix(r.URL.Path, "/v1/academic-year-policy/"):
+		reason = "INVALID_ACADEMIC_YEAR_POLICY_REQUEST"
 	case strings.Contains(r.URL.Path, "/application-operation-permissions"):
 		reason = "INVALID_APPLICATION_OPERATIONS_PERMISSION_REQUEST"
 	case strings.HasPrefix(r.URL.Path, "/v1/users/me/application-grants"):
@@ -418,7 +496,7 @@ func invalidHTTPInput(r *http.Request) error {
 		reason = "INVALID_DEVELOPER_APPLICATION_REQUEST"
 	case strings.HasPrefix(r.URL.Path, "/v1/email-logins"):
 		reason = "INVALID_EMAIL_LOGIN_REQUEST"
-	case emailHTTPPath(r.URL.Path):
+	case emailAccountHTTPPath(r.URL.Path), emailHTTPPath(r.URL.Path):
 		reason = "INVALID_EMAIL_REQUEST"
 	case strings.HasSuffix(r.URL.Path, "/reviewer-permission"), strings.Contains(r.URL.Path, "/application-review-permissions"):
 		reason = "INVALID_REVIEWER_PERMISSION_INPUT"
@@ -438,17 +516,23 @@ func invalidHTTPInput(r *http.Request) error {
 }
 
 func oversizedHTTPInput(r *http.Request) error {
+	if credentialManagementHTTPPath(r.URL.Path) {
+		return credentialManagementTooLarge()
+	}
 	if strings.HasPrefix(r.URL.Path, "/v1/users/me/sessions:") {
 		return invalidHTTPInput(r)
 	}
 	reason := "AUTHENTICATION_INPUT_TOO_LARGE"
+	if strings.HasPrefix(r.URL.Path, "/v1/users/me/campus-certification") {
+		reason = "CAMPUS_CERTIFICATION_REQUEST_TOO_LARGE"
+	}
 	if strings.HasPrefix(r.URL.Path, "/v1/users/me/developer-withdrawal:") {
 		reason = "DEVELOPER_WITHDRAWAL_REQUEST_TOO_LARGE"
 	}
 	if developerApplicationHTTPPath(r.URL.Path) {
 		reason = "DEVELOPER_APPLICATION_REQUEST_TOO_LARGE"
 	}
-	if emailHTTPPath(r.URL.Path) {
+	if emailAccountHTTPPath(r.URL.Path) || emailHTTPPath(r.URL.Path) {
 		reason = "EMAIL_REQUEST_TOO_LARGE"
 	}
 	if strings.HasPrefix(r.URL.Path, "/v1/email-logins") {
@@ -478,9 +562,9 @@ func authHTTPErrorEncoder(w http.ResponseWriter, r *http.Request, err error) {
 	// RESOURCE_EXHAUSTED covers both rate limiting (429) and payload limits
 	// (413); the UC's stable reason determines which HTTP status applies.
 	switch converted.Reason {
-	case "DEVELOPER_WITHDRAWAL_REQUEST_TOO_LARGE", "DEVELOPER_APPLICATION_REQUEST_TOO_LARGE", "EMAIL_LOGIN_REQUEST_TOO_LARGE", "EMAIL_REQUEST_TOO_LARGE", "REGISTRATION_INPUT_TOO_LARGE", "AUTHENTICATION_INPUT_TOO_LARGE", profiledomain.ErrLimit.Error():
+	case "CREDENTIAL_MANAGEMENT_REQUEST_TOO_LARGE", "DEVELOPER_WITHDRAWAL_REQUEST_TOO_LARGE", "DEVELOPER_APPLICATION_REQUEST_TOO_LARGE", "EMAIL_LOGIN_REQUEST_TOO_LARGE", "EMAIL_REQUEST_TOO_LARGE", "REGISTRATION_INPUT_TOO_LARGE", "AUTHENTICATION_INPUT_TOO_LARGE", profiledomain.ErrLimit.Error():
 		converted.Code = http.StatusRequestEntityTooLarge
-	case "DEVELOPER_RESTORE_BLOCKED", "DEVELOPER_REVISION_EXHAUSTED", "ACCOUNT_REVISION_EXHAUSTED", "PLATFORM_ADMIN_GRANT_BLOCKED", "APPLICATION_OPERATIONS_PERMISSION_GRANT_BLOCKED", "LAST_PLATFORM_ADMIN_REQUIRED", "PERMISSION_REVISION_EXHAUSTED":
+	case "DEVELOPER_RESTORE_BLOCKED", "DEVELOPER_REVISION_EXHAUSTED", "ACCOUNT_REVISION_EXHAUSTED", "PLATFORM_ADMIN_GRANT_BLOCKED", "APPLICATION_OPERATIONS_PERMISSION_GRANT_BLOCKED", "LAST_PLATFORM_ADMIN_REQUIRED", "PERMISSION_REVISION_EXHAUSTED", "ACADEMIC_YEAR_ROLLOVER_NOT_FUTURE", "ACADEMIC_YEAR_POLICY_REVISION_EXHAUSTED", "ACADEMIC_YEAR_RANGE_EXHAUSTED":
 		converted.Code = http.StatusConflict
 	case "DEVELOPER_HANDLE_CHANGE_NOT_ALLOWED", "DEVELOPER_EMAIL_REQUIRED", "EMAIL_FLOW_MISMATCH", profiledomain.ErrExhausted.Error():
 		converted.Code = http.StatusConflict

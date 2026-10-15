@@ -71,6 +71,7 @@ func TestE2E_IdentityIssuance_ProductionWire(t *testing.T) {
 	for key, value := range map[string]string{"AUTH_PLATFORM_ADMIN_ENDPOINTS_ENABLED": "true", "AUTH_PLATFORM_ADMIN_WRITE_PER_MINUTE": "1000", "AUTH_APPLICATION_OPERATIONS_PERMISSION_ENDPOINTS_ENABLED": "true", "AUTH_APPLICATION_OPERATIONS_PERMISSION_WRITE_PER_MINUTE": "1000", "AUTH_EMAIL_RECOVERY_READY": "true", "AUTH_EMAIL_BINDING_ENABLED": "true", "AUTH_EMAIL_BINDING_HMAC_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{3}, 32)), "AUTH_EMAIL_LOGIN_ENABLED": "true", "AUTH_EMAIL_LOGIN_CODE_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)), "AUTH_SMTP_ADDR": capture.Address, "AUTH_SMTP_FROM": "auth@example.test", "AUTH_SMTP_TLS_MODE": "implicit_tls", "AUTH_SMTP_CA_FILE": ca} {
 		env[key] = value
 	}
+	enableEmailRegistrationFixture(t, env, capture)
 	configuration, err := config.Load(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
 	if err != nil {
 		t.Fatal(err)
@@ -97,7 +98,7 @@ func TestE2E_IdentityIssuance_ProductionWire(t *testing.T) {
 	auth := authv1.NewAuthenticationServiceClient(connection)
 	device, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	student := sha256.Sum256(deviceprotocol.Frame([]byte("iwut-student-association-v1"), []byte("0123456")))
-	user, _ := registerUser(t, auth, device, student[:])
+	user, _ := registerUser(t, connection, device, student[:])
 	callCtx := func(service, token string) context.Context {
 		return metadata.AppendToOutgoingContext(serviceCallContext(t, t.Context(), serviceKey, service, "app-center-2026-01", "iwut-auth-center"), "x-iwut-session", token)
 	}
@@ -201,7 +202,7 @@ func TestE2E_IdentityIssuance_ProductionWire(t *testing.T) {
 		if _, e := client.IssueUserIdentityFromSession(callCtx("gateway", user.Session.SessionToken), request); status.Code(e) != codes.Unauthenticated {
 			t.Fatal(e)
 		}
-		mutate(bson.M{"principalType": "USER", "accountStatus": "ACTIVE", "accountRevision": int64(1)})
+		mutate(bson.M{"principalType": "USER", "accountStatus": "ACTIVE", "accountRevision": int64(1), "minimumCredentialRevision": int64(1)})
 	}
 	expiry := time.Now().Add(5 * time.Second).Truncate(time.Second)
 	if _, e := database.Collection(mongoadapter.SessionCollection).UpdateOne(t.Context(), bson.M{"sessionId": user.Session.SessionId}, bson.M{"$set": bson.M{"expiresAt": expiry}}); e != nil {

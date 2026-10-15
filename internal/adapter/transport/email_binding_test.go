@@ -17,13 +17,24 @@ func TestEmailStrictProtoWire(t *testing.T) {
 	field := func(n protowire.Number, b []byte) []byte {
 		return protowire.AppendBytes(protowire.AppendTag(nil, n, protowire.BytesType), b)
 	}
-	for _, wire := range [][]byte{append(field(3, nil), field(4, nil)...), append(field(1, []byte("x")), field(1, []byte("y"))...), field(5, nil), field(3, field(2, nil)), field(4, field(1, field(3, nil)))} {
-		if e := codec.Unmarshal(wire, &pb.BeginSetEmailRequest{}); e == nil {
-			t.Fatal("accepted ambiguous/unknown proto")
+	for _, wire := range [][]byte{append(field(3, nil), field(4, nil)...), append(field(1, []byte("x")), field(1, []byte("y"))...), field(5, nil), field(3, field(2, nil)), field(4, field(1, field(3, nil))), field(4, field(2, nil))} {
+		message := &pb.BeginSetEmailRequest{}
+		if e := codec.Unmarshal(wire, message); e != nil {
+			t.Fatal("codec errors become grpc INTERNAL", e)
+		}
+		if status.Code(checkEmailMessage(message)) != codes.InvalidArgument {
+			t.Fatal("ambiguous/unknown proto lost rejection marker")
 		}
 	}
 	if e := codec.Unmarshal(field(3, protowire.AppendVarint(protowire.AppendTag(nil, 1, protowire.VarintType), 0)), &pb.BeginSetEmailRequest{}); e != nil {
 		t.Fatalf("explicit revision zero rejected: %v", e)
+	}
+	oversized := &pb.BeginSetEmailRequest{}
+	if e := codec.Unmarshal(field(1, make([]byte, 16*1024+1)), oversized); e != nil {
+		t.Fatal(e)
+	}
+	if status.Code(checkEmailMessage(oversized)) != codes.ResourceExhausted {
+		t.Fatal("oversize marker lost admission bound")
 	}
 }
 func TestEmailErrorStatusMappings(t *testing.T) {

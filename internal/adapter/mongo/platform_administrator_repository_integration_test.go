@@ -3,6 +3,7 @@ package mongo
 import (
 	"context"
 	"errors"
+	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	m "go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -16,10 +17,21 @@ import (
 
 func adminVerifiedEmail(t *testing.T, db *m.Database, id string) {
 	t.Helper()
-	_, e := db.Collection(EmailBindingCollection).UpdateOne(t.Context(), bson.M{"authId": id}, bson.M{"$set": bson.M{"revision": int64(1), "email": id + "@example.test", "verifiedAt": time.Now().UTC()}}, options.UpdateOne().SetUpsert(true))
-	if e != nil {
-		t.Fatal(e)
+	if err := EnsureEmailAccountSchema(t.Context(), db); err != nil {
+		t.Fatal(err)
 	}
+	bindingID := uuid.NewString()
+	var prior emailDirectoryDocument
+	if err := db.Collection(EmailDirectoryCollection).FindOne(t.Context(), bson.M{"authId": id}).Decode(&prior); err == nil {
+		bindingID = prior.LoginBindingID
+	}
+	if _, err := db.Collection(EmailBindingCollection).UpdateOne(t.Context(), bson.M{"bindingId": bindingID}, bson.M{"$set": emailBindingDocument{BindingID: bindingID, AuthID: id, Email: id + "@example.test", VerifiedAt: time.Now().UTC().Truncate(time.Millisecond)}}, options.UpdateOne().SetUpsert(true)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Collection(EmailDirectoryCollection).UpdateOne(t.Context(), bson.M{"authId": id}, bson.M{"$setOnInsert": emailDirectoryDocument{AuthID: id, LoginBindingID: bindingID, Revision: 1, LoginRoleRevision: 1, VerifiedCount: 1}}, options.UpdateOne().SetUpsert(true)); err != nil {
+		t.Fatal(err)
+	}
+
 }
 func seedAdministrator(t *testing.T, a *AuthenticationRepository, id string) {
 	t.Helper()
@@ -46,7 +58,7 @@ func administratorFixture(t *testing.T) (*PlatformAdministratorRepository, *m.Da
 }
 func adminCandidate(t *testing.T, db *m.Database, id string) {
 	t.Helper()
-	_, e := db.Collection(PrincipalCollection).InsertOne(t.Context(), bson.M{"authId": id, "principalType": "USER", "accountStatus": "ACTIVE", "accountRevision": int64(1), "permissions": bson.A{"app.profile.review", "app.version.review"}, "permissionRevision": int64(1)})
+	_, e := db.Collection(PrincipalCollection).InsertOne(t.Context(), bson.M{"authId": id, "principalType": "USER", "accountStatus": "ACTIVE", "accountRevision": int64(1), "minimumCredentialRevision": int64(1), "permissions": bson.A{"app.profile.review", "app.version.review"}, "permissionRevision": int64(1)})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -114,10 +126,11 @@ func TestPlatformAdministratorMongoReadinessCASPaginationAndRevokedActor(t *test
 		t.Fatal(e)
 	}
 	c := d.Command{ActorAuthID: actor, SubjectAuthID: "zz-b", Action: "GRANT", Reason: "test", ExpectedRevision: 1}
-	if _, e = r.Manage(account.WithIdentity(t.Context(), actor, 1), c); !errors.Is(e, d.ErrGrantBlocked) {
+	if _, e = r.Manage(account.WithIdentity(t.Context(), actor, 1), c); !errors.Is(e, d.ErrUnavailable) {
 		t.Fatal(e)
 	}
 	c.ExpectedRevision = 2
+	adminVerifiedEmail(t, db, "zz-b")
 	if _, e = r.Manage(account.WithIdentity(t.Context(), actor, 1), c); !errors.Is(e, d.ErrConflict) {
 		t.Fatal(e)
 	}

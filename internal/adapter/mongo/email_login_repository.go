@@ -67,7 +67,7 @@ func NewEmailLoginRepository(r *RegistrationRepository, keyID string, limits Ema
 	return &EmailLoginRepository{shared, keyID}, nil
 }
 func (r *EmailLoginRepository) Initialize(ctx context.Context, now time.Time) error {
-	if e := EnsureEmailSchema(ctx, r.db); e != nil {
+	if e := EnsureEmailAccountSchema(ctx, r.db); e != nil {
 		return d.ErrUnavailable
 	}
 	_, e := r.db.Collection(AuthenticationOperationCollection).Indexes().CreateOne(ctx, m.IndexModel{Keys: bson.D{{Key: "purpose", Value: 1}, {Key: "fingerprint", Value: 1}, {Key: "requestId", Value: 1}}, Options: options.Index().SetUnique(true).SetName("email_login_request_unique").SetPartialFilterExpression(bson.M{"purpose": d.Purpose})})
@@ -140,12 +140,11 @@ func (r *EmailLoginRepository) Begin(ctx context.Context, candidate d.Operation,
 			return e
 		}
 		// Freeze eligibility and credential ownership from one fenced snapshot.
-		var binding bindingDocument
-		e = r.db.Collection(EmailBindingCollection).FindOne(tx, bson.M{"email": op.Email}).Decode(&binding)
-		if e == nil {
-			if binding.AuthID == "" || binding.Revision <= 0 || binding.VerifiedAt.IsZero() {
-				return d.ErrUnavailable
-			}
+		binding, roleRevision, eligible, e := ResolvePrimaryEmailTx(tx, r.db, op.Email)
+		if e != nil {
+			return d.ErrUnavailable
+		}
+		if eligible {
 			revision, e := r.AccountRevisionTx(tx, binding.AuthID)
 			if e != nil && !errors.Is(e, ap.ErrAuthenticationFailed) {
 				return e
@@ -153,11 +152,9 @@ func (r *EmailLoginRepository) Begin(ctx context.Context, candidate d.Operation,
 			if e == nil {
 				op.AuthID = binding.AuthID
 				op.AccountRevision = revision
-				op.EmailBindingRevision = binding.Revision
+				op.EmailBindingRevision = roleRevision
 				op.Eligible = true
 			}
-		} else if !errors.Is(e, m.ErrNoDocuments) {
-			return e
 		}
 		var credential CredentialDocument
 		e = r.db.Collection(CredentialCollection).FindOne(tx, bson.M{"fingerprint": op.Fingerprint}).Decode(&credential)
@@ -175,12 +172,13 @@ func (r *EmailLoginRepository) Begin(ctx context.Context, candidate d.Operation,
 		if _, e = r.db.Collection(AuthenticationOperationCollection).UpdateMany(tx, bson.M{"purpose": d.Purpose, "email": op.Email, "fingerprint": op.Fingerprint, "status": auth.Pending}, bson.M{"$set": bson.M{"status": auth.Closed}}); e != nil {
 			return e
 		}
-		count, e := r.db.Collection(AuthenticationOperationCollection).CountDocuments(tx, bson.M{"status": auth.Pending, "expiresAt": bson.M{"$gt": now}})
-		if e != nil {
+		if e = sharedOperationCapacityTx(tx, r.db, now, min(10000, r.maxPending), true); e != nil {
 			return e
 		}
-		if count >= int64(r.maxPending) {
-			return d.ErrRate
+		if op.Eligible {
+			if e := r.debitTx(tx, "owner:BIND:"+op.AuthID, r.limits.OwnerHourly, true, now); e != nil {
+				return e
+			}
 		}
 		for _, q := range []struct {
 			key      string
@@ -248,7 +246,14 @@ func (r *EmailLoginRepository) Complete(ctx context.Context, c p.Commit, now tim
 		if !op.CredentialAcceptable {
 			return d.ErrCredential
 		}
-		confirmed, e := r.db.Collection(EmailBindingCollection).UpdateOne(tx, bson.M{"authId": op.AuthID, "email": op.Email, "revision": op.EmailBindingRevision}, bson.M{"$inc": bson.M{"authenticationFence": int64(1)}})
+		binding, role, err := ReadPrimaryEmailTx(tx, r.db, op.AuthID)
+		if err != nil {
+			return d.ErrUnavailable
+		}
+		if binding.Email != op.Email || role != op.EmailBindingRevision {
+			return d.ErrFailed
+		}
+		confirmed, e := r.db.Collection(EmailDirectoryCollection).UpdateOne(tx, bson.M{"authId": op.AuthID, "loginBindingId": binding.BindingID, "loginRoleRevision": op.EmailBindingRevision}, bson.M{"$inc": bson.M{"authenticationFence": int64(1)}})
 		if e != nil {
 			return e
 		}

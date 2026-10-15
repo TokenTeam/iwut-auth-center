@@ -10,6 +10,7 @@ import (
 	m "go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	auth "iwut-auth-center/internal/authentication/port"
+	password "iwut-auth-center/internal/password/domain"
 	d "iwut-auth-center/internal/sessionmanagement/domain"
 	"iwut-auth-center/internal/sessionmanagement/port"
 )
@@ -80,6 +81,10 @@ func (r *SessionManagementRepository) List(ctx context.Context, digest []byte, p
 			return e
 		}
 		page = d.Page{CurrentSessionID: caller.SessionID, ObservedAt: observed, Sessions: []d.Summary{}}
+		_, minimum, e := r.auth.CredentialBoundsTx(tx, caller.AuthID)
+		if e != nil {
+			return e
+		}
 		filter := bson.M{"authId": caller.AuthID}
 		if cursor != "" {
 			var raw bson.Raw
@@ -122,6 +127,7 @@ func (r *SessionManagementRepository) List(ctx context.Context, digest []byte, p
 		if e != nil {
 			return e
 		}
+		var passwordRevision int64
 		for i, raw := range candidates[:n] {
 			session, e := managementSession(raw)
 			if e != nil {
@@ -136,6 +142,23 @@ func (r *SessionManagementRepository) List(ctx context.Context, digest []byte, p
 				available, e := managementCredential(credentials[session.CredentialID], session.AuthID)
 				if e != nil {
 					return e
+				}
+				if available {
+					available = password.EligibleCredential(credentials[session.CredentialID].Lookup("credentialRevision").Int64(), minimum, caller.AccountRevision)
+				}
+				if available && (session.AuthenticationMethod == password.PasswordAndDevice || session.AuthenticationMethod == password.PasswordAndSession) {
+					if passwordRevision == 0 {
+						var raw bson.Raw
+						if e = r.auth.database.Collection(PasswordCollection).FindOne(tx, bson.M{"authId": caller.AuthID}).Decode(&raw); e != nil {
+							return d.ErrUnavailable
+						}
+						record, err := decodePassword(raw)
+						if err != nil {
+							return d.ErrUnavailable
+						}
+						passwordRevision = record.Revision
+					}
+					available = session.PasswordRevision == passwordRevision
 				}
 				if available {
 					page.Sessions = append(page.Sessions, d.Summary{SessionID: session.SessionID, CredentialID: session.CredentialID, AuthenticationMethod: session.AuthenticationMethod, AuthenticatedAt: session.AuthenticatedAt, CreatedAt: session.CreatedAt, LastUsedAt: session.LastUsedAt, ExpiresAt: session.ExpiresAt, IsCurrent: session.SessionID == caller.SessionID})
@@ -325,6 +348,10 @@ func managementSession(raw bson.Raw) (SessionDocument, error) {
 	case "EMAIL_CODE_AND_DEVICE":
 		v := raw.Lookup("emailBindingRevision")
 		if v.Type != bson.TypeInt64 || v.Int64() <= 0 {
+			return s, d.ErrUnavailable
+		}
+	case "PASSWORD_AND_DEVICE", "PASSWORD_AND_SESSION":
+		if !validSessionMethod(s) {
 			return s, d.ErrUnavailable
 		}
 	default:

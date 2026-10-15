@@ -2,6 +2,7 @@ package smtpmail
 
 import (
 	"context"
+	campus "iwut-auth-center/internal/campuscertification/domain"
 	d "iwut-auth-center/internal/emailbinding/domain"
 	login "iwut-auth-center/internal/emaillogin/domain"
 	"iwut-auth-center/internal/testutil/smtpcapture"
@@ -52,6 +53,36 @@ func TestTLSCertificateValidationAndHeaderInjection(t *testing.T) {
 	}
 	if sender.Send(context.Background(), "a@example.test\r\nBcc: b@example.test", d.BindingPurpose, "00001234", time.Now()) == nil {
 		t.Fatal("header injection accepted")
+	}
+}
+
+func TestCampusSMTPPurpose(t *testing.T) {
+	for _, mode := range []string{"implicit_tls", "starttls", "reject", "lost_ack"} {
+		t.Run(mode, func(t *testing.T) {
+			capture := smtpcapture.New(t, mode)
+			tlsMode := "implicit_tls"
+			if mode == "starttls" {
+				tlsMode = mode
+			}
+			sender, err := New(Config{Address: capture.Address, From: "auth@example.test", TLSMode: tlsMode, Roots: capture.Roots, Timeout: time.Second})
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = sender.Send(t.Context(), "campus@whut.edu.cn", campus.Purpose, "00123456", time.Now().Add(time.Minute))
+			if mode == "reject" || mode == "lost_ack" {
+				if err == nil {
+					t.Fatal("uncertain delivery successful")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			message := capture.Next(t)
+			if !strings.Contains(message.Body, "certify your campus membership") || !strings.Contains(message.Body, "00123456") || strings.Contains(message.Body, "register a new account") || strings.Contains(message.Body, "student status") {
+				t.Fatal("wrong campus template")
+			}
+		})
 	}
 }
 

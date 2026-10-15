@@ -11,18 +11,25 @@ import (
 )
 
 var (
-	ErrRequest      = errors.New("invalid_request")
-	ErrScope        = errors.New("invalid_scope")
-	ErrClient       = errors.New("invalid_client")
-	ErrGrant        = errors.New("invalid_grant")
-	ErrToken        = errors.New("invalid_token")
-	ErrInsufficient = errors.New("insufficient_scope")
-	ErrUnavailable  = errors.New("temporarily_unavailable")
-	ErrLogin        = errors.New("login_required")
-	ErrConsent      = errors.New("consent_required")
-	ErrConflict     = errors.New("interaction_changed")
-	ErrNotFound     = errors.New("not_found")
+	ErrRequest         = errors.New("invalid_request")
+	ErrScope           = errors.New("invalid_scope")
+	ErrClient          = errors.New("invalid_client")
+	ErrGrant           = errors.New("invalid_grant")
+	ErrToken           = errors.New("invalid_token")
+	ErrInsufficient    = errors.New("insufficient_scope")
+	ErrUnavailable     = errors.New("temporarily_unavailable")
+	ErrLogin           = errors.New("login_required")
+	ErrConsent         = errors.New("consent_required")
+	ErrConflict        = errors.New("interaction_changed")
+	ErrStorageConflict = errors.New("application_user_storage_conflict")
+	ErrStorageLimit    = errors.New("application_user_storage_limit_exceeded")
+	ErrNotFound        = errors.New("not_found")
 )
+
+type StorageConflict struct{ MinimumRevision int64 }
+
+func (e StorageConflict) Error() string { return ErrStorageConflict.Error() }
+func (e StorageConflict) Unwrap() error { return ErrStorageConflict }
 
 type Scope struct {
 	Name, Label, Description, Kind, Audience string
@@ -36,10 +43,29 @@ type Catalog struct {
 	Scopes      []Scope
 }
 
+// ValidMetadata keeps reserved scope names tied to their immutable disclosure
+// meaning. Campus certification is never a resource or self-asserted profile.
+func (s Scope) ValidMetadata() bool {
+	protocol := Contains([]string{"openid", "email", "offline_access"}, s.Name)
+	if protocol != (s.Kind == "PROTOCOL") || (s.Name == "campus.whut") != (s.Kind == "USERINFO_CAMPUS") {
+		return false
+	}
+	switch s.Kind {
+	case "PROTOCOL", "USERINFO_CAMPUS":
+		return s.Audience == "" && s.ProfileField == "" && s.ProfileValueType == ""
+	case "RESOURCE":
+		return s.Audience != "" && s.ProfileField == "" && s.ProfileValueType == ""
+	case "USERINFO_PROFILE":
+		return s.Audience == "" && s.ProfileField != "" && s.Name == "profile."+s.ProfileField && ValidProfileValueType(s.ProfileValueType)
+	default:
+		return false
+	}
+}
+
 func (c Catalog) Enabled(refresh bool) []string {
 	var out []string
 	for _, s := range c.Scopes {
-		if s.Enabled && (s.Kind == "RESOURCE" && s.Audience != "" || s.Kind == "USERINFO_PROFILE" && s.Audience == "" || s.Kind == "PROTOCOL" && (s.Name == "openid" || s.Name == "email" || s.Name == "offline_access" && refresh)) {
+		if s.Enabled && s.ValidMetadata() && (s.Kind != "PROTOCOL" || s.Name != "offline_access" || refresh) {
 			out = append(out, s.Name)
 		}
 	}
@@ -97,10 +123,17 @@ type User struct {
 	EmailVerified, DeveloperApproved bool
 }
 type ProfileValue struct {
-	Type    string
-	Text    string
-	Integer int32
-	Boolean bool
+	Type     string
+	Text     string
+	Integer  int32
+	Boolean  bool
+	Strings  []string
+	Academic *ProfileGrade
+}
+type ProfileGrade struct {
+	Stage                         string
+	Year, FinalYear, AcademicYear int32
+	ConfirmedAt                   *time.Time
 }
 type ProfileEntry struct {
 	Key   string
@@ -189,6 +222,39 @@ type UserInfo struct {
 	Subject, Email string
 	EmailVerified  bool
 	Profile        []ProfileEntry
+	Campus         *CampusCertification
+}
+
+// CampusCertification is a consumer-owned snapshot read in the authorization
+// transaction. Its account identifier and timestamp never become wire claims.
+type CampusCertification struct {
+	AuthID, Institution string
+	CertifiedAt         time.Time
+}
+type StorageEntry struct {
+	Key, Value string
+}
+type StorageNamespace struct {
+	AuthID, ApplicationID, Channel string
+	Revision                       int64
+	Entries                        []StorageEntry
+	UpdatedAt                      time.Time
+}
+type StorageMutation struct {
+	Key, Action, Value string
+}
+type StorageSnapshot struct {
+	ClientID    string
+	Entries     []StorageEntry
+	MissingKeys []string
+	Revision    int64
+	UpdatedAt   time.Time
+}
+type StorageMutationResult struct {
+	ClientID  string
+	Revision  int64
+	UpdatedAt time.Time
+	Changed   bool
 }
 type ClientProof struct {
 	ClientID, Secret string
@@ -223,7 +289,7 @@ func ValidScopes(xs []string) bool {
 	return true
 }
 func ValidProfileValueType(value string) bool {
-	return value == "STRING" || value == "INTEGER" || value == "BOOLEAN" || value == "DATE"
+	return value == "STRING" || value == "INTEGER" || value == "BOOLEAN" || value == "DATE" || value == "STRING_SET" || value == "ACADEMIC_GRADE"
 }
 func Contains(xs []string, s string) bool { return slices.Contains(xs, s) }
 func Subset(a, b []string) bool {

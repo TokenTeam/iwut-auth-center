@@ -14,6 +14,7 @@ import (
 
 func TestDeveloperLifecycleMongoReadersRejectInconsistentRevisions(t *testing.T) {
 	repo, db, session, _, _, _ := identityFixture(t)
+	adminVerifiedEmail(t, db, session.AuthID)
 	directory, _ := NewPrincipalRepository(db)
 	oauth := NewOAuthRepository(repo.authentication, db)
 	for _, tc := range []struct {

@@ -9,7 +9,6 @@ import (
 	ap "iwut-auth-center/internal/authentication/port"
 	d "iwut-auth-center/internal/emailbinding/domain"
 	"iwut-auth-center/internal/emailbinding/port"
-	reg "iwut-auth-center/internal/registration/domain"
 	rp "iwut-auth-center/internal/registration/port"
 	"time"
 )
@@ -18,7 +17,6 @@ type Service struct {
 	repo      port.Repository
 	protocol  port.Protocol
 	device    ap.DeviceProtocol
-	cipher    rp.AssociationCipher
 	sender    port.Sender
 	limiter   ap.Limiter
 	serviceID string
@@ -26,11 +24,11 @@ type Service struct {
 	now       func() time.Time
 }
 
-func New(repo port.Repository, p port.Protocol, device ap.DeviceProtocol, cipher rp.AssociationCipher, sender port.Sender, limiter ap.Limiter, service string, ttl time.Duration) (*Service, error) {
-	if repo == nil || p == nil || device == nil || cipher == nil || sender == nil || limiter == nil || service == "" || ttl <= 0 {
+func New(repo port.Repository, p port.Protocol, device ap.DeviceProtocol, sender port.Sender, limiter ap.Limiter, service string, ttl time.Duration) (*Service, error) {
+	if repo == nil || p == nil || device == nil || sender == nil || limiter == nil || service == "" || ttl <= 0 {
 		return nil, d.ErrUnavailable
 	}
-	return &Service{repo, p, device, cipher, sender, limiter, service, ttl, time.Now}, nil
+	return &Service{repo, p, device, sender, limiter, service, ttl, time.Now}, nil
 }
 
 // Authorize distinguishes absence at the transport boundary. Only an absent carrier passes nil.
@@ -73,14 +71,14 @@ func (u *Service) Begin(ctx context.Context, b d.Begin, digest []byte) (port.Sta
 	}
 	var fingerprint []byte
 	if b.Mode == d.Register {
-		if b.Revision != nil || b.ProtocolVersion != auth.ProtocolVersion || b.Scheme != reg.AssociationScheme || len(b.Token) != 32 {
+		if b.Revision != nil || b.ProtocolVersion != auth.ProtocolVersion {
 			return port.Started{}, d.ErrInvalid
 		}
 		fingerprint, e = u.device.Fingerprint(b.PublicKey)
 		if e != nil {
 			return port.Started{}, d.ErrInvalid
 		}
-	} else if b.Revision == nil || *b.Revision < 0 || len(b.PublicKey) > 0 || len(b.Token) > 0 {
+	} else if b.Revision == nil || *b.Revision < 0 || len(b.PublicKey) > 0 || b.ProtocolVersion != "" {
 		return port.Started{}, d.ErrInvalid
 	}
 	id, e := u.device.NewID()
@@ -92,7 +90,7 @@ func (u *Service) Begin(ctx context.Context, b d.Begin, digest []byte) (port.Sta
 	if b.Mode == d.Register {
 		op.Owner = hex.EncodeToString(fingerprint)
 		op.Proof.Purpose = d.RegistrationPurpose
-		op.Proof.ProtocolVersion = auth.ProtocolVersion
+		op.Proof.ProtocolVersion = d.ProtocolVersion
 		op.Proof.PublicKey = append([]byte(nil), b.PublicKey...)
 		op.Proof.LocatorKind = auth.FingerprintLocator
 		op.Proof.LocatorValue = fingerprint
@@ -100,15 +98,6 @@ func (u *Service) Begin(ctx context.Context, b d.Begin, digest []byte) (port.Sta
 		if e != nil {
 			return port.Started{}, d.ErrUnavailable
 		}
-		sealed, e := u.cipher.Seal("operation", id, b.Scheme, b.Token)
-		if e != nil {
-			return port.Started{}, d.ErrUnavailable
-		}
-		op.Proof.SchemeVersion = sealed.SchemeVersion
-		op.Proof.KeyVersion = sealed.KeyVersion
-		op.Proof.LookupKey = sealed.LookupKey
-		op.Proof.Nonce = sealed.Nonce
-		op.Proof.Ciphertext = sealed.Ciphertext
 	} else {
 		op.Revision = *b.Revision
 	}
@@ -123,17 +112,7 @@ func (u *Service) Begin(ctx context.Context, b d.Begin, digest []byte) (port.Sta
 	}
 	result := port.Started{Operation: saved}
 	if saved.Mode == d.Register {
-		token, e := u.open(saved)
-		if e != nil {
-			return port.Started{}, e
-		}
-		defer clear(token)
-		sum, e := u.cipher.AssociationDigest(saved.Proof.SchemeVersion, token)
-		if e != nil {
-			return port.Started{}, d.ErrUnavailable
-		}
-		defer clear(sum)
-		result.SigningPayload, e = u.protocol.Payload(saved, sum)
+		result.SigningPayload, e = u.protocol.Payload(saved)
 		if e != nil {
 			return port.Started{}, d.ErrUnavailable
 		}
@@ -193,38 +172,24 @@ func (u *Service) Complete(ctx context.Context, id, code string, signature []byt
 	var commit *rp.RegistrationCommit
 	var established *auth.Established
 	if op.Mode == d.Register {
-		token, e := u.open(op)
-		if e != nil {
-			return port.Activated{}, e
-		}
-		defer clear(token)
-		sum, e := u.cipher.AssociationDigest(op.Proof.SchemeVersion, token)
-		if e != nil {
-			return port.Activated{}, d.ErrUnavailable
-		}
-		defer clear(sum)
-		payload, e := u.protocol.Payload(op, sum)
+		payload, e := u.protocol.Payload(op)
 		if e != nil || !u.device.Verify(op.Proof.PublicKey, payload, signature) {
 			return port.Activated{}, u.fail(ctx, id, now)
 		}
-		ids := make([]string, 4)
+		ids := make([]string, 3)
 		for i := range ids {
 			ids[i], e = u.device.NewID()
 			if e != nil {
 				return port.Activated{}, d.ErrUnavailable
 			}
 		}
-		group, e := u.cipher.Seal("group", ids[3], op.Proof.SchemeVersion, token)
-		if e != nil {
-			return port.Activated{}, d.ErrUnavailable
-		}
 		secret, sd, e := u.device.NewSessionToken()
 		if e != nil {
 			return port.Activated{}, d.ErrUnavailable
 		}
-		credential := auth.Credential{CredentialID: ids[1], AuthID: ids[0], ProtocolVersion: auth.ProtocolVersion, PublicKey: op.Proof.PublicKey, Fingerprint: op.Proof.LocatorValue, CreatedAt: now}
+		credential := auth.Credential{CredentialRevision: 1, CredentialID: ids[1], AuthID: ids[0], ProtocolVersion: auth.ProtocolVersion, PublicKey: op.Proof.PublicKey, Fingerprint: op.Proof.LocatorValue, CreatedAt: now}
 		session := auth.Session{SessionID: ids[2], AuthID: ids[0], CredentialID: ids[1], TokenDigest: sd, AuthenticationMethod: "DEVICE_CREDENTIAL", AuthenticatedAt: now, CreatedAt: now, LastUsedAt: now, ExpiresAt: now.Add(u.ttl)}
-		commit = &rp.RegistrationCommit{Operation: op.Proof, Credential: credential, Session: session, Association: reg.Association{AssociationID: ids[3], SealedAssociation: group}}
+		commit = &rp.RegistrationCommit{Operation: op.Proof, Credential: credential, Session: session}
 		established = &auth.Established{AuthID: ids[0], CredentialID: ids[1], SessionID: ids[2], SessionToken: secret, ExpiresAt: session.ExpiresAt}
 	}
 	result, e := u.repo.Complete(ctx, op, digest, commit, now)
@@ -244,17 +209,6 @@ func (u *Service) Own(ctx context.Context, digest []byte) (port.Binding, error) 
 	}
 	r, e := u.repo.Own(ctx, digest, now)
 	return r, mapError(e)
-}
-func (u *Service) open(o port.Operation) ([]byte, error) {
-	a := o.Proof
-	if a.KeyVersion != u.cipher.CurrentVersion() {
-		return nil, d.ErrVerification
-	}
-	p, e := u.cipher.Open("operation", a.OperationID, reg.SealedAssociation{SchemeVersion: a.SchemeVersion, KeyVersion: a.KeyVersion, LookupKey: a.LookupKey, Nonce: a.Nonce, Ciphertext: a.Ciphertext})
-	if e != nil {
-		return nil, d.ErrUnavailable
-	}
-	return p, nil
 }
 func (u *Service) fail(ctx context.Context, id string, now time.Time) error {
 	if e := u.repo.Fail(ctx, id, now); e != nil {

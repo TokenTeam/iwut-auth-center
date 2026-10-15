@@ -18,6 +18,7 @@ type closureOperationDocument struct {
 	CredentialID         string     `bson:"credentialId,omitempty"`
 	PublicKey            []byte     `bson:"publicKey,omitempty"`
 	AccountRevision      int64      `bson:"accountRevision"`
+	PasswordRevision     int64      `bson:"passwordRevision"`
 	DeveloperRevision    int64      `bson:"developerRevision"`
 	PermissionRevision   int64      `bson:"permissionRevision"`
 	MutationDigest       []byte     `bson:"mutationDigest,omitempty"`

@@ -8,8 +8,11 @@ import (
 	p "iwut-auth-center/internal/accountclosure/port"
 	owner "iwut-auth-center/internal/ownerexit/domain"
 	op "iwut-auth-center/internal/ownerexit/port"
+	pwd "iwut-auth-center/internal/password/domain"
+	pp "iwut-auth-center/internal/password/port"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 type Service struct {
@@ -18,6 +21,7 @@ type Service struct {
 	app                               op.App
 	owners                            op.Repository
 	ledger                            p.TerminationLedger
+	password                          pp.PasswordVerifier
 	serviceID                         string
 	clock                             func() time.Time
 	mu                                sync.Mutex
@@ -29,11 +33,18 @@ type bucket struct {
 	n  int
 }
 
-func New(r p.Repository, protocol p.Protocol, app op.App, owners op.Repository, ledger p.TerminationLedger, serviceID string) (*Service, error) {
+func New(r p.Repository, protocol p.Protocol, app op.App, owners op.Repository, ledger p.TerminationLedger, serviceID string, verifiers ...pp.PasswordVerifier) (*Service, error) {
 	if r == nil || protocol == nil || app == nil || owners == nil || ledger == nil || serviceID == "" {
 		return nil, d.ErrUnavailable
 	}
-	return &Service{repo: r, protocol: protocol, app: app, owners: owners, ledger: ledger, serviceID: serviceID, clock: time.Now, buckets: map[string]bucket{}, readLimit: 30, writeLimit: 10, maxBuckets: 4096}, nil
+	if len(verifiers) > 1 {
+		return nil, d.ErrUnavailable
+	}
+	s := &Service{repo: r, protocol: protocol, app: app, owners: owners, ledger: ledger, serviceID: serviceID, clock: time.Now, buckets: map[string]bucket{}, readLimit: 30, writeLimit: 10, maxBuckets: 4096}
+	if len(verifiers) == 1 {
+		s.password = verifiers[0]
+	}
+	return s, nil
 }
 func (s *Service) ConfigureLimits(read, write, buckets int) error {
 	if read < 1 || write < 1 || buckets < 1 || read > 1000000 || write > 1000000 || buckets > 1000000 {
@@ -114,9 +125,14 @@ func (s *Service) Begin(ctx context.Context, in d.BeginInput) (d.Challenge, erro
 	}
 	return d.Challenge{OperationID: o.OperationID, Challenge: o.Challenge, SigningPayload: payload, ExpiresAt: o.ExpiresAt, ServiceID: o.ServiceID, ApplicationID: o.ApplicationID, PolicyVersion: o.PolicyVersion}, nil
 }
-func (s *Service) Prepare(ctx context.Context, id string, signature []byte) (d.Preparation, error) {
-	if !owner.ValidOperationID(id) || len(signature) < 8 || len(signature) > 72 {
+func (s *Service) Prepare(ctx context.Context, id string, signature []byte, password, source string) (d.Preparation, error) {
+	if !owner.ValidOperationID(id) || len(signature) < 8 || len(signature) > 72 || password == "" || len(password) > 1024 || !utf8.ValidString(password) {
 		return d.Preparation{}, d.ErrInvalid
+	}
+	// A recovery-only runtime may omit password validation. It can reconcile and
+	// clean existing decisions, but cannot authorize new signature-only closures.
+	if s.password == nil {
+		return d.Preparation{}, d.ErrUnavailable
 	}
 	o, e := s.repo.Read(ctx, id)
 	if e != nil {
@@ -136,7 +152,26 @@ func (s *Service) Prepare(ctx context.Context, id string, signature []byte) (d.P
 	if !s.rate(o.AuthID, false) {
 		return d.Preparation{}, d.ErrRate
 	}
-	o, owned, e := s.repo.Prepare(ctx, id, s.now())
+	passwordRevision, e := s.password.VerifyPassword(ctx, pp.ReauthRequest{AuthID: o.AuthID, CredentialID: o.CredentialID, AccountRevision: o.AccountRevision, Password: password, Source: source, AllowDisabled: true})
+	if e != nil {
+		switch {
+		case errors.Is(e, pwd.ErrAuthentication), errors.Is(e, pwd.ErrSessionInvalid), errors.Is(e, pwd.ErrConflict):
+			if e = s.repo.FailProof(ctx, id, s.now()); e != nil && !errors.Is(e, d.ErrProof) {
+				return d.Preparation{}, e
+			}
+			return d.Preparation{}, d.ErrProof
+		case errors.Is(e, pwd.ErrInvalidInput):
+			return d.Preparation{}, d.ErrInvalid
+		case errors.Is(e, pwd.ErrLimited):
+			return d.Preparation{}, d.ErrRate
+		default:
+			return d.Preparation{}, d.ErrUnavailable
+		}
+	}
+	if passwordRevision <= 0 {
+		return d.Preparation{}, d.ErrUnavailable
+	}
+	o, owned, e := s.repo.Prepare(ctx, id, passwordRevision, s.now())
 	if e != nil {
 		return d.Preparation{}, e
 	}

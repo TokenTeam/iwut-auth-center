@@ -30,12 +30,14 @@ func developerAdditionalUser(t *testing.T, db *m.Database) SessionDocument {
 	public := elliptic.Marshal(elliptic.P256(), key.X, key.Y)
 	fingerprint, _ := p.Fingerprint(public)
 	now := time.Now().UTC().Truncate(time.Millisecond)
+	bindingID := uuid.NewString()
 	session := SessionDocument{AccountRevision: 1, SessionID: sessionID, AuthID: authID, AuthenticationMethod: "DEVICE_CREDENTIAL", CredentialID: credentialID, TokenDigest: digest, CreatedAt: now, AuthenticatedAt: now, LastUsedAt: now, ExpiresAt: now.Add(time.Hour)}
 	for collection, doc := range map[string]any{
-		PrincipalCollection:    bson.M{"authId": authID, "principalType": "USER", "accountStatus": "ACTIVE", "accountRevision": int64(1), "developerStatus": nil, "developerRevision": int64(0), "permissions": bson.A{}, "permissionRevision": int64(1)},
-		CredentialCollection:   CredentialDocument{AuthID: authID, CredentialID: credentialID, ProtocolVersion: "iwut-device-v1", PublicKey: public, Fingerprint: fingerprint, CreatedAt: now},
-		SessionCollection:      session,
-		EmailBindingCollection: bindingDocument{AuthID: authID, Email: authID + "@example.test", Revision: 1, VerifiedAt: now},
+		PrincipalCollection:      bson.M{"authId": authID, "principalType": "USER", "accountStatus": "ACTIVE", "accountRevision": int64(1), "minimumCredentialRevision": int64(1), "developerStatus": nil, "developerRevision": int64(0), "permissions": bson.A{}, "permissionRevision": int64(1)},
+		CredentialCollection:     CredentialDocument{CredentialRevision: 1, AuthID: authID, CredentialID: credentialID, ProtocolVersion: "iwut-device-v1", PublicKey: public, Fingerprint: fingerprint, CreatedAt: now},
+		SessionCollection:        session,
+		EmailBindingCollection:   emailBindingDocument{BindingID: bindingID, AuthID: authID, Email: authID + "@example.test", VerifiedAt: now},
+		EmailDirectoryCollection: emailDirectoryDocument{AuthID: authID, LoginBindingID: bindingID, Revision: 1, LoginRoleRevision: 1, VerifiedCount: 1},
 	} {
 		if _, e := db.Collection(collection).InsertOne(t.Context(), doc); e != nil {
 			t.Fatal(e)

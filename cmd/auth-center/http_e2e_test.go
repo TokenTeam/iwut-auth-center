@@ -6,7 +6,6 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -16,17 +15,20 @@ import (
 
 	authv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
 	profilev1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/user_profile"
+	emailpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v3/email_account"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
+	"github.com/google/uuid"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
-	"iwut-auth-center/internal/adapter/deviceprotocol"
 	authdomain "iwut-auth-center/internal/authentication/domain"
+	"iwut-auth-center/internal/testutil/smtpcapture"
+	"regexp"
 )
 
 // Called inside the real Mongo + production Wire lifecycle after cold migration.
 // The same running process is exercised by both generated gRPC and HTTP clients.
-func runHTTPUserFlow(t *testing.T, base string, identityKey *rsa.PrivateKey) {
+func runHTTPUserFlow(t *testing.T, base string, identityKey *rsa.PrivateKey, capture *smtpcapture.Server) {
 	t.Helper()
 	client := &http.Client{Timeout: 5 * time.Second}
 	defer client.CloseIdleConnections()
@@ -75,17 +77,22 @@ func runHTTPUserFlow(t *testing.T, base string, identityKey *rsa.PrivateKey) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token := sha256.Sum256(deviceprotocol.Frame([]byte("iwut-student-association-v1"), []byte("0122256789101")))
-	proposal := &authv1.BeginUserRegistrationRequest{CredentialProposal: &authv1.CredentialRegistrationProposal{ProtocolVersion: authdomain.ProtocolVersion, PublicKey: elliptic.Marshal(elliptic.P256(), key.X, key.Y)}, Association: &authv1.StudentAssociationDeclaration{SchemeVersion: "iwut-student-association-v1", AssociationToken: token[:]}}
-	var challenge authv1.AuthenticationChallenge
-	send("POST", "/v1/registrations", encode(proposal), nil, 200, &challenge)
-	completion := encode(&authv1.CompleteUserRegistrationRequest{Proof: &authv1.CredentialProof{Signature: signDevice(t, key, challenge.SigningPayload)}})
-	var registered authv1.UserRegistrationResult
-	send("POST", "/v1/registrations/"+challenge.OperationId+"/completion", completion, nil, 201, &registered)
+	proposal := &emailpb.BeginEmailRegistrationRequest{RequestId: uuid.NewString(), Email: uuid.NewString() + "@example.test", CredentialProposal: &authv1.CredentialRegistrationProposal{ProtocolVersion: authdomain.ProtocolVersion, PublicKey: elliptic.Marshal(elliptic.P256(), key.X, key.Y)}}
+	var challenge emailpb.EmailRegistrationStarted
+	send("POST", "/v1/registrations", `{}`, nil, 404, nil)
+	send("POST", "/v3/email-registrations", encode(proposal), nil, 200, &challenge)
+	match := regexp.MustCompile(`Verification code: ([0-9]{8})`).FindStringSubmatch(capture.Next(t).Body)
+	if len(match) != 2 {
+		t.Fatal("HTTP registration missing SMTP code")
+	}
+	completion := encode(&emailpb.CompleteEmailRegistrationRequest{OperationId: challenge.OperationId, Code: match[1], Password: "a long fixture password 123", Proof: &authv1.CredentialProof{Signature: signDevice(t, key, challenge.GetSigningPayload())}})
+	var activated emailpb.EmailRegistrationCompleted
+	send("POST", "/v3/email-registrations:complete", completion, nil, 200, &activated)
+	registered := activated.GetRegistrationResult()
 	if registered.AuthId == "" || registered.Session.GetSessionToken() == "" {
 		t.Fatal("HTTP registration returned no account/session")
 	}
-	send("POST", "/v1/registrations/"+challenge.OperationId+"/completion", completion, nil, 409, nil)
+	send("POST", "/v3/email-registrations:complete", completion, nil, 409, nil)
 	md, _ := metadata.FromOutgoingContext(userCallContext(t, identityKey, registered.AuthId))
 	identity := http.Header{"X-Iwut-Identity": md.Get("x-iwut-identity")}
 	session := http.Header{"X-Iwut-Session": {registered.Session.SessionToken}}
@@ -151,6 +158,12 @@ func runHTTPUserFlow(t *testing.T, base string, identityKey *rsa.PrivateKey) {
 	credentialPath := "/v1/users/me/credentials/" + registered.CredentialId
 	send("DELETE", credentialPath, "", session, 401, nil)
 	send("DELETE", credentialPath, "", identity, 401, nil)
+	// Every non-current ID is rejected before a target ownership lookup.
+	otherPath := "/v1/users/me/credentials/" + uuid.NewString()
+	denied := send("DELETE", otherPath, "", http.Header{"X-Iwut-Session": {login.SessionToken}}, 403, nil)
+	if !bytes.Contains(denied, []byte("CREDENTIAL_REAUTH_REQUIRED")) {
+		t.Fatal("non-current target did not require dedicated reauthentication")
+	}
 	send("DELETE", credentialPath, "", http.Header{"X-Iwut-Session": {login.SessionToken}}, 200, nil)
 	send("DELETE", credentialPath, "", http.Header{"X-Iwut-Session": {login.SessionToken}}, 401, nil)
 	loginChallenge, err = generated.BeginDeviceLogin(t.Context(), &authv1.BeginDeviceLoginRequest{CredentialLocator: &authv1.BeginDeviceLoginRequest_CredentialId{CredentialId: registered.CredentialId}})

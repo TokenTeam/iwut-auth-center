@@ -14,24 +14,32 @@ import (
 
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
-	"iwut-auth-center/internal/adapter/associationcrypto"
 	"iwut-auth-center/internal/adapter/deviceprotocol"
+	"iwut-auth-center/internal/adapter/emailaccountprotocol"
 	"iwut-auth-center/internal/adapter/emailloginprotocol"
+	"iwut-auth-center/internal/adapter/passwordcrypto"
 	auth "iwut-auth-center/internal/authentication/domain"
 	ap "iwut-auth-center/internal/authentication/port"
+	accountdomain "iwut-auth-center/internal/emailaccount/domain"
+	accountusecase "iwut-auth-center/internal/emailaccount/usecase"
 	email "iwut-auth-center/internal/emailbinding/domain"
 	d "iwut-auth-center/internal/emaillogin/domain"
 	uc "iwut-auth-center/internal/emaillogin/usecase"
 	identity "iwut-auth-center/internal/identity/domain"
+	pwd "iwut-auth-center/internal/password/domain"
 	regport "iwut-auth-center/internal/registration/port"
-	regusecase "iwut-auth-center/internal/registration/usecase"
 )
 
 type fixedLoginProtocol struct{ *emailloginprotocol.Protocol }
 
 func (fixedLoginProtocol) NewCode() (string, error) { return "00005678", nil }
 
+type fixedAccountProtocol struct{ *emailaccountprotocol.Protocol }
+
+func (fixedAccountProtocol) NewCode() (string, error) { return "00001234", nil }
+
 type emailLoginFixture struct {
+	accounts *accountusecase.Service
 	*emailFixture
 	login *uc.Login
 	lr    *EmailLoginRepository
@@ -42,15 +50,41 @@ type emailLoginFixture struct {
 func newEmailLoginFixture(t *testing.T) *emailLoginFixture {
 	t.Helper()
 	f := newEmailFixture(t)
+	// This isolated historical fixture starts empty. Retire only its known
+	// old indexes before creating all authority through real v3 transactions.
+	for _, name := range []string{"authId_1", "email_1"} {
+		if err := f.db.Collection(EmailBindingCollection).Indexes().DropOne(t.Context(), name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, err := range []error{EnsureEmailAccountSchema(t.Context(), f.db), EnsurePasswordSchema(t.Context(), f.db), EnsurePasswordQuotaSchema(t.Context(), f.db)} {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	protocol, _ := emailaccountprotocol.New(bytes32(3), bytes32(42), "iwut-auth-center:test")
+	pwdProtocol, _ := passwordcrypto.NewProtocol(bytes32(42), "iwut-auth-center:test")
+	passwords, _ := NewPasswordRepository(f.repo.AuthenticationRepository, pwdProtocol.KeyID())
+	quota, _ := NewPasswordQuota(f.repo.AuthenticationRepository)
+	repo, e := NewEmailAccountRepository(f.repo, passwords, protocol.KeyID(), EmailLimits{5, 5, 20, 1000})
+	if e != nil {
+		t.Fatal(e)
+	}
+	accounts, e := accountusecase.New(repo, fixedAccountProtocol{protocol}, f.protocol, passwordEngine(t, pwd.DefaultParameters()), quota, f.sender, "iwut-auth-center:test", time.Hour)
+	if e != nil {
+		t.Fatal(e)
+	}
+	temp := &emailLoginFixture{emailFixture: f, accounts: accounts}
 	key := newSigningKey(t)
-	started, e := f.service.Begin(t.Context(), emailBegin(key, "login@example.test"), nil)
+	started, e := temp.beginRegistration(t, key, "login@example.test")
 	if e != nil {
 		t.Fatal(e)
 	}
-	activated, e := completeEmail(t, f, key, started)
+	activated, e := temp.completeRegistration(t, key, started)
 	if e != nil {
 		t.Fatal(e)
 	}
+
 	p, _ := emailloginprotocol.New("iwut-auth-center:test", bytes.Repeat([]byte{7}, 32), email.NormalizeEmail)
 	r, e := NewEmailLoginRepository(f.repo, p.KeyID(), EmailLimits{5, 5, 20, 1000})
 	if e != nil {
@@ -65,7 +99,41 @@ func newEmailLoginFixture(t *testing.T) *emailLoginFixture {
 	if e != nil {
 		t.Fatal(e)
 	}
-	return &emailLoginFixture{f, service, r, lp, *activated.Registration}
+	return &emailLoginFixture{emailFixture: f, accounts: accounts, login: service, lr: r, lp: lp, owner: *activated.Registration}
+}
+
+func (f *emailLoginFixture) beginRegistration(t *testing.T, key *ecdsa.PrivateKey, email string) (accountusecase.Started, error) {
+	return f.accounts.Begin(t.Context(), "", accountdomain.Begin{RequestID: uuid.NewString(), Email: email, DeviceVersion: auth.ProtocolVersion, PublicKey: elliptic.Marshal(elliptic.P256(), key.X, key.Y), Source: "127.0.0.1"}, true)
+}
+func (f *emailLoginFixture) completeRegistration(t *testing.T, key *ecdsa.PrivateKey, o accountusecase.Started) (accountusecase.Completed, error) {
+	return f.accounts.Complete(t.Context(), "", o.Operation.OperationID, "00001234", initialPassword, signAuthentication(t, key, o.SigningPayload), true, "127.0.0.1")
+}
+func (f *emailLoginFixture) addForSwitch(t *testing.T, address string) accountdomain.Directory {
+	t.Helper()
+	clearMailCooldown(t, f) // Isolate role-CAS tests from the separately tested shared send budget.
+	directory, err := f.accounts.Own(t.Context(), f.owner.SessionToken, "127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	o, err := f.accounts.Begin(t.Context(), f.owner.SessionToken, accountdomain.Begin{RequestID: uuid.NewString(), Email: address, ExpectedDirectoryRevision: directory.Revision, Source: "127.0.0.1"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := f.accounts.Complete(t.Context(), f.owner.SessionToken, o.Operation.OperationID, "00001234", "", nil, false, "127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out.Directory
+}
+func (f *emailLoginFixture) switchEmail(t *testing.T, directory accountdomain.Directory, address string) error {
+	target := ""
+	for _, b := range directory.Bindings {
+		if b.Email == address {
+			target = b.BindingID
+		}
+	}
+	_, _, err := f.accounts.Mutate(t.Context(), f.owner.SessionToken, accountdomain.Mutation{RequestID: uuid.NewString(), BindingID: target, Password: initialPassword, ExpectedDirectoryRevision: directory.Revision, ExpectedLoginRoleRevision: directory.LoginRoleRevision, Source: "127.0.0.1"}, true)
+	return err
 }
 
 // Reset only isolated test mail quotas; account/binding authority is always
@@ -77,7 +145,7 @@ func clearMailCooldown(t *testing.T, f *emailLoginFixture) {
 	}
 }
 func loginBegin(key *ecdsa.PrivateKey, email string) d.Begin {
-	return d.Begin{RequestID: uuid.NewString(), Email: email, ProtocolVersion: auth.ProtocolVersion, PublicKey: elliptic.Marshal(elliptic.P256(), key.X, key.Y), Source: "controlled-peer"}
+	return d.Begin{RequestID: uuid.NewString(), Email: email, ProtocolVersion: auth.ProtocolVersion, PublicKey: elliptic.Marshal(elliptic.P256(), key.X, key.Y), Source: "127.0.0.1"}
 }
 func loginSignature(t *testing.T, key *ecdsa.PrivateKey, c d.Challenge) []byte {
 	t.Helper()
@@ -109,16 +177,21 @@ func TestEmailLoginExistingAccountReuseQuotaAndSessionConsumers(t *testing.T) {
 	if _, e = f.login.Begin(t.Context(), conflict); !errors.Is(e, d.ErrConflict) {
 		t.Fatal("request conflict", e)
 	}
-	a, e := f.login.Complete(t.Context(), c.OperationID, "00005678", loginSignature(t, key, c), "peer")
+	a, e := f.login.Complete(t.Context(), c.OperationID, "00005678", loginSignature(t, key, c), "127.0.0.1")
 	if e != nil {
 		t.Fatal(e)
 	}
 	if a.AuthID != f.owner.AuthID {
 		t.Fatal("new account created")
 	}
-	for _, collection := range []string{PrincipalCollection, AssociationCollection, AssociationMemberCollection, EmailBindingCollection} {
+	for _, collection := range []string{PrincipalCollection, EmailBindingCollection} {
 		if n := countEmail(t, f.emailFixture, collection); n != 1 {
 			t.Fatalf("%s changed: %d", collection, n)
+		}
+	}
+	for _, collection := range []string{AssociationCollection, AssociationMemberCollection} {
+		if n := countEmail(t, f.emailFixture, collection); n != 0 {
+			t.Fatal("retired association written", n)
 		}
 	}
 	digest, _ := f.protocol.TokenDigest(a.SessionToken)
@@ -126,7 +199,7 @@ func TestEmailLoginExistingAccountReuseQuotaAndSessionConsumers(t *testing.T) {
 	if e != nil || session.EmailBindingRevision != 1 || session.AuthenticationMethod != d.AuthenticationMethod {
 		t.Fatal("session check", e)
 	}
-	if _, e = f.email.Own(t.Context(), digest, time.Now()); e != nil {
+	if _, e = ReadEmailDirectoryTx(t.Context(), f.db, a.AuthID); e != nil {
 		t.Fatal("UC011 consumer", e)
 	}
 	identityRepo, _ := NewIdentityRepository(f.repo.AuthenticationRepository)
@@ -144,7 +217,7 @@ func TestEmailLoginExistingAccountReuseQuotaAndSessionConsumers(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	a2, e := f.login.Complete(t.Context(), reuse.OperationID, "00005678", loginSignature(t, key, reuse), "peer")
+	a2, e := f.login.Complete(t.Context(), reuse.OperationID, "00005678", loginSignature(t, key, reuse), "127.0.0.1")
 	if e != nil || a2.CredentialID != a.CredentialID {
 		t.Fatal("credential reuse", e)
 	}
@@ -155,16 +228,11 @@ func TestEmailLoginExistingAccountReuseQuotaAndSessionConsumers(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	ownerDigest, _ := f.protocol.TokenDigest(f.owner.SessionToken)
-	revision := int64(1)
-	bind, e := f.service.Begin(t.Context(), email.Begin{RequestID: uuid.NewString(), Email: "changed@example.test", Mode: email.Bind, Revision: &revision, Source: "peer"}, ownerDigest)
-	if e != nil {
+	directory := f.addForSwitch(t, "changed@example.test")
+	if e = f.switchEmail(t, directory, "changed@example.test"); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = f.service.Complete(t.Context(), bind.Operation.Proof.OperationID, "00001234", nil, false, ownerDigest); e != nil {
-		t.Fatal(e)
-	}
-	if _, e = f.login.Complete(t.Context(), pending.OperationID, "00005678", loginSignature(t, pendingKey, pending), "peer"); !errors.Is(e, d.ErrFailed) {
+	if _, e = f.login.Complete(t.Context(), pending.OperationID, "00005678", loginSignature(t, pendingKey, pending), "127.0.0.1"); !errors.Is(e, d.ErrFailed) {
 		t.Fatal("changed email accepted pending login", e)
 	}
 	op, e := f.lr.Get(t.Context(), pending.OperationID)
@@ -185,6 +253,30 @@ func TestEmailLoginExistingAccountReuseQuotaAndSessionConsumers(t *testing.T) {
 		t.Fatal("audit privacy", e)
 	}
 }
+
+func TestEmailAccountAndLoginShareOwnerMailCooldownAcrossAddresses(t *testing.T) {
+	f := newEmailLoginFixture(t)
+	// ADD mails a different address, but recovery on the login address must still
+	// consume the same owner budget (not just the per-address budget).
+	f.addForSwitch(t, "second@example.test")
+	if _, err := f.login.Begin(t.Context(), loginBegin(newSigningKey(t), "login@example.test")); !errors.Is(err, d.ErrRate) {
+		t.Fatalf("ADD to LOGIN bypassed owner cooldown: %v", err)
+	}
+	clearMailCooldown(t, f)
+	if _, err := f.login.Begin(t.Context(), loginBegin(newSigningKey(t), "login@example.test")); err != nil {
+		t.Fatal(err)
+	}
+	directory, err := f.accounts.Own(t.Context(), f.owner.SessionToken, "127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.accounts.Begin(t.Context(), f.owner.SessionToken, accountdomain.Begin{RequestID: uuid.NewString(), Email: "third@example.test", ExpectedDirectoryRevision: directory.Revision, Source: "127.0.0.1"}, false); !errors.Is(err, accountdomain.ErrLimited) {
+		t.Fatalf("LOGIN to ADD bypassed owner cooldown: %v", err)
+	}
+	if _, err = f.accounts.BeginCampus(t.Context(), f.owner.SessionToken, uuid.NewString(), "campus@whut.edu.cn", "127.0.0.1"); !errors.Is(err, accountdomain.ErrLimited) {
+		t.Fatalf("campus alias bypassed shared cooldown: %v", err)
+	}
+}
 func TestEmailLoginFrozenUnknownFailuresAndRotation(t *testing.T) {
 	f := newEmailLoginFixture(t)
 	key := newSigningKey(t)
@@ -195,15 +287,15 @@ func TestEmailLoginFrozenUnknownFailuresAndRotation(t *testing.T) {
 	}
 	clearMailCooldown(t, f)
 	registrationKey := newSigningKey(t)
-	registered, e := f.service.Begin(t.Context(), emailBegin(registrationKey, b.Email), nil)
+	registered, e := f.beginRegistration(t, registrationKey, b.Email)
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e = completeEmail(t, f.emailFixture, registrationKey, registered); e != nil {
+	if _, e = f.completeRegistration(t, registrationKey, registered); e != nil {
 		t.Fatal(e)
 	}
 	sig := loginSignature(t, key, c)
-	if _, e = f.login.Complete(t.Context(), c.OperationID, "00005678", sig, "peer"); !errors.Is(e, d.ErrFailed) {
+	if _, e = f.login.Complete(t.Context(), c.OperationID, "00005678", sig, "127.0.0.1"); !errors.Is(e, d.ErrFailed) {
 		t.Fatal("placeholder became eligible", e)
 	}
 	clearMailCooldown(t, f)
@@ -216,7 +308,7 @@ func TestEmailLoginFrozenUnknownFailuresAndRotation(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, e := f.login.Complete(t.Context(), valid.OperationID, "99999999", sig, "peer")
+			_, e := f.login.Complete(t.Context(), valid.OperationID, "99999999", sig, "127.0.0.1")
 			if !errors.Is(e, d.ErrFailed) {
 				t.Errorf("failure: %v", e)
 			}
@@ -264,7 +356,7 @@ func TestEmailLoginRollbackConcurrencyAndLRU(t *testing.T) {
 	if e = f.db.RunCommand(t.Context(), bson.D{{Key: "collMod", Value: EmailLoginAuditCollection}, {Key: "validator", Value: bson.M{"impossible": bson.M{"$exists": true}}}}).Err(); e != nil {
 		t.Fatal(e)
 	}
-	result, e := f.login.Complete(t.Context(), c.OperationID, "00005678", sig, "peer")
+	result, e := f.login.Complete(t.Context(), c.OperationID, "00005678", sig, "127.0.0.1")
 	if !errors.Is(e, d.ErrUnavailable) || result.SessionToken != "" || countEmail(t, f.emailFixture, CredentialCollection) != 1 || countEmail(t, f.emailFixture, SessionCollection) != 1 {
 		t.Fatal("atomic rollback failed", e)
 	}
@@ -277,7 +369,7 @@ func TestEmailLoginRollbackConcurrencyAndLRU(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			a, e := f.login.Complete(t.Context(), c.OperationID, "00005678", sig, "peer")
+			a, e := f.login.Complete(t.Context(), c.OperationID, "00005678", sig, "127.0.0.1")
 			if e == nil {
 				successes <- a
 			} else if !errors.Is(e, d.ErrCompleted) {
@@ -307,7 +399,7 @@ func TestEmailLoginRollbackConcurrencyAndLRU(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, e := f.login.Complete(t.Context(), op.c.OperationID, "00005678", op.sig, "peer"); e != nil {
+			if _, e := f.login.Complete(t.Context(), op.c.OperationID, "00005678", op.sig, "127.0.0.1"); e != nil {
 				t.Errorf("parallel LRU: %v", e)
 			}
 		}()
@@ -343,13 +435,13 @@ func TestEmailLoginUnknownCommitNeverReturnsToken(t *testing.T) {
 		t.Fatal(e)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 250*time.Millisecond)
-	a, e := service.Complete(ctx, c.OperationID, "00005678", loginSignature(t, key, c), "peer")
+	a, e := service.Complete(ctx, c.OperationID, "00005678", loginSignature(t, key, c), "127.0.0.1")
 	cancel()
 	if !errors.Is(e, d.ErrUnavailable) || a.SessionToken != "" {
 		t.Fatal("unknown commit released token", e)
 	}
 	disable()
-	if _, e = service.Complete(t.Context(), c.OperationID, "00005678", loginSignature(t, key, c), "peer"); e != nil && !errors.Is(e, d.ErrCompleted) {
+	if _, e = service.Complete(t.Context(), c.OperationID, "00005678", loginSignature(t, key, c), "127.0.0.1"); e != nil && !errors.Is(e, d.ErrCompleted) {
 		t.Fatal(e)
 	}
 }
@@ -357,11 +449,11 @@ func TestEmailLoginUnknownCommitNeverReturnsToken(t *testing.T) {
 func TestEmailLoginCrossAccountRevokedAndCompetingRegistration(t *testing.T) {
 	f := newEmailLoginFixture(t)
 	otherKey := newSigningKey(t)
-	registered, e := f.service.Begin(t.Context(), emailBegin(otherKey, "other@example.test"), nil)
+	registered, e := f.beginRegistration(t, otherKey, "other@example.test")
 	if e != nil {
 		t.Fatal(e)
 	}
-	other, e := completeEmail(t, f.emailFixture, otherKey, registered)
+	other, e := f.completeRegistration(t, otherKey, registered)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -370,10 +462,10 @@ func TestEmailLoginCrossAccountRevokedAndCompetingRegistration(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e = f.login.Complete(t.Context(), cross.OperationID, "99999999", loginSignature(t, otherKey, cross), "peer"); !errors.Is(e, d.ErrFailed) {
+	if _, e = f.login.Complete(t.Context(), cross.OperationID, "99999999", loginSignature(t, otherKey, cross), "127.0.0.1"); !errors.Is(e, d.ErrFailed) {
 		t.Fatal("conflict disclosed before proofs", e)
 	}
-	if _, e = f.login.Complete(t.Context(), cross.OperationID, "00005678", loginSignature(t, otherKey, cross), "peer"); !errors.Is(e, d.ErrCredential) {
+	if _, e = f.login.Complete(t.Context(), cross.OperationID, "00005678", loginSignature(t, otherKey, cross), "127.0.0.1"); !errors.Is(e, d.ErrCredential) {
 		t.Fatal("cross account public key accepted", e)
 	}
 	digest, _ := f.protocol.TokenDigest(other.Registration.SessionToken)
@@ -389,7 +481,7 @@ func TestEmailLoginCrossAccountRevokedAndCompetingRegistration(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e = f.login.Complete(t.Context(), revoked.OperationID, "00005678", loginSignature(t, otherKey, revoked), "peer"); !errors.Is(e, d.ErrCredential) {
+	if _, e = f.login.Complete(t.Context(), revoked.OperationID, "00005678", loginSignature(t, otherKey, revoked), "127.0.0.1"); !errors.Is(e, d.ErrCredential) {
 		t.Fatal("revoked public key revived", e)
 	}
 	clearMailCooldown(t, f)
@@ -398,18 +490,21 @@ func TestEmailLoginCrossAccountRevokedAndCompetingRegistration(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	reg := beginRegistration(t, f.registrationFixture, key, bytes.Repeat([]byte{4}, 32))
+	reg, e := f.beginRegistration(t, key, "competing@example.test")
+	if e != nil {
+		t.Fatal(e)
+	}
 	var wg sync.WaitGroup
 	results := make(chan error, 2)
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		_, e := f.login.Complete(t.Context(), c.OperationID, "00005678", loginSignature(t, key, c), "peer")
+		_, e := f.login.Complete(t.Context(), c.OperationID, "00005678", loginSignature(t, key, c), "127.0.0.1")
 		results <- e
 	}()
 	go func() {
 		defer wg.Done()
-		_, e := f.uc.Complete(t.Context(), reg.OperationID, signChallenge(t, key, reg))
+		_, e := f.completeRegistration(t, key, reg)
 		results <- e
 	}()
 	wg.Wait()
@@ -418,7 +513,7 @@ func TestEmailLoginCrossAccountRevokedAndCompetingRegistration(t *testing.T) {
 	for e := range results {
 		if e == nil {
 			successes++
-		} else if !errors.Is(e, d.ErrCredential) && !errors.Is(e, regport.ErrCredentialRegistered) {
+		} else if !errors.Is(e, d.ErrCredential) && !errors.Is(e, accountdomain.ErrCredential) && !errors.Is(e, regport.ErrCredentialRegistered) && !errors.Is(e, ap.ErrCredentialRegistered) {
 			t.Fatal("unexpected competing proof error", e)
 		}
 	}
@@ -431,7 +526,7 @@ func TestEmailLoginCrossAccountRevokedAndCompetingRegistration(t *testing.T) {
 		t.Fatal("global key uniqueness", e)
 	}
 }
-func TestEmailLoginAssociationRotationDoesNotCloseOperation(t *testing.T) {
+func TestEmailLoginRestartDoesNotCloseOperation(t *testing.T) {
 	f := newEmailLoginFixture(t)
 	clearMailCooldown(t, f)
 	key := newSigningKey(t)
@@ -439,17 +534,10 @@ func TestEmailLoginAssociationRotationDoesNotCloseOperation(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	current := associationcrypto.Key{Version: "v2", Encrypt: bytes.Repeat([]byte{5}, 32), Lookup: bytes.Repeat([]byte{6}, 32)}
-	previous := associationcrypto.Key{Version: "v1", Encrypt: bytes.Repeat([]byte{1}, 32), Lookup: bytes.Repeat([]byte{2}, 32)}
-	cipher, e := associationcrypto.New(current, &previous)
-	if e != nil {
+	if e = f.lr.Initialize(t.Context(), time.Now()); e != nil {
 		t.Fatal(e)
 	}
-	migration, _ := NewAssociationMigrationRepository(f.db)
-	if e = regusecase.MigrateAssociations(t.Context(), migration, cipher, time.Now()); e != nil {
-		t.Fatal(e)
-	}
-	if _, e = f.login.Complete(t.Context(), c.OperationID, "00005678", loginSignature(t, key, c), "peer"); e != nil {
+	if _, e = f.login.Complete(t.Context(), c.OperationID, "00005678", loginSignature(t, key, c), "127.0.0.1"); e != nil {
 		t.Fatal("unrelated association invalidated login", e)
 	}
 }
@@ -462,23 +550,18 @@ func TestEmailLoginAndEmailReplacementCommitOrder(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	digest, _ := f.protocol.TokenDigest(f.owner.SessionToken)
-	revision := int64(1)
-	binding, e := f.service.Begin(t.Context(), email.Begin{RequestID: uuid.NewString(), Email: "replacement@example.test", Mode: email.Bind, Revision: &revision, Source: "peer"}, digest)
-	if e != nil {
-		t.Fatal(e)
-	}
+	directory := f.addForSwitch(t, "replacement@example.test")
 	var result auth.Established
 	var loginErr, bindErr error
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		result, loginErr = f.login.Complete(t.Context(), challenge.OperationID, "00005678", loginSignature(t, key, challenge), "peer")
+		result, loginErr = f.login.Complete(t.Context(), challenge.OperationID, "00005678", loginSignature(t, key, challenge), "127.0.0.1")
 	}()
 	go func() {
 		defer wg.Done()
-		_, bindErr = f.service.Complete(t.Context(), binding.Operation.Proof.OperationID, "00001234", nil, false, digest)
+		bindErr = f.switchEmail(t, directory, "replacement@example.test")
 	}()
 	wg.Wait()
 	if bindErr != nil {
@@ -495,15 +578,14 @@ func TestEmailLoginAndEmailReplacementCommitOrder(t *testing.T) {
 	}
 	// Even restoring the original address cannot restore revision 1's challenge.
 	clearMailCooldown(t, f)
-	revision = 2
-	back, e := f.service.Begin(t.Context(), email.Begin{RequestID: uuid.NewString(), Email: "login@example.test", Mode: email.Bind, Revision: &revision, Source: "peer"}, digest)
+	current, e := f.accounts.Own(t.Context(), f.owner.SessionToken, "127.0.0.1")
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e = f.service.Complete(t.Context(), back.Operation.Proof.OperationID, "00001234", nil, false, digest); e != nil {
+	if e = f.switchEmail(t, current, "login@example.test"); e != nil {
 		t.Fatal(e)
 	}
-	_, e = f.login.Complete(t.Context(), challenge.OperationID, "00005678", loginSignature(t, key, challenge), "peer")
+	_, e = f.login.Complete(t.Context(), challenge.OperationID, "00005678", loginSignature(t, key, challenge), "127.0.0.1")
 	if loginErr == nil {
 		if !errors.Is(e, d.ErrCompleted) {
 			t.Fatal(e)
@@ -526,7 +608,7 @@ func TestEmailLoginDisabledEligibilityRemainsFrozen(t *testing.T) {
 	if _, e = f.db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": f.owner.AuthID}, bson.M{"$set": bson.M{"accountStatus": "ACTIVE", "accountRevision": int64(1)}}); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = f.login.Complete(t.Context(), challenge.OperationID, "00005678", loginSignature(t, key, challenge), "peer"); !errors.Is(e, d.ErrFailed) {
+	if _, e = f.login.Complete(t.Context(), challenge.OperationID, "00005678", loginSignature(t, key, challenge), "127.0.0.1"); !errors.Is(e, d.ErrFailed) {
 		t.Fatal("reenabled account revived placeholder", e)
 	}
 }

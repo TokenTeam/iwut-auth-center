@@ -17,6 +17,7 @@ import (
 	"iwut-auth-center/internal/adapter/terminationledger"
 	"iwut-auth-center/internal/adapter/transport"
 	"iwut-auth-center/internal/config"
+	passwordport "iwut-auth-center/internal/password/port"
 )
 
 type accountClosureRuntime struct {
@@ -24,7 +25,7 @@ type accountClosureRuntime struct {
 	Worker  *closureworker.Worker
 }
 
-func provideAccountClosure(configuration config.Config, db *m.Database, endpoints *transport.UserEndpoints, owner *ownerExitRuntime) (*accountClosureRuntime, error) {
+func provideAccountClosure(configuration config.Config, db *m.Database, endpoints *transport.UserEndpoints, owner *ownerExitRuntime, passwords *passwordRuntime) (*accountClosureRuntime, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	c := configuration.AccountClosure
@@ -46,6 +47,13 @@ func provideAccountClosure(configuration config.Config, db *m.Database, endpoint
 	if endpoints == nil || configuration.UserEndpoints == nil || owner == nil || owner.App == nil || owner.Repository == nil {
 		return nil, errors.New("account closure requires owner exit and authentication runtimes")
 	}
+	var verifier passwordport.PasswordVerifier
+	if passwords != nil && passwords.Reauth != nil {
+		verifier = passwords.Reauth
+	}
+	if c.Enabled && verifier == nil {
+		return nil, errors.New("public account closure requires password verification runtime")
+	}
 	ledger, err := terminationledger.Open(c.LedgerDir)
 	if err != nil {
 		return nil, err
@@ -65,7 +73,7 @@ func provideAccountClosure(configuration config.Config, db *m.Database, endpoint
 	if err != nil {
 		return nil, err
 	}
-	service, err := closure.New(repo, protocol, owner.App, owner.Repository, ledger, configuration.UserEndpoints.Authentication.ServiceID)
+	service, err := closure.New(repo, protocol, owner.App, owner.Repository, ledger, configuration.UserEndpoints.Authentication.ServiceID, verifier)
 	if err != nil {
 		return nil, err
 	}

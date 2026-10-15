@@ -107,7 +107,13 @@ func EnsureApplicationClosureSchema(ctx context.Context, db *m.Database) error {
 		return err
 	}
 	_, err = db.Collection(ApplicationClosureSecurityEventCollection).Indexes().CreateOne(ctx, m.IndexModel{Keys: bson.D{{Key: "applicationId", Value: 1}, {Key: "closureId", Value: 1}, {Key: "closingStartedAt", Value: 1}}, Options: options.Index().SetUnique(true).SetName("application_closure_conflict_unique")})
-	return err
+	if err != nil {
+		return err
+	}
+	if err = EnsureApplicationUserStorageSchema(ctx, db); err != nil {
+		return err
+	}
+	return EnsureApplicationUserStorageCleanupSchema(ctx, db)
 }
 
 func validClosure(v applicationClosureDocument) bool {
@@ -196,6 +202,9 @@ func (r *ApplicationClosureRepository) Apply(ctx context.Context, app, closure s
 				semantic = d.ErrConflict
 				return errors.New("closure binding conflict")
 			}
+			if e = ensureApplicationUserStorageCleanupTaskTx(tx, r.auth.database, existing.ApplicationID, existing.ClosureID, existing.AppliedAt); e != nil {
+				return e
+			}
 			out = existing.domain()
 			return nil
 		}
@@ -211,6 +220,9 @@ func (r *ApplicationClosureRepository) Apply(ctx context.Context, app, closure s
 			return e
 		}
 		if _, e = r.auth.database.Collection(ApplicationClosureAuditCollection).InsertOne(tx, bson.M{"applicationId": app, "closureId": closure, "receiptId": receipt, "closingStartedAt": started, "appliedAt": applied, "callerServiceId": caller, "action": "APPLICATION_CLOSED"}); e != nil {
+			return e
+		}
+		if e = ensureApplicationUserStorageCleanupTaskTx(tx, r.auth.database, app, closure, applied); e != nil {
 			return e
 		}
 		out = doc.domain()

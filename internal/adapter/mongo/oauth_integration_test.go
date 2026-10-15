@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -96,13 +97,30 @@ func newOAuthFixture(t *testing.T) *oauthFixture {
 	if e := EnsureOAuthSchema(ctx, db); e != nil {
 		t.Fatal(e)
 	}
+	if e := EnsureAcademicYearSchema(ctx, db); e != nil {
+		t.Fatal(e)
+	}
+	academicYears, e := NewAcademicYearRepository(f.r)
+	if e != nil {
+		t.Fatal("initialize academic year policy", e)
+	}
+	if e = academicYears.Initialize(ctx); e != nil {
+		t.Fatal("initialize academic year policy", e)
+	}
 	if _, e := db.Collection(PrincipalCollection).UpdateOne(ctx, bson.M{"authId": f.c.AuthID}, bson.M{"$set": bson.M{"developerStatus": "APPROVED", "developerRevision": int64(1)}}); e != nil {
 		t.Fatal(e)
 	}
 	if _, e := db.Collection("auth_developer_handles").InsertOne(ctx, bson.M{"authId": f.c.AuthID, "developerHandle": "testdev"}); e != nil {
 		t.Fatal(e)
 	}
-	if _, e := db.Collection(EmailBindingCollection).InsertOne(ctx, bindingDocument{AuthID: f.c.AuthID, Email: "student@example.test", Revision: 1, VerifiedAt: time.Now()}); e != nil {
+	if e := EnsureEmailAccountSchema(ctx, db); e != nil {
+		t.Fatal(e)
+	}
+	bindingID := uuid.NewString()
+	if _, e := db.Collection(EmailDirectoryCollection).InsertOne(ctx, emailDirectoryDocument{AuthID: f.c.AuthID, LoginBindingID: bindingID, Revision: 1, LoginRoleRevision: 1, VerifiedCount: 1}); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := db.Collection(EmailBindingCollection).InsertOne(ctx, emailBindingDocument{BindingID: bindingID, AuthID: f.c.AuthID, Email: "student@example.test", VerifiedAt: time.Now()}); e != nil {
 		t.Fatal(e)
 	}
 	session := f.login(t).SessionToken
@@ -366,6 +384,8 @@ func TestOAuthMongoUserInfoProfileProjection(t *testing.T) {
 		{Name: "profile.education.year", Label: "Year", Description: "Read year", Kind: "USERINFO_PROFILE", ProfileField: "education.year", ProfileValueType: "INTEGER", Enabled: true},
 		{Name: "profile.preferences.public", Label: "Public", Description: "Read preference", Kind: "USERINFO_PROFILE", ProfileField: "preferences.public", ProfileValueType: "BOOLEAN", Enabled: true},
 		{Name: "profile.personal.birthday", Label: "Birthday", Description: "Read birthday", Kind: "USERINFO_PROFILE", ProfileField: "personal.birthday", ProfileValueType: "DATE", Enabled: true},
+		{Name: "profile.education.campus_areas", Label: "Campus", Description: "Read campus", Kind: "USERINFO_PROFILE", ProfileField: "education.campus_areas", ProfileValueType: "STRING_SET", Enabled: true},
+		{Name: "profile.education.current_grade", Label: "Grade", Description: "Read grade", Kind: "USERINFO_PROFILE", ProfileField: "education.current_grade", ProfileValueType: "ACADEMIC_GRADE", Enabled: true},
 	}
 	f.seed = append(f.seed, profileScopes...)
 	if err := f.repo.SeedCatalog(ctx, f.seed); err != nil {
@@ -378,6 +398,8 @@ func TestOAuthMongoUserInfoProfileProjection(t *testing.T) {
 	f.app.mu.Unlock()
 	entries := bson.A{
 		bson.M{"key": "basic.name", "valueType": "STRING", "value": "Alice"},
+		bson.M{"key": "education.campus_areas", "valueType": "STRING_SET", "value": bson.A{"JIANHU", "NANHU"}},
+		bson.M{"key": "education.current_grade", "valueType": "ACADEMIC_GRADE", "value": bson.M{"stage": "UNDERGRADUATE", "year": int32(3), "finalYear": int32(4), "academicYear": int32(2025), "confirmedAt": time.Now()}},
 		bson.M{"key": "education.year", "valueType": "INTEGER", "value": int32(2024)},
 		bson.M{"key": "personal.birthday", "valueType": "DATE", "value": "2000-02-29"},
 		bson.M{"key": "preferences.public", "valueType": "BOOLEAN", "value": false},
@@ -391,11 +413,18 @@ func TestOAuthMongoUserInfoProfileProjection(t *testing.T) {
 	}
 	tokens := f.tokens(t, scopes...)
 	info, err := f.service.UserInfo(ctx, tokens.AccessToken)
-	if err != nil || len(info.Profile) != 4 {
+	if err != nil || len(info.Profile) != 6 {
 		t.Fatalf("profile = %#v, %v", info.Profile, err)
 	}
-	if info.Profile[0].Key != "basic.name" || info.Profile[0].Value.Text != "Alice" || info.Profile[1].Value.Integer != 2024 || info.Profile[2].Value.Text != "2000-02-29" || info.Profile[3].Value.Boolean {
+	projected := map[string]d.ProfileValue{}
+	for _, entry := range info.Profile {
+		projected[entry.Key] = entry.Value
+	}
+	if projected["basic.name"].Text != "Alice" || projected["education.year"].Integer != 2024 || projected["personal.birthday"].Text != "2000-02-29" || projected["preferences.public"].Boolean {
 		t.Fatalf("typed projection = %#v", info.Profile)
+	}
+	if !slices.Equal(projected["education.campus_areas"].Strings, []string{"JIANHU", "NANHU"}) || projected["education.current_grade"].Integer != 4 || projected["education.current_grade"].Academic.Stage != "UNDERGRADUATE" {
+		t.Fatalf("extended projection = %#v", info.Profile)
 	}
 	if _, err = f.repo.db.Collection(PrincipalCollection).UpdateOne(ctx, bson.M{"authId": f.auth.c.AuthID}, bson.M{"$set": bson.M{"profile.entries.0.value": "Alice 2", "profile.revision": int64(3), "profile.updatedAt": time.Now()}}); err != nil {
 		t.Fatal(err)

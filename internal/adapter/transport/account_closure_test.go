@@ -23,7 +23,7 @@ func (s *closureStub) Begin(context.Context, d.BeginInput) (d.Challenge, error) 
 	s.calls++
 	return d.Challenge{OperationID: "99999999-9999-4999-8999-000000000001", ExpiresAt: time.Unix(1800000300, 0)}, nil
 }
-func (s *closureStub) Prepare(context.Context, string, []byte) (d.Preparation, error) {
+func (s *closureStub) Prepare(context.Context, string, []byte, string, string) (d.Preparation, error) {
 	s.calls++
 	return d.Preparation{Outcome: "BLOCKED", Blocker: d.AdminBlocker}, nil
 }
@@ -143,5 +143,20 @@ func TestClosureWireRejectsDuplicateAndConflictingLocator(t *testing.T) {
 	s, _ := closureTransportFixture(t, true)
 	if _, err := s.BeginAccountClosure(t.Context(), nilRequest); status.Code(err) != codes.InvalidArgument {
 		t.Fatal("nil request accepted", err)
+	}
+}
+
+func TestClosurePrepareRequiresPasswordWithoutFallback(t *testing.T) {
+	for _, password := range []string{"", strings.Repeat("a", 1025), string([]byte{0xff})} {
+		s, h := closureTransportFixture(t, true)
+		_, err := s.PrepareAccountClosure(t.Context(), &pb.PrepareAccountClosureRequest{OperationId: "99999999-9999-4999-8999-000000000001", Signature: []byte("signature"), CurrentPassword: password})
+		if status.Code(err) != codes.InvalidArgument || h.calls != 0 {
+			t.Fatal("invalid or missing password reached core", err)
+		}
+	}
+	s, h := closureTransportFixture(t, true)
+	_, err := s.PrepareAccountClosure(t.Context(), &pb.PrepareAccountClosureRequest{OperationId: "99999999-9999-4999-8999-000000000001", Signature: []byte("signature"), CurrentPassword: "a valid fixture password"})
+	if err != nil || h.calls != 1 {
+		t.Fatal("valid request rejected", err)
 	}
 }
