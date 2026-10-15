@@ -23,12 +23,12 @@ of the primary binding/login-role revision with no pending proposal. Device logi
 signing bytes are unchanged. No deployment/production migration is performed;
 missing/malformed directory/password records are not repaired or defaulted.
 
-This is an incomplete combined password delivery: default password login, reset,
-reliable notification delivery and public password services remain incomplete.
+Password management/recovery and default password login now have independent
+default-off public gates below. These backend packages do not enable production.
 UC009/025/026 danger gates are implemented and verified in the full real Mongo/Wire race suite:
 current-only legacy revocation and current-password plus registered-device proof
-for account/App closure. PasswordManagement/PasswordLogin services
-are not registered. Do not enable the new model in production yet. Gateway,
+for account/App closure.
+Do not enable the new model in production yet. Gateway,
 Console and mobile UI delivery are independent work packages.
 
 ### Development gate for the v3 email runtime
@@ -41,6 +41,52 @@ inputs:
 - `AUTH_PASSWORD_BLOCKLIST_FILE`, `AUTH_PASSWORD_BLOCKLIST_VERSION`, `AUTH_PASSWORD_BLOCKLIST_SOURCE`, `AUTH_PASSWORD_BLOCKLIST_SHA256`: pinned nonempty regular file of whole NFC-password SHA-256 digests (64 lowercase hex + LF), at most 1,000,000 unique lines. Not an account password verifier.
 - `AUTH_PASSWORD_READINESS_CONFIRMED=true`: operator declaration, not automatic evidence that remaining delivery is complete.
 - Optional `AUTH_PASSWORD_ARGON_MEMORY_KIB`, `AUTH_PASSWORD_ARGON_ITERATIONS`, `AUTH_PASSWORD_ARGON_PARALLELISM`: reviewed defaults 19456/2/1 and enforced bounds.
+
+### Password management and recovery
+
+`AUTH_PASSWORD_MANAGEMENT_ENABLED=false` is independent of the shared password
+runtime. Enabling it requires that runtime and email delivery; it registers only
+the four exact `password_management.PasswordManagementService` methods.
+Change/Get use the sole current Session; Reset rejects any supplied Session key.
+Normal change rotates the token and retains only its current device. Email reset
+returns no Session and permanently retires every old key. Current login-role,
+password and account versions are rechecked at final commit; completed reset
+replay returns only the original empty result with the same code/password input.
+
+Reset mail shares existing address/source/owner send budgets. The independent
+password operation key cannot replenish anonymous work budgets. Notifications use
+unique outbox events, an SMTP-deadline-covering lease, at most eight attempts with
+one-minute exponential backoff capped at one hour, and 24-hour retention. The
+worker processes at most 32 notifications per tick and prunes 64 expired rows per
+collection. SMTP runs outside transactions; network uncertainty can duplicate a
+notification with the same Message-ID, never repeat a password change. Turning
+off the public gate retains maintenance; without SMTP it only prunes and never
+marks unsent notifications delivered. Formal blocklist publication, target-host
+load testing and Gateway/client delivery remain separate production gates.
+
+### Password login
+
+`AUTH_PASSWORD_LOGIN_ENABLED` defaults false and requires both the shared password
+runtime and `AUTH_PASSWORD_MANAGEMENT_ENABLED=true`. It registers only the two
+exact `password_login.PasswordLoginService` methods, anonymously (even an empty
+Session header is forbidden). Begin takes the current unique login email and a
+P-256 proposal; Complete takes password and an independent fresh proof. Login does
+not send mail, create users, change email roles, reset passwords or bypass retired
+fingerprint ownership. UC012 email-code login remains an explicit alternative.
+
+Five-minute challenges have five shared password/signature failures and 24-hour
+address/request idempotency. Both real and permanent placeholder operations count
+towards the shared capacity, with five live logins per owner/protected address.
+Argon verification uses the same process-wide executor and persistent quotas;
+unacceptable accounts use random dummy material at configured cost. The final
+Auth transaction rechecks all captured versions and credential eligibility,
+creates/reuses a credential, establishes PASSWORD_AND_DEVICE, applies Session LRU
+and commits the audit/consumed operation together. Rehash upgrades preserve
+security revisions; retired/revoked/foreign keys are never advanced or reassigned.
+Completed operations never disclose another token; UC007 can recover with the
+accepted key. Login operations are included in bounded expiry/UC025 cleanup even
+when the public login gate is off. UI/default entry, Gateway and production
+readiness are separate delivery gates.
 
 The campus alias additionally uses `AUTH_CAMPUS_CERTIFICATION_ENABLED=true` and
 the ADD email key; retired `AUTH_CAMPUS_CERTIFICATION_CODE_KEY` is ignored, not a

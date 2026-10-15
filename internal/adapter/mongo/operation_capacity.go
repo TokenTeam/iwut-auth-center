@@ -14,7 +14,7 @@ import (
 // create unbounded retained storage. Only expired rows are drained, at most 64
 // per collection; no pending/retained operation is evicted to admit another.
 func sharedOperationCapacityTx(ctx context.Context, db *m.Database, now time.Time, maxPending int, pending bool) error {
-	collections := []struct{ name, retention string }{{AuthenticationOperationCollection, "purgeAfter"}, {EmailAccountOperationCollection, "retainUntil"}, {EmailAccountMutationCollection, "retainUntil"}, {PasswordChangeCollection, "retainUntil"}, {CredentialManagementOperationCollection, "retainUntil"}}
+	collections := []struct{ name, retention string }{{AuthenticationOperationCollection, "purgeAfter"}, {EmailAccountOperationCollection, "retainUntil"}, {EmailAccountMutationCollection, "retainUntil"}, {PasswordChangeCollection, "retainUntil"}, {CredentialManagementOperationCollection, "retainUntil"}, {PasswordResetCollection, "retainUntil"}, {PasswordLoginCollection, "retainUntil"}}
 	var live, physical int64
 	for _, spec := range collections {
 		expired, err := db.Collection(spec.name).Find(ctx, bson.M{spec.retention: bson.M{"$lte": now}}, options.Find().SetProjection(bson.M{"_id": 1}).SetLimit(64))

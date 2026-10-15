@@ -34,7 +34,7 @@ import (
 
 // Runtime construction is the startup gate: no RPC listener exists until the
 // complete configuration, catalog, indexes and transaction support are verified.
-func provideUserEndpoints(configuration config.Config, database *drivermongo.Database, passwordsRuntime *passwordRuntime, credentialRuntime *credentialManagementRuntime) (*transport.UserEndpoints, error) {
+func provideUserEndpoints(configuration config.Config, database *drivermongo.Database, passwordsRuntime *passwordRuntime, credentialRuntime *credentialManagementRuntime, passwordManagement *passwordManagementRuntime) (*transport.UserEndpoints, error) {
 	c := configuration.UserEndpoints
 	if c == nil {
 		return nil, nil
@@ -301,6 +301,8 @@ func provideUserEndpoints(configuration config.Config, database *drivermongo.Dat
 	return &transport.UserEndpoints{SessionManagement: sessionManagement, DeveloperManagement: developerManagement, AccountManagement: accountManagement, PlatformAdministrator: administrator, AcademicYearPolicy: academicYearPolicy,
 		ApplicationOperations:         applicationOperations,
 		CredentialManagement:          credentialRuntime.Service,
+		PasswordManagement:            passwordManagement.Service,
+		PasswordLogin:                 passwordManagement.Login,
 		ApplicationUserStorage:        applicationUserStorage,
 		DeveloperApplication:          developerApplication,
 		EmailBinding:                  emailService,

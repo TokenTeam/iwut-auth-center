@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	passwordloginpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/password_login"
+	passwordpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/password_management"
 	"io"
 	"mime"
 	"net/http"
@@ -18,6 +20,7 @@ import (
 	kgrpc "github.com/go-kratos/kratos/v2/transport/grpc"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
@@ -74,6 +77,8 @@ type ServerConfig struct {
 
 // UserEndpoints is an optional, fully validated runtime assembled before listening.
 type UserEndpoints struct {
+	PasswordManagement            *PasswordManagementService
+	PasswordLogin                 *PasswordLoginService
 	CredentialManagement          *CredentialManagementService
 	SessionManagement             *SessionManagementService
 	DeveloperManagement           *DeveloperManagementService
@@ -212,6 +217,12 @@ func newGRPCServer(
 	}
 	campuspb.RegisterCampusCertificationServiceServer(server, campusService)
 	if endpoints := configuration.UserEndpoints; endpoints != nil {
+		if endpoints.PasswordManagement != nil {
+			passwordpb.RegisterPasswordManagementServiceServer(server, endpoints.PasswordManagement)
+		}
+		if endpoints.PasswordLogin != nil {
+			passwordloginpb.RegisterPasswordLoginServiceServer(server, endpoints.PasswordLogin)
+		}
 		if endpoints.SessionManagement != nil {
 			// Credential management uses its own no-touch authentication, not the
 			// ordinary Session middleware that updates LRU.
@@ -324,6 +335,12 @@ func newHTTPServer(configuration ServerConfig, verifier *ServiceIdentityVerifier
 			// The v3 service has an exact DIRECT allowlist, not a package wildcard.
 			campuspb.RegisterCampusCertificationServiceHTTPServer(server, endpoints.CampusCertification)
 		}
+		if endpoints.PasswordManagement != nil {
+			passwordpb.RegisterPasswordManagementServiceHTTPServer(server, endpoints.PasswordManagement)
+		}
+		if endpoints.PasswordLogin != nil {
+			passwordloginpb.RegisterPasswordLoginServiceHTTPServer(server, endpoints.PasswordLogin)
+		}
 		if endpoints.EmailAccount != nil {
 			emailaccountv3.RegisterEmailAccountServiceHTTPServer(server, endpoints.EmailAccount)
 		}
@@ -399,7 +416,7 @@ func authHTTPFilter(next http.Handler) http.Handler {
 func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 	return func(r *http.Request, value any) error {
 		limit := authenticationLimit
-		if credentialManagementRequest(value) != nil {
+		if credentialManagementRequest(value) != nil || passwordRequest(value) != nil {
 			limit = min(limit, 16384)
 		}
 		switch value.(type) {
@@ -445,6 +462,9 @@ func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 		if err := validateEmailAccountJSON(data, value); err != nil {
 			return err
 		}
+		if !passwordJSON(data, value) {
+			return invalidHTTPInput(r)
+		}
 		if !dangerProofJSON(data, value) {
 			return invalidDangerProofInput(value)
 		}
@@ -470,6 +490,8 @@ func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 func invalidHTTPInput(r *http.Request) error {
 	reason := "INVALID_LOGIN_INPUT"
 	switch {
+	case passwordManagementHTTPPath(r.URL.Path), passwordLoginHTTPPath(r.URL.Path):
+		reason = "INVALID_PASSWORD_REQUEST"
 	case credentialManagementHTTPPath(r.URL.Path):
 		reason = "INVALID_CREDENTIAL_MANAGEMENT_REQUEST"
 	case strings.HasPrefix(r.URL.Path, "/v1/application-close-reauth"):
@@ -516,6 +538,9 @@ func invalidHTTPInput(r *http.Request) error {
 }
 
 func oversizedHTTPInput(r *http.Request) error {
+	if passwordManagementHTTPPath(r.URL.Path) || passwordLoginHTTPPath(r.URL.Path) {
+		return transportStatus(codes.ResourceExhausted, "PASSWORD_REQUEST_TOO_LARGE", "password request is too large")
+	}
 	if credentialManagementHTTPPath(r.URL.Path) {
 		return credentialManagementTooLarge()
 	}
@@ -562,7 +587,7 @@ func authHTTPErrorEncoder(w http.ResponseWriter, r *http.Request, err error) {
 	// RESOURCE_EXHAUSTED covers both rate limiting (429) and payload limits
 	// (413); the UC's stable reason determines which HTTP status applies.
 	switch converted.Reason {
-	case "CREDENTIAL_MANAGEMENT_REQUEST_TOO_LARGE", "DEVELOPER_WITHDRAWAL_REQUEST_TOO_LARGE", "DEVELOPER_APPLICATION_REQUEST_TOO_LARGE", "EMAIL_LOGIN_REQUEST_TOO_LARGE", "EMAIL_REQUEST_TOO_LARGE", "REGISTRATION_INPUT_TOO_LARGE", "AUTHENTICATION_INPUT_TOO_LARGE", profiledomain.ErrLimit.Error():
+	case "PASSWORD_REQUEST_TOO_LARGE", "CREDENTIAL_MANAGEMENT_REQUEST_TOO_LARGE", "DEVELOPER_WITHDRAWAL_REQUEST_TOO_LARGE", "DEVELOPER_APPLICATION_REQUEST_TOO_LARGE", "EMAIL_LOGIN_REQUEST_TOO_LARGE", "EMAIL_REQUEST_TOO_LARGE", "REGISTRATION_INPUT_TOO_LARGE", "AUTHENTICATION_INPUT_TOO_LARGE", profiledomain.ErrLimit.Error():
 		converted.Code = http.StatusRequestEntityTooLarge
 	case "DEVELOPER_RESTORE_BLOCKED", "DEVELOPER_REVISION_EXHAUSTED", "ACCOUNT_REVISION_EXHAUSTED", "PLATFORM_ADMIN_GRANT_BLOCKED", "APPLICATION_OPERATIONS_PERMISSION_GRANT_BLOCKED", "LAST_PLATFORM_ADMIN_REQUIRED", "PERMISSION_REVISION_EXHAUSTED", "ACADEMIC_YEAR_ROLLOVER_NOT_FUTURE", "ACADEMIC_YEAR_POLICY_REVISION_EXHAUSTED", "ACADEMIC_YEAR_RANGE_EXHAUSTED":
 		converted.Code = http.StatusConflict

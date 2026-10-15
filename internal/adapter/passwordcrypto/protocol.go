@@ -18,6 +18,8 @@ type Protocol struct {
 	device  *deviceprotocol.Protocol
 }
 
+func (p *Protocol) ServiceID() string { return p.service }
+
 func NewProtocol(key []byte, service string) (*Protocol, error) {
 	d, err := deviceprotocol.New(service)
 	if err != nil || len(key) != 32 {
@@ -89,4 +91,12 @@ func (p *Protocol) LoginPayload(operationID, address string, key, challenge []by
 		return nil, domain.ErrInvalidInput
 	}
 	return payload, nil
+}
+
+func (p *Protocol) LoginRequestMAC(requestID, address string, key []byte) ([]byte, error) {
+	normalized, err := email.NormalizeEmail(address)
+	if err != nil || normalized != address || !deviceprotocol.ValidID(requestID) || p.device.ValidatePublicKey(key) != nil {
+		return nil, domain.ErrInvalidInput
+	}
+	return p.mac([]byte("iwut-password-login-request-v1"), []byte(requestID), []byte(address), key, []byte(p.service), []byte("iwut-client")), nil
 }

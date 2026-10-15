@@ -18,16 +18,19 @@ permanently retired and the old campus collection cannot authorize disclosure.
 Preserve all prior dirty work. No production migration, automatic old-data repair,
 commit, push or deployment. Registration never silently synthesizes passwords.
 
-**UC-AUTH-033/034 — accepted password core.** Read their briefs and password v1.
-Password core/change transactions and credential cutoff exist; password login,
-reset, public password services and notification worker remain incomplete. Do
-not declare the combined password model production-ready. UC009/025/026 gate
+**UC-AUTH-033/034 — accepted backend complete.** Read their briefs and password v1.
+Password change/reset/login, public HTTP/gRPC services and the bounded notification
+worker are implemented through Wire and verified with real Mongo/race E2E.
+See `auth-center/implements/UC-AUTH-033-034-readiness.md` in the docs repository.
+Public gates remain default off; formal blocklist publication, target-host load
+testing, Gateway/client delivery and production enablement remain separate gates.
+Do not declare the combined password model production-ready. UC009/025/026 gate
 revisions were explicitly accepted later on 2026-10-13 and their briefs regenerated
 before implementing current-only revocation and password plus device proof gates.
 These gates are now backend complete: final check/race and real Mongo/Wire race
 passed (Wire 211.879s, Mongo 554.595s). Preserve the explicit 15s bounded request
-timeout and final current-version checks. Public password login/reset/notification
-delivery remains incomplete.
+timeout and final current-version checks. Preserve the independent password
+management/login deployment gates and bounded notification delivery semantics.
 UC032 was explicitly authorized for completion on 2026-10-13. Read its generated
 brief and auth-credential-management-v1. Implement bounded no-touch listing,
 label CAS and same-Session current-password plus device-proof single-target

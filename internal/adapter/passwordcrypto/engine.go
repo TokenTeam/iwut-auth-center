@@ -101,4 +101,17 @@ func (e *Engine) NeedsUpgrade(m domain.Material) bool {
 	return m.Valid() && m.Parameters.MemoryKiB <= e.parameters.MemoryKiB && m.Parameters.Iterations <= e.parameters.Iterations && (m.Parameters.MemoryKiB < e.parameters.MemoryKiB || m.Parameters.Iterations < e.parameters.Iterations)
 }
 
+// A random, process-local verifier with the configured work factor. No fixed
+// test secret, cheaper algorithm or account data participates in dummy checks.
+func (e *Engine) DummyMaterial() (domain.Material, error) {
+	m := domain.Material{Algorithm: domain.Algorithm, FormatVersion: domain.FormatVersion, NormalizationVersion: domain.NormalizationVersion, Parameters: e.parameters, Salt: make([]byte, 16), Hash: make([]byte, 32)}
+	if _, err := rand.Read(m.Salt); err != nil {
+		return domain.Material{}, domain.ErrUnavailable
+	}
+	if _, err := rand.Read(m.Hash); err != nil {
+		return domain.Material{}, domain.ErrUnavailable
+	}
+	return m, nil
+}
+
 var _ port.Engine = (*Engine)(nil)

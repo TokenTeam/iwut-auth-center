@@ -42,6 +42,8 @@ var ErrInvalidConfiguration = errors.New("invalid auth center configuration")
 type LookupEnv func(key string) (value string, found bool)
 
 type Config struct {
+	PasswordManagement              bool
+	PasswordLogin                   bool
 	CredentialManagement            *CredentialManagement
 	Password                        *Password
 	ApplicationOperationsPermission *ApplicationOperationsPermission
@@ -214,6 +216,14 @@ func Load(lookup LookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	passwordManagement, err := loadPasswordManagement(lookup, password)
+	if err != nil {
+		return Config{}, err
+	}
+	passwordLogin, err := loadPasswordLogin(lookup, password, passwordManagement)
+	if err != nil {
+		return Config{}, err
+	}
 	if emailBinding != nil && emailLogin != nil && string(emailBinding.HMACKey) == string(emailLogin.HMACKey) {
 		return Config{}, fmt.Errorf("%w: email login key must be independent", ErrInvalidConfiguration)
 	}
@@ -309,6 +319,8 @@ func Load(lookup LookupEnv) (Config, error) {
 		DeveloperApplication:            developerApplication,
 		EmailBinding:                    emailBinding,
 		Password:                        password,
+		PasswordManagement:              passwordManagement,
+		PasswordLogin:                   passwordLogin,
 		EmailLogin:                      emailLogin,
 		CampusCertification:             campusCertification,
 		IdentityIssuance:                issuance,

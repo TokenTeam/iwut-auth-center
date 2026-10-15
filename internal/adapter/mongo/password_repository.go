@@ -84,6 +84,7 @@ func EnsurePasswordSchema(ctx context.Context, db *m.Database) error {
 		PasswordNotificationCollection: {
 			{Keys: bson.D{{Key: "eventId", Value: 1}}, Options: options.Index().SetUnique(true).SetName("password_notification_event_unique")},
 			{Keys: bson.D{{Key: "authId", Value: 1}, {Key: "state", Value: 1}, {Key: "nextAttemptAt", Value: 1}}, Options: options.Index().SetName("password_notification_owner_due")},
+			{Keys: bson.D{{Key: "state", Value: 1}, {Key: "nextAttemptAt", Value: 1}, {Key: "eventId", Value: 1}}, Options: options.Index().SetName("password_notification_due")},
 			{Keys: bson.D{{Key: "retainUntil", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0).SetName("password_notification_retention")},
 		},
 	}
@@ -240,12 +241,8 @@ func (r *PasswordRepository) CommitChange(ctx context.Context, c port.ChangeComm
 		} else if err != nil {
 			return err
 		}
-		count, err := r.auth.database.Collection(PasswordNotificationCollection).CountDocuments(tx, bson.M{"retainUntil": bson.M{"$gt": observed}}, options.Count().SetLimit(1000000))
-		if err != nil {
+		if err = ensurePasswordOutboxCapacityTx(tx, r.auth.database, observed); err != nil {
 			return err
-		}
-		if count >= 1000000 {
-			return domain.ErrLimited
 		}
 		record, err := r.readPasswordTx(tx, op.AuthID)
 		if err != nil {
@@ -261,9 +258,8 @@ func (r *PasswordRepository) CommitChange(ctx context.Context, c port.ChangeComm
 		if minimum != before.MinimumCredentialRevision {
 			return domain.ErrConflict
 		}
-		// Current binding is notification destination only; it does not authorize
-		// the change. This baseline adapter is replaced by the accepted email-list
-		// primary-role reader before public activation.
+		// The current login role is the notification destination, not additional
+		// authority to change a password.
 		binding, _, err := ReadPrimaryEmailTx(tx, r.auth.database, op.AuthID)
 		if err != nil {
 			return domain.ErrUnavailable

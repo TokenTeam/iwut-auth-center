@@ -376,6 +376,10 @@ func (r *AccountClosureRepository) Cleanup(ctx context.Context, id string, now t
 			done, e = r.deleteBatch(tx, EmailDirectoryCollection, bson.M{"authId": authID}, limit)
 		case 23:
 			done, e = r.deleteBatch(tx, CredentialManagementOperationCollection, bson.M{"authId": authID}, limit)
+		case 24:
+			done, e = r.deleteBatch(tx, PasswordResetCollection, bson.M{"authId": authID}, limit)
+		case 25:
+			done, e = r.deleteBatch(tx, PasswordLoginCollection, bson.M{"authId": authID}, limit)
 		default:
 			complete = true
 		}
@@ -385,7 +389,7 @@ func (r *AccountClosureRepository) Cleanup(ctx context.Context, id string, now t
 		if done {
 			task.Step++
 		}
-		if task.Step > 23 {
+		if task.Step > 25 {
 			complete = true
 		}
 		_, e = r.auth.database.Collection(AccountClosureTaskCollection).UpdateOne(tx, bson.M{"operationId": id}, bson.M{"$set": bson.M{"step": task.Step, "localComplete": complete, "lastAttemptAt": now}})

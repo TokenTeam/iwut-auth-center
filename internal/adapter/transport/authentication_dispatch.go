@@ -35,7 +35,7 @@ func userEndpointAuthenticationMiddleware(service *ServiceIdentityVerifier, prof
 			if !ok {
 				return nil, transportStatus(codes.Unauthenticated, "AUTHENTICATION_FAILED", "authentication context is required")
 			}
-			if credentialManagementMethod(tr.Operation()) || sessionManagementMethod(tr.Operation()) || developerWithdrawalMethod(tr.Operation()) || developerApplicationMethod(tr.Operation()) || oauthGrantMethod(tr.Operation()) {
+			if passwordManagementMethod(tr.Operation()) || passwordLoginMethod(tr.Operation()) || credentialManagementMethod(tr.Operation()) || sessionManagementMethod(tr.Operation()) || developerWithdrawalMethod(tr.Operation()) || developerApplicationMethod(tr.Operation()) || oauthGrantMethod(tr.Operation()) {
 				return handler(ctx, request)
 			}
 			if isPlatformAdministratorOperation(tr.Operation()) || academicYearPolicyMethod(tr.Operation()) || accountManagementMethod(tr.Operation()) || isDeveloperManagementOperation(tr.Operation()) || applicationOperationsPermissionMethod(tr.Operation()) || applicationUserStorageMethod(tr.Operation()) {

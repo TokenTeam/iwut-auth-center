@@ -91,8 +91,11 @@ func provideServerConfigWithObservability(configuration config.Config, endpoints
 	return serverConfig
 }
 
-func provideApp(servers *transport.Servers, owner *ownerExitRuntime, closure *accountClosureRuntime, credentials *credentialManagementRuntime) *kratos.App {
+func provideApp(servers *transport.Servers, owner *ownerExitRuntime, closure *accountClosureRuntime, credentials *credentialManagementRuntime, password *passwordManagementRuntime) *kratos.App {
 	all := []kt.Server{servers.HTTP, servers.GRPC}
+	if password.Worker != nil {
+		all = append(all, password.Worker)
+	}
 	if credentials.Worker != nil {
 		all = append(all, credentials.Worker)
 	}

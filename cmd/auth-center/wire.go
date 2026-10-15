@@ -36,6 +36,7 @@ func wireApp(configuration config.Config) (*kratos.App, func(), error) {
 		provideObservability,
 		provideUserEndpoints,
 		providePasswordRuntime,
+		providePasswordManagement,
 		provideCredentialManagement,
 		provideServerConfigWithObservability,
 		provideApp,

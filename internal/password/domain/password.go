@@ -4,8 +4,13 @@ package domain
 import (
 	"errors"
 	"math"
+	"regexp"
 	"time"
 )
+
+var operationIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+
+func ValidOperationID(id string) bool { return operationIDPattern.MatchString(id) }
 
 var (
 	ErrInvalidInput     = errors.New("invalid password request")
@@ -18,9 +23,12 @@ var (
 	ErrSessionInvalid   = errors.New("session invalid")
 	ErrLimited          = errors.New("password rate limited")
 	ErrUnavailable      = errors.New("password unavailable")
+	ErrReset            = errors.New("password reset failed")
+	ErrDelivery         = errors.New("email delivery unavailable")
+	ErrLoginCompleted   = errors.New("password login already completed")
 )
 
-var Errors = []error{ErrInvalidInput, ErrPolicy, ErrAuthentication, ErrUnchanged, ErrConflict, ErrRequestConflict, ErrAlreadyCompleted, ErrSessionInvalid, ErrLimited, ErrUnavailable}
+var Errors = []error{ErrInvalidInput, ErrPolicy, ErrAuthentication, ErrUnchanged, ErrConflict, ErrRequestConflict, ErrAlreadyCompleted, ErrSessionInvalid, ErrLimited, ErrUnavailable, ErrReset, ErrDelivery, ErrLoginCompleted}
 
 const (
 	Algorithm            = "argon2id"
