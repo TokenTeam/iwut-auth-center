@@ -14,7 +14,7 @@ import (
 )
 
 func TestPasswordReauthUsesCurrentPasswordWithoutReapplyingNewPolicy(t *testing.T) {
-	f := attachPassword(t, newAuthenticationFixture(t))
+	f := attachPassword(t, newAuthenticationFixture(t, EnsurePasswordSchema, EnsurePasswordQuotaSchema, EnsureEmailAccountSchema))
 	service, err := u.NewReauth(f.repository, f.engine, f.quota)
 	if err != nil {
 		t.Fatal(err)
@@ -72,7 +72,7 @@ func TestPasswordReauthAccountAndCredentialBoundary(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			f := attachPassword(t, newAuthenticationFixture(t))
+			f := attachPassword(t, newAuthenticationFixture(t, EnsurePasswordSchema, EnsurePasswordQuotaSchema, EnsureEmailAccountSchema))
 			if tc.principal != nil {
 				if _, err := f.r.database.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": f.c.AuthID}, bson.M{"$set": tc.principal}, options.UpdateOne().SetBypassDocumentValidation(true)); err != nil {
 					t.Fatal(err)
@@ -92,7 +92,7 @@ func TestPasswordReauthAccountAndCredentialBoundary(t *testing.T) {
 }
 
 func TestPasswordReauthMissingTargetAndMalformedPasswordFailClosed(t *testing.T) {
-	f := attachPassword(t, newAuthenticationFixture(t))
+	f := attachPassword(t, newAuthenticationFixture(t, EnsurePasswordSchema, EnsurePasswordQuotaSchema, EnsureEmailAccountSchema))
 	request := p.ReauthRequest{AuthID: f.c.AuthID, CredentialID: uuid.NewString(), AccountRevision: 1}
 	if _, err := f.repository.ReadReauth(t.Context(), request, time.Now()); !errors.Is(err, d.ErrAuthentication) {
 		t.Fatal("unknown device accepted", err)
@@ -111,7 +111,7 @@ func TestPasswordReauthRejectsLegalNonUserAndClosedTombstones(t *testing.T) {
 		{"principalType": "USER", "accountStatus": "CLOSED"},
 		{"principalType": "SYSTEM"},
 	} {
-		f := attachPassword(t, newAuthenticationFixture(t))
+		f := attachPassword(t, newAuthenticationFixture(t, EnsurePasswordSchema, EnsurePasswordQuotaSchema, EnsureEmailAccountSchema))
 		principal["authId"] = f.c.AuthID
 		if _, err := f.r.database.Collection(PrincipalCollection).ReplaceOne(t.Context(), bson.M{"authId": f.c.AuthID}, principal, options.Replace().SetBypassDocumentValidation(true)); err != nil {
 			t.Fatal(err)

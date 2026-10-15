@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	m "go.mongodb.org/mongo-driver/v2/mongo"
 	"iwut-auth-center/internal/adapter/oauthcrypto"
 	d "iwut-auth-center/internal/oauth/domain"
 	p "iwut-auth-center/internal/oauth/port"
@@ -89,9 +90,15 @@ type oauthFixture struct {
 	verifier, challenge string
 }
 
+// The original fixture creates this collection when inserting its first handle.
+// Pre-create the same empty, unindexed collection before taking the pool snapshot.
+func ensureOAuthFixtureHandles(ctx context.Context, db *m.Database) error {
+	return db.CreateCollection(ctx, "auth_developer_handles")
+}
+
 func newOAuthFixture(t *testing.T) *oauthFixture {
 	t.Helper()
-	f := newAuthenticationFixture(t)
+	f := newAuthenticationFixture(t, EnsureOAuthSchema, EnsureAcademicYearSchema, EnsureEmailAccountSchema, ensureOAuthFixtureHandles)
 	db := f.r.database
 	ctx := t.Context()
 	if e := EnsureOAuthSchema(ctx, db); e != nil {

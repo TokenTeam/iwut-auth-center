@@ -46,12 +46,7 @@ type emailAccountFixture struct {
 
 func newEmailAccountFixture(t *testing.T) *emailAccountFixture {
 	t.Helper()
-	db := integrationDatabase(t)
-	for _, err := range []error{EnsurePrincipalSchema(t.Context(), db), EnsureAuthenticationSchema(t.Context(), db), EnsurePasswordSchema(t.Context(), db), EnsurePasswordQuotaSchema(t.Context(), db), EnsureEmailAccountSchema(t.Context(), db)} {
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
+	db := reusableIntegrationDatabase(t, EnsurePrincipalSchema, EnsureAuthenticationSchema, EnsurePasswordSchema, EnsurePasswordQuotaSchema, EnsureEmailAccountSchema)
 	a, err := NewAuthenticationRepository(db, 10000, 5)
 	if err != nil {
 		t.Fatal(err)

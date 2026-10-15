@@ -34,7 +34,7 @@ type credentialFixture struct {
 
 func newCredentialFixture(t *testing.T) *credentialFixture {
 	t.Helper()
-	f := attachPassword(t, newAuthenticationFixture(t))
+	f := attachPassword(t, newAuthenticationFixture(t, EnsurePasswordSchema, EnsurePasswordQuotaSchema, EnsureEmailAccountSchema, EnsureCredentialManagementSchema))
 	if err := EnsureCredentialManagementSchema(t.Context(), f.r.database); err != nil {
 		t.Fatal(err)
 	}

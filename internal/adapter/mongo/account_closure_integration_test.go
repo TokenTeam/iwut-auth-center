@@ -73,7 +73,7 @@ type closureFixture struct {
 
 func newClosureFixture(t *testing.T) *closureFixture {
 	t.Helper()
-	a := newAuthenticationFixture(t)
+	a := newAuthenticationFixture(t, EnsurePasswordSchema, EnsurePasswordQuotaSchema, EnsureEmailAccountSchema, EnsureAccountClosureSchema, EnsureOwnerExitSchema, EnsureCampusSchema)
 	return buildClosureFixture(t, a)
 }
 func buildClosureFixture(t *testing.T, a authenticationFixture) *closureFixture {

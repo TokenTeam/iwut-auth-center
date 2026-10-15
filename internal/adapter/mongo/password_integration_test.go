@@ -112,7 +112,7 @@ func bytes32(v byte) []byte {
 }
 
 func TestPasswordChangePreservesOnlyCurrentCredentialAndReturnsOneToken(t *testing.T) {
-	f := attachPassword(t, newAuthenticationFixture(t))
+	f := attachPassword(t, newAuthenticationFixture(t, EnsurePasswordSchema, EnsurePasswordQuotaSchema, EnsureEmailAccountSchema))
 	ctx := t.Context()
 	before := f.login(t)
 	digest, _ := f.p.TokenDigest(before.SessionToken)
@@ -181,7 +181,7 @@ func TestPasswordChangePreservesOnlyCurrentCredentialAndReturnsOneToken(t *testi
 func TestPasswordChangeFinalRecheckAndAuditRollback(t *testing.T) {
 	for _, kind := range []string{"password_changed", "account_disabled", "pending_exit", "audit_failure"} {
 		t.Run(kind, func(t *testing.T) {
-			f := attachPassword(t, newAuthenticationFixture(t))
+			f := attachPassword(t, newAuthenticationFixture(t, EnsurePasswordSchema, EnsurePasswordQuotaSchema, EnsureEmailAccountSchema))
 			before := f.login(t)
 			digest, _ := f.p.TokenDigest(before.SessionToken)
 			snapshot, err := f.repository.ReadSnapshot(t.Context(), digest, time.Now())
@@ -227,7 +227,7 @@ func TestPasswordChangeFinalRecheckAndAuditRollback(t *testing.T) {
 }
 
 func TestPasswordChangeWrongAndUnchangedDoNotMutate(t *testing.T) {
-	f := attachPassword(t, newAuthenticationFixture(t))
+	f := attachPassword(t, newAuthenticationFixture(t, EnsurePasswordSchema, EnsurePasswordQuotaSchema, EnsureEmailAccountSchema))
 	before := f.login(t)
 	for _, values := range [][2]string{{"an incorrect password", changedPassword}, {initialPassword, initialPassword}} {
 		if _, _, err := f.service.Change(t.Context(), before.SessionToken, uuid.NewString(), values[0], values[1], "127.0.0.1"); err == nil {

@@ -20,7 +20,7 @@ import (
 
 func appClosePasswordFixture(t *testing.T) (passwordFixture, *uc.Service, []byte, string, d.Challenge, []byte) {
 	t.Helper()
-	f := attachPassword(t, newAuthenticationFixture(t))
+	f := attachPassword(t, newAuthenticationFixture(t, EnsurePasswordSchema, EnsurePasswordQuotaSchema, EnsureEmailAccountSchema))
 	if err := EnsureApplicationCloseReauthSchema(t.Context(), f.r.database); err != nil {
 		t.Fatal(err)
 	}

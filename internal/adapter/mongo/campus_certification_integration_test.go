@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	m "go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"iwut-auth-center/internal/adapter/campusprotocol"
 	"iwut-auth-center/internal/adapter/deviceprotocol"
 	auth "iwut-auth-center/internal/authentication/domain"
@@ -18,7 +17,6 @@ import (
 	email "iwut-auth-center/internal/emailbinding/domain"
 	emailport "iwut-auth-center/internal/emailbinding/port"
 	rp "iwut-auth-center/internal/registration/port"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -40,21 +38,7 @@ type campusFixture struct {
 
 func newCampusFixture(t *testing.T) *campusFixture {
 	t.Helper()
-	uri := os.Getenv("MONGODB_INTEGRATION_URI")
-	if uri == "" {
-		t.Skip("MONGODB_INTEGRATION_URI is required")
-	}
-	client, err := m.Connect(options.Client().ApplyURI(uri))
-	if err != nil {
-		t.Fatal(err)
-	}
-	db := client.Database("uc031_" + uuid.NewString())
-	t.Cleanup(func() { _ = db.Drop(context.Background()); _ = client.Disconnect(context.Background()) })
-	for _, ensure := range []func(context.Context, *m.Database) error{EnsurePrincipalSchema, EnsureAuthenticationSchema, EnsureCampusSchema, EnsureEmailSchema} {
-		if err = ensure(t.Context(), db); err != nil {
-			t.Fatal(err)
-		}
-	}
+	db := reusableIntegrationDatabase(t, EnsurePrincipalSchema, EnsureAuthenticationSchema, EnsureCampusSchema, EnsureEmailSchema)
 	ar, err := NewAuthenticationRepository(db, 1000, 5)
 	if err != nil {
 		t.Fatal(err)

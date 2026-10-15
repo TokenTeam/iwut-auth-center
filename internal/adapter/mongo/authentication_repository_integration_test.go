@@ -28,15 +28,10 @@ type authenticationFixture struct {
 	c   domain.Credential
 }
 
-func newAuthenticationFixture(t *testing.T) authenticationFixture {
+func newAuthenticationFixture(t *testing.T, extraSchemas ...fixtureSchemaSetup) authenticationFixture {
 	t.Helper()
-	db := integrationDatabase(t)
-	if err := EnsurePrincipalSchema(t.Context(), db); err != nil {
-		t.Fatal(err)
-	}
-	if err := EnsureAuthenticationSchema(t.Context(), db); err != nil {
-		t.Fatal(err)
-	}
+	setups := append([]fixtureSchemaSetup{EnsurePrincipalSchema, EnsureAuthenticationSchema}, extraSchemas...)
+	db := reusableIntegrationDatabase(t, setups...)
 	r, err := NewAuthenticationRepository(db, 10000, 5)
 	if err != nil {
 		t.Fatal(err)

@@ -124,6 +124,17 @@ make test-mongo
 make run
 ```
 
+Mongo repository behavior fixtures reuse exclusive databases within the test
+process, partitioned by their ordered schema setup functions. Every successful
+lease checks collection options and index definitions, clears all documents and
+restores the exact BSON seeds (including the authentication fence). Failed cases,
+changed schemas and reset failures discard the database. Cleanup errors fail the
+test; package cleanup drops owned databases and closes clients. Schema comparison
+preserves BSON types and compound-index field order. Explicit cold-start/schema
+upgrade tests continue to use `integrationDatabase`; fault injection and password
+hashing parameters are unchanged. Run the complete Mongo/Wire race suite with
+`./scripts/test-mongo-integration.sh -race -timeout=30m`.
+
 `make run` starts HTTP on `:8000` and native gRPC on `:9000` by default.
 User HTTP routes require the user-endpoint switch below. Gateway/Traefik owns
 the public service prefix and gRPC-Web mapping.
