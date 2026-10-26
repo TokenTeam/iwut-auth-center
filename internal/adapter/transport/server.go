@@ -46,6 +46,7 @@ import (
 	adminpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/platform_administrator"
 	reviewerpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/reviewer_permission"
 	scopecatalogv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/scope_catalog"
+	scopemanagementpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/scope_management"
 	sessionmanagementpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/session_management"
 	systemprincipalv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/system_principal"
 	profilev1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/user_profile"
@@ -77,6 +78,7 @@ type ServerConfig struct {
 
 // UserEndpoints is an optional, fully validated runtime assembled before listening.
 type UserEndpoints struct {
+	ScopeManagement               *ScopeManagementService
 	PasswordManagement            *PasswordManagementService
 	PasswordLogin                 *PasswordLoginService
 	CredentialManagement          *CredentialManagementService
@@ -240,6 +242,9 @@ func newGRPCServer(
 		if endpoints.AcademicYearPolicy != nil {
 			academicyearpb.RegisterAcademicYearPolicyServiceServer(server, endpoints.AcademicYearPolicy)
 		}
+		if endpoints.ScopeManagement != nil {
+			scopemanagementpb.RegisterScopeManagementServiceServer(server, endpoints.ScopeManagement)
+		}
 		if endpoints.ApplicationOperations != nil {
 			applicationoperationspb.RegisterApplicationOperationsPermissionServiceServer(server, endpoints.ApplicationOperations)
 		}
@@ -365,6 +370,9 @@ func newHTTPServer(configuration ServerConfig, verifier *ServiceIdentityVerifier
 		if endpoints.AcademicYearPolicy != nil {
 			academicyearpb.RegisterAcademicYearPolicyServiceHTTPServer(server, endpoints.AcademicYearPolicy)
 		}
+		if endpoints.ScopeManagement != nil {
+			scopemanagementpb.RegisterScopeManagementServiceHTTPServer(server, endpoints.ScopeManagement)
+		}
 		if endpoints.ApplicationOperations != nil {
 			applicationoperationspb.RegisterApplicationOperationsPermissionServiceHTTPServer(server, endpoints.ApplicationOperations)
 		}
@@ -440,6 +448,9 @@ func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 		if _, ok := value.(*profilev1.EditOwnProfileRequest); ok {
 			limit = profiledomain.MaxMessageBytes
 		}
+		if scopeManagementRequest(value) != nil {
+			limit = scopeManagementMessageLimit
+		}
 		mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 		if err != nil || mediaType != "application/json" {
 			return kerrors.New(415, "UNSUPPORTED_CONTENT_TYPE", "application/json is required")
@@ -472,6 +483,9 @@ func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 			return err
 		}
 		if err := validateCredentialManagementJSON(data, value); err != nil {
+			return err
+		}
+		if err := validateScopeManagementJSON(data, value); err != nil {
 			return err
 		}
 		message, ok := value.(proto.Message)
@@ -510,6 +524,8 @@ func invalidHTTPInput(r *http.Request) error {
 		reason = "INVALID_PLATFORM_ADMIN_REQUEST"
 	case strings.HasPrefix(r.URL.Path, "/v1/academic-year-policy/"):
 		reason = "INVALID_ACADEMIC_YEAR_POLICY_REQUEST"
+	case strings.HasPrefix(r.URL.Path, "/v1/scope-catalog"):
+		reason = "INVALID_SCOPE_MANAGEMENT_REQUEST"
 	case strings.Contains(r.URL.Path, "/application-operation-permissions"):
 		reason = "INVALID_APPLICATION_OPERATIONS_PERMISSION_REQUEST"
 	case strings.HasPrefix(r.URL.Path, "/v1/users/me/application-grants"):
@@ -548,6 +564,9 @@ func oversizedHTTPInput(r *http.Request) error {
 		return invalidHTTPInput(r)
 	}
 	reason := "AUTHENTICATION_INPUT_TOO_LARGE"
+	if strings.HasPrefix(r.URL.Path, "/v1/scope-catalog") {
+		reason = "SCOPE_MANAGEMENT_REQUEST_TOO_LARGE"
+	}
 	if strings.HasPrefix(r.URL.Path, "/v1/users/me/campus-certification") {
 		reason = "CAMPUS_CERTIFICATION_REQUEST_TOO_LARGE"
 	}
@@ -587,9 +606,9 @@ func authHTTPErrorEncoder(w http.ResponseWriter, r *http.Request, err error) {
 	// RESOURCE_EXHAUSTED covers both rate limiting (429) and payload limits
 	// (413); the UC's stable reason determines which HTTP status applies.
 	switch converted.Reason {
-	case "PASSWORD_REQUEST_TOO_LARGE", "CREDENTIAL_MANAGEMENT_REQUEST_TOO_LARGE", "DEVELOPER_WITHDRAWAL_REQUEST_TOO_LARGE", "DEVELOPER_APPLICATION_REQUEST_TOO_LARGE", "EMAIL_LOGIN_REQUEST_TOO_LARGE", "EMAIL_REQUEST_TOO_LARGE", "REGISTRATION_INPUT_TOO_LARGE", "AUTHENTICATION_INPUT_TOO_LARGE", profiledomain.ErrLimit.Error():
+	case "SCOPE_MANAGEMENT_REQUEST_TOO_LARGE", "PASSWORD_REQUEST_TOO_LARGE", "CREDENTIAL_MANAGEMENT_REQUEST_TOO_LARGE", "DEVELOPER_WITHDRAWAL_REQUEST_TOO_LARGE", "DEVELOPER_APPLICATION_REQUEST_TOO_LARGE", "EMAIL_LOGIN_REQUEST_TOO_LARGE", "EMAIL_REQUEST_TOO_LARGE", "REGISTRATION_INPUT_TOO_LARGE", "AUTHENTICATION_INPUT_TOO_LARGE", profiledomain.ErrLimit.Error():
 		converted.Code = http.StatusRequestEntityTooLarge
-	case "DEVELOPER_RESTORE_BLOCKED", "DEVELOPER_REVISION_EXHAUSTED", "ACCOUNT_REVISION_EXHAUSTED", "PLATFORM_ADMIN_GRANT_BLOCKED", "APPLICATION_OPERATIONS_PERMISSION_GRANT_BLOCKED", "LAST_PLATFORM_ADMIN_REQUIRED", "PERMISSION_REVISION_EXHAUSTED", "ACADEMIC_YEAR_ROLLOVER_NOT_FUTURE", "ACADEMIC_YEAR_POLICY_REVISION_EXHAUSTED", "ACADEMIC_YEAR_RANGE_EXHAUSTED":
+	case "SCOPE_CHANGE_BLOCKED", "SCOPE_CATALOG_REVISION_EXHAUSTED", "DEVELOPER_RESTORE_BLOCKED", "DEVELOPER_REVISION_EXHAUSTED", "ACCOUNT_REVISION_EXHAUSTED", "PLATFORM_ADMIN_GRANT_BLOCKED", "APPLICATION_OPERATIONS_PERMISSION_GRANT_BLOCKED", "LAST_PLATFORM_ADMIN_REQUIRED", "PERMISSION_REVISION_EXHAUSTED", "ACADEMIC_YEAR_ROLLOVER_NOT_FUTURE", "ACADEMIC_YEAR_POLICY_REVISION_EXHAUSTED", "ACADEMIC_YEAR_RANGE_EXHAUSTED":
 		converted.Code = http.StatusConflict
 	case "DEVELOPER_HANDLE_CHANGE_NOT_ALLOWED", "DEVELOPER_EMAIL_REQUIRED", "EMAIL_FLOW_MISMATCH", profiledomain.ErrExhausted.Error():
 		converted.Code = http.StatusConflict

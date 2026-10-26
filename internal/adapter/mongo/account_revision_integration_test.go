@@ -101,7 +101,7 @@ func TestAccountRevisionOAuthCredentialsNeverRevive(t *testing.T) {
 				t.Fatal("code revived", err)
 			}
 			f.session = f.auth.login(t).SessionToken
-			if _, err = f.service.Confirm(t.Context(), pending.InteractionID, pending.CSRF, f.session, scopes, true); err == nil {
+			if _, err = f.service.Confirm(t.Context(), pending.InteractionID, pending.CSRF, pending.PresentationID, f.session, scopes, true); err == nil {
 				t.Fatal("old consent revived")
 			}
 			freshCode := f.code(t, scopes, client)

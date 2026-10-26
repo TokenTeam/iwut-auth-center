@@ -38,7 +38,7 @@ func userEndpointAuthenticationMiddleware(service *ServiceIdentityVerifier, prof
 			if passwordManagementMethod(tr.Operation()) || passwordLoginMethod(tr.Operation()) || credentialManagementMethod(tr.Operation()) || sessionManagementMethod(tr.Operation()) || developerWithdrawalMethod(tr.Operation()) || developerApplicationMethod(tr.Operation()) || oauthGrantMethod(tr.Operation()) {
 				return handler(ctx, request)
 			}
-			if isPlatformAdministratorOperation(tr.Operation()) || academicYearPolicyMethod(tr.Operation()) || accountManagementMethod(tr.Operation()) || isDeveloperManagementOperation(tr.Operation()) || applicationOperationsPermissionMethod(tr.Operation()) || applicationUserStorageMethod(tr.Operation()) {
+			if isPlatformAdministratorOperation(tr.Operation()) || scopeManagementMethod(tr.Operation()) || academicYearPolicyMethod(tr.Operation()) || accountManagementMethod(tr.Operation()) || isDeveloperManagementOperation(tr.Operation()) || applicationOperationsPermissionMethod(tr.Operation()) || applicationUserStorageMethod(tr.Operation()) {
 				if profile == nil {
 					return nil, accountError(account.ErrIdentity)
 				}

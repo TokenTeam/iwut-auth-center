@@ -91,6 +91,7 @@ func TestOAuthE2E_ProductionWireActualAppProvider(t *testing.T) {
 	clockFile := writeJSON("clock.json", map[string]any{"observedAt": time.Now().UTC(), "offsetMillis": 0})
 	cfg := config.OAuth{ClockObservationFile: clockFile, ResourceScopesReady: true, Issuer: "https://auth.example.test/oidc", PortalOrigin: "https://auth.example.test", PortalLoginURL: "https://auth.example.test/login", SectorSuffix: "sectors.example.test", CatalogFile: writeJSON("scopes.json", []d.Scope{{Name: "openid", Label: "Login", Description: "Identify account", Kind: "PROTOCOL", Enabled: true}, {Name: "email", Label: "Email", Description: "Verified email", Kind: "PROTOCOL", Enabled: true}, {Name: "campus.whut", Label: "Campus membership", Description: "Read permanent WHUT campus membership, not student status", Kind: "USERINFO_CAMPUS", Enabled: true}, {Name: "offline_access", Label: "Background", Description: "Refresh access", Kind: "PROTOCOL", Enabled: true}, {Name: "items.read", Label: "Items", Description: "Read items", Kind: "RESOURCE", Audience: "resource-service", Enabled: true}, {Name: "profile.basic.name", Label: "Name", Description: "Read user-provided name", Kind: "USERINFO_PROFILE", ProfileField: "basic.name", Enabled: true}}), AppTarget: appGRPC, AppPlaintextLoopback: true, ServiceKeyID: "auth-service", ServiceKeyFile: keyFile("service.pem", serviceKey), OIDCKeyID: "oidc", OIDCKeyFile: keyFile("oidc.pem", oidcKey), DelegationKeyID: "delegation", DelegationKeyFile: keyFile("delegation.pem", delegationKey), RoutePolicyFile: policy, PublicEnabled: true, PortalReady: true, GatewayReady: true, RefreshEnabled: true}
 	env["AUTH_CENTER_OAUTH_CONFIG_FILE"] = writeJSON("oauth.json", cfg)
+	env["AUTH_SCOPE_MANAGEMENT_ENABLED"] = "true"
 	enableEmailRegistrationFixture(t, env)
 	configuration, e := config.Load(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
 	if e != nil {
@@ -133,14 +134,27 @@ func TestOAuthE2E_ProductionWireActualAppProvider(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	issue := func(u *authpb.UserRegistrationResult) string {
+	issueAudience := func(u *authpb.UserRegistrationResult, audience string) string {
 		t.Helper()
-		r, e := ip.NewUserIdentityServiceClient(conn).IssueUserIdentityFromSession(metadata.NewOutgoingContext(ctx, metadata.Pairs("authorization", "Bearer "+gatewayToken, "x-iwut-session", u.Session.SessionToken)), &ip.IssueUserIdentityFromSessionRequest{Audience: "iwut-app-center"})
+		r, e := ip.NewUserIdentityServiceClient(conn).IssueUserIdentityFromSession(metadata.NewOutgoingContext(ctx, metadata.Pairs("authorization", "Bearer "+gatewayToken, "x-iwut-session", u.Session.SessionToken)), &ip.IssueUserIdentityFromSessionRequest{Audience: audience})
 		if e != nil {
 			t.Fatal(e)
 		}
 		return r.IdentityJws
 	}
+	issue := func(u *authpb.UserRegistrationResult) string { return issueAudience(u, "iwut-app-center") }
+	adminAuth, e := ma.NewAuthenticationRepository(db, configuration.UserEndpoints.Authentication.MaxPending, configuration.UserEndpoints.Authentication.MaxFailures)
+	if e != nil {
+		t.Fatal(e)
+	}
+	adminRepository, e := ma.NewPlatformAdministratorRepository(adminAuth, true)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = adminRepository.Bootstrap(ctx, user.AuthId); e != nil {
+		t.Fatal("bootstrap scope administrator", e)
+	}
+	runScopeManagementWireFlow(t, configuration, db, conn, issueAudience(user, "iwut-auth-center"), issueAudience(reviewer, "iwut-auth-center"))
 	appRegistry, _ := json.Marshal(map[string]any{"iwut-auth-center": map[string]any{"status": "ACTIVE", "keys": map[string]any{"auth-service": map[string]string{"publicKeyPemB64": base64.StdEncoding.EncodeToString(servicePEM)}}, "permissions": []string{"app.oauth.client.read", "app.oauth.client.verify", "app.oauth.runtime.resolve", "app.oauth.context.resolve", "app.oauth.redirects.read"}}})
 	_, appURL, _ := startActualApp(t, uri, publicFile, authGRPC, serviceKey, map[string]string{"APP_CENTER_GRPC_ADDR": appGRPC, "APP_CENTER_SERVICE_CALLERS_B64": base64.StdEncoding.EncodeToString(appRegistry)})
 	appCall := func(method, path, token string, body any) map[string]any {
@@ -184,7 +198,22 @@ func TestOAuthE2E_ProductionWireActualAppProvider(t *testing.T) {
 	versionID := version["versionId"].(string)
 	vr := appCall("POST", prefix+"/versions/"+versionID+"/reviews", ownerToken, map[string]any{"expectedRevision": "1"})
 	vrID := vr["review"].(map[string]any)["reviewId"].(string)
-	appCall("POST", prefix+"/versions/"+versionID+"/reviews/"+vrID+"/decision", reviewToken, map[string]any{"outcome": "APPROVE", "expectedPolicyVersion": "app-version-review-v2", "confirmedCheckIds": []string{"content-policy-reviewed", "launch-url-content-reviewed", "requested-access-reviewed", "oauth-redirects-reviewed"}})
+	// Read the real current policy instead of pinning an already-retired policy
+	// version in the fixture. New, unknown checks require updating this test.
+	reviewPath := prefix + "/versions/" + versionID + "/reviews/" + vrID
+	detail := appCall("GET", reviewPath, reviewToken, nil)
+	policyContext := detail["currentPolicy"].(map[string]any)
+	confirmedChecks := []string{"content-policy-reviewed", "launch-url-content-reviewed", "requested-access-reviewed", "oauth-redirects-reviewed"}
+	actualChecks := policyContext["requiredCheckIds"].([]any)
+	if len(actualChecks) != len(confirmedChecks) {
+		t.Fatal("unknown current review checks", actualChecks)
+	}
+	for i, check := range confirmedChecks {
+		if actualChecks[i] != check {
+			t.Fatal("unexpected review check definition", actualChecks)
+		}
+	}
+	appCall("POST", reviewPath+"/decision", reviewToken, map[string]any{"outcome": "APPROVE", "expectedPolicyVersion": policyContext["version"], "confirmedCheckIds": confirmedChecks})
 	registration := appCall("POST", prefix+"/oauth-registrations/OAUTH_CHANNEL_TEST/clients", ownerToken, map[string]any{"type": "OAUTH_CLIENT_TYPE_PUBLIC_PKCE"})
 	clientID := registration["registration"].(map[string]any)["publicClient"].(map[string]any)["clientId"].(string)
 	secretRegistration := appCall("POST", prefix+"/oauth-registrations/OAUTH_CHANNEL_TEST/clients", ownerToken, map[string]any{"type": "OAUTH_CLIENT_TYPE_CONFIDENTIAL_SECRET", "expectedRegistrationRevision": "1"})
@@ -296,7 +325,7 @@ func TestOAuthE2E_ProductionWireActualAppProvider(t *testing.T) {
 			return string(m[1])
 		}
 		id, csrf := field("interaction"), field("csrf")
-		v := url.Values{"interaction": {id}, "csrf": {csrf}, "decision": {"approve"}, "scope": {"openid", "email", "campus.whut", "offline_access", "items.read", "profile.basic.name"}}
+		v := url.Values{"interaction": {id}, "csrf": {csrf}, "presentation": {field("presentation")}, "decision": {"approve"}, "scope": {"openid", "email", "campus.whut", "offline_access", "items.read", "profile.basic.name"}}
 		status, h, b := request("POST", "/portal/interactions/"+id+"/confirm", v.Encode(), "application/x-www-form-urlencoded", http.Header{"Cookie": []string{cookie}, "Origin": []string{cfg.PortalOrigin}})
 		if status != 303 {
 			t.Fatal("confirm", status, string(b))

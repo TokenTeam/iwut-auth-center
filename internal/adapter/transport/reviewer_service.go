@@ -15,6 +15,7 @@ import (
 	developer "iwut-auth-center/internal/developer/domain"
 	"iwut-auth-center/internal/reviewer/domain"
 	"iwut-auth-center/internal/reviewer/usecase"
+	scopemanagement "iwut-auth-center/internal/scopemanagement/domain"
 	"slices"
 )
 
@@ -35,7 +36,7 @@ func UserCapabilityIdentityMiddleware(v *UserIdentityVerifier) middleware.Middle
 			if accountManagementMethod(tr.Operation()) {
 				return accountManagementIdentity(v)(next)(ctx, req)
 			}
-			if !isReviewerOperation(tr.Operation()) && !isPlatformAdministratorOperation(tr.Operation()) && !academicYearPolicyMethod(tr.Operation()) && !isDeveloperManagementOperation(tr.Operation()) && !applicationOperationsPermissionMethod(tr.Operation()) {
+			if !isReviewerOperation(tr.Operation()) && !isPlatformAdministratorOperation(tr.Operation()) && !academicYearPolicyMethod(tr.Operation()) && !scopeManagementMethod(tr.Operation()) && !isDeveloperManagementOperation(tr.Operation()) && !applicationOperationsPermissionMethod(tr.Operation()) {
 				return UserProfileIdentityMiddleware(v)(next)(ctx, req)
 			}
 			values := tr.RequestHeader().Values(UserIdentityHeader)
@@ -51,13 +52,16 @@ func UserCapabilityIdentityMiddleware(v *UserIdentityVerifier) middleware.Middle
 				return nil, transportStatus(codes.Unauthenticated, "INVALID_USER_IDENTITY", "invalid user identity")
 			}
 			required := domain.Manager
-			if isPlatformAdministratorOperation(tr.Operation()) || academicYearPolicyMethod(tr.Operation()) || applicationOperationsPermissionMethod(tr.Operation()) {
+			if isPlatformAdministratorOperation(tr.Operation()) || academicYearPolicyMethod(tr.Operation()) || scopeManagementMethod(tr.Operation()) || applicationOperationsPermissionMethod(tr.Operation()) {
 				required = admin.Manager
 			}
 			if isDeveloperManagementOperation(tr.Operation()) {
 				required = developer.DeveloperManager
 			}
 			if !slices.Contains(identity.Permissions, required) {
+				if scopeManagementMethod(tr.Operation()) {
+					return nil, scopeManagementError(scopemanagement.ErrForbidden)
+				}
 				if isDeveloperManagementOperation(tr.Operation()) {
 					return nil, developerManagementError(developer.ErrManagementForbidden)
 				}
@@ -72,7 +76,14 @@ func UserCapabilityIdentityMiddleware(v *UserIdentityVerifier) middleware.Middle
 				}
 				return nil, reviewerError(domain.ErrForbidden)
 			}
-			if msg, ok := req.(proto.Message); !ok || proto.Size(msg) > 16*1024 {
+			limit := 16 * 1024
+			if scopeManagementMethod(tr.Operation()) {
+				limit = scopeManagementMessageLimit
+			}
+			if msg, ok := req.(proto.Message); !ok || proto.Size(msg) > limit {
+				if scopeManagementMethod(tr.Operation()) {
+					return nil, transportStatus(codes.ResourceExhausted, "SCOPE_MANAGEMENT_REQUEST_TOO_LARGE", "request is too large")
+				}
 				return nil, transportStatus(codes.ResourceExhausted, "AUTHENTICATION_INPUT_TOO_LARGE", "request is too large")
 			}
 			return next(context.WithValue(account.WithIdentity(ctx, identity.AuthID, identity.AccountRevision), userIdentityContextKey{}, identity.AuthID), req)

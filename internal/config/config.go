@@ -42,6 +42,7 @@ var ErrInvalidConfiguration = errors.New("invalid auth center configuration")
 type LookupEnv func(key string) (value string, found bool)
 
 type Config struct {
+	ScopeManagementEnabled          bool
 	PasswordManagement              bool
 	PasswordLogin                   bool
 	CredentialManagement            *CredentialManagement
@@ -294,6 +295,10 @@ func Load(lookup LookupEnv) (Config, error) {
 	if oauth != nil && userEndpoints == nil {
 		return Config{}, ErrInvalidConfiguration
 	}
+	scopeManagementEnabled, err := loadScopeManagement(lookup, userEndpoints, issuance, oauth)
+	if err != nil {
+		return Config{}, err
+	}
 	applicationUserStorage, err := loadApplicationUserStorage(lookup, oauth, userEndpoints)
 	if err != nil {
 		return Config{}, err
@@ -303,6 +308,7 @@ func Load(lookup LookupEnv) (Config, error) {
 		return Config{}, err
 	}
 	return Config{
+		ScopeManagementEnabled:          scopeManagementEnabled,
 		CredentialManagement:            credentialManagement,
 		ApplicationOperationsPermission: applicationOperationsPermission,
 		ApplicationClosure:              applicationClosure,

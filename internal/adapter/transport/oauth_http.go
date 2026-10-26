@@ -416,7 +416,7 @@ func (h *OAuthHTTP) confirm(w http.ResponseWriter, r *http.Request, id string) {
 		oauthJSON(w, 429, map[string]string{"error": "slow_down"})
 		return
 	}
-	target, e := h.Service.Confirm(r.Context(), v.Get("interaction"), v.Get("csrf"), token, scopes, v.Get("decision") == "approve")
+	target, e := h.Service.Confirm(r.Context(), v.Get("interaction"), v.Get("csrf"), v.Get("presentation"), token, scopes, v.Get("decision") == "approve")
 	if e != nil {
 		oauthError(w, e)
 		return
@@ -449,14 +449,14 @@ func oauthConsentForm(r *http.Request) (url.Values, error) {
 			}
 			continue
 		}
-		if len(vs) != 1 || k != "interaction" && k != "csrf" && k != "decision" {
+		if len(vs) != 1 || k != "interaction" && k != "csrf" && k != "presentation" && k != "decision" {
 			return nil, d.ErrRequest
 		}
 	}
 	return v, nil
 }
 
-var oauthConsentTemplate = template.Must(template.New("consent").Parse(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>应用授权</title><body><main>{{if .View.LoginRequired}}<h1>登录平台账号</h1><p>登录完成后返回本页面继续授权，不会自动创建账号。</p><a href="{{.Login}}">前往官方登录页</a>{{else}}<h1>授权 {{.View.DisplayName}}</h1><p>开发者：{{.View.DeveloperHandle}} · 渠道：{{.View.Channel}}</p><p>此渠道的客户端共享授权。退出平台不会退出第三方应用。</p><form method="post" action="{{.Action}}"><input type="hidden" name="interaction" value="{{.View.InteractionID}}"><input type="hidden" name="csrf" value="{{.View.CSRF}}">{{range .Scopes}}<p><label>{{if .Required}}<input type="hidden" name="scope" value="{{.Name}}"><input type="checkbox" checked disabled>{{else}}<input type="checkbox" name="scope" value="{{.Name}}" {{if .Granted}}checked{{end}}>{{end}} {{.Label}}{{if .Required}}（必需）{{end}}{{if .Granted}}（已授权）{{end}}</label><br>{{.Description}}</p>{{end}}<button name="decision" value="approve">同意</button><button name="decision" value="deny">拒绝</button></form>{{end}}</main></body></html>`))
+var oauthConsentTemplate = template.Must(template.New("consent").Parse(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>应用授权</title><body><main>{{if .View.LoginRequired}}<h1>登录平台账号</h1><p>登录完成后返回本页面继续授权，不会自动创建账号。</p><a href="{{.Login}}">前往官方登录页</a>{{else}}<h1>授权 {{.View.DisplayName}}</h1><p>开发者：{{.View.DeveloperHandle}} · 渠道：{{.View.Channel}}</p><p>此渠道的客户端共享授权。退出平台不会退出第三方应用。</p><form method="post" action="{{.Action}}"><input type="hidden" name="interaction" value="{{.View.InteractionID}}"><input type="hidden" name="csrf" value="{{.View.CSRF}}"><input type="hidden" name="presentation" value="{{.View.PresentationID}}">{{range .Scopes}}<p><label>{{if .Required}}<input type="hidden" name="scope" value="{{.Name}}"><input type="checkbox" checked disabled>{{else}}<input type="checkbox" name="scope" value="{{.Name}}" {{if .Granted}}checked{{end}}>{{end}} {{.Label}}{{if .Required}}（必需）{{end}}{{if .Granted}}（已授权）{{end}}</label><br>{{.Description}}</p>{{end}}<button name="decision" value="approve">同意</button><button name="decision" value="deny">拒绝</button></form>{{end}}</main></body></html>`))
 
 func (h *OAuthHTTP) render(w http.ResponseWriter, r *http.Request, v d.AuthorizationView) {
 	if v.Redirect != "" {

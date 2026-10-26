@@ -99,9 +99,10 @@ design in [`TokenTeam/iwut-docs`](https://github.com/TokenTeam/iwut-docs/tree/ma
 the current Developer status projection and Auth-owned SYSTEM principals to
 authorized internal services through native gRPC.
 
-The OAuth scope catalog is persisted and seeded from an explicit deployment
-manifest when OAuth is enabled; the hard-coded catalog is only a development
-fallback. Developer and SYSTEM principals are read from Auth-owned MongoDB
+The OAuth scope catalog is persisted and initially provisioned from an explicit
+deployment manifest when OAuth is enabled. Subsequent startup validates delivered
+provider mappings but never overwrites live enablement or display text. The
+hard-coded catalog is only a development fallback. Developer and SYSTEM principals are read from Auth-owned MongoDB
 collection `auth_principals`.
 Internal business RPCs use caller-signed service JWS and a fixed permission
 allowlist. The optional UC005–009 user endpoints add profile editing, app-managed
@@ -665,6 +666,46 @@ see `configs/oauth.example.json` and
 The manifest selects the persistent Mongo scope catalog, real App019 provider,
 independent OIDC/delegation/service keys, official portal login URL and route policy.
 Without it, existing endpoints retain their previous configuration.
+
+### Scope lifecycle administration (UC036)
+
+`AUTH_SCOPE_MANAGEMENT_ENABLED=true` enables three administrator-only HTTP/native
+gRPC methods: `GetManagedScopeCatalog`, `ChangeScopeCatalog`, and
+`GetScopeCatalogOperation`, under `auth_center.v1.scope_management.ScopeManagementService`.
+HTTP paths are POST `/v1/scope-catalog:get`, `/v1/scope-catalog:change`, and
+`/v1/scope-catalog/operations:get`. The switch defaults off and requires user
+identity issuance and the persistent OAuth manifest. Requests use an Auth-audience
+USER JWS and recheck current complete platform administrator membership in the
+shared Auth transaction. No new permission, publishing key or two-person approval
+system is introduced. Gateway routing and administration UI are separate deliveries.
+
+Read the full catalog and submit its `revision` and `digest`, a fresh UUID v4
+`operationId`, a reason, and typed REGISTER/CORRECT_TEXT/SET_ENABLED changes.
+Registration is limited to already delivered providers in the manifest and
+requires an immutable permission contract and implementation evidence reference.
+Names cannot be deleted/reused or acquire new meanings. A new meaning needs a new
+name, App declaration/review and user consent; it never widens old credentials.
+Catalog capacity remains 32 including disabled definitions.
+
+Catalog changes, immutable audit, contracts and operation receipts commit
+atomically. Repeating an identical operation ID returns its original receipt;
+changed contents or actor conflict. Stale revisions conflict even for no-ops.
+After a timeout, query the original ID; NOT_FOUND is not proof an in-flight commit
+cannot finish. The first version adds no TTL/automatic deletion for these records.
+
+The manifest is a delivered-provider allowlist, not a restart-time settings
+override. Only a never-initialized database receives a system baseline, audit and
+durable provisioning marker. Missing/corrupt initialized state fails closed; no
+legacy migration or repair is performed. Route/resource/storage constraints are
+checked before first provisioning and before each change. Remove all older
+startup writers and use consistent provider manifests across replicas before
+enabling management. A current binary restart preserves administrator-modified
+labels and enabled values; new manifest entries are not automatically registered.
+
+Consent pages bind a per-view presentation identifier to the definitions actually
+requested. Confirmation submits that identifier; relevant wording changes or an
+older tab require re-display, while unrelated catalog changes do not invalidate
+consent. Existing grants are not rewritten. UC035 host RPC remains a separate draft.
 
 OAuth scope entries use `Kind=PROTOCOL`, `RESOURCE`, or `USERINFO_PROFILE`.
 A `USERINFO_PROFILE` entry must have an empty `Audience`, set `ProfileField` to an

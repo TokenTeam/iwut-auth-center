@@ -30,11 +30,16 @@ func TestOAuthStrictFormsAndClientCarriers(t *testing.T) {
 			t.Fatal("invalid bearer")
 		}
 	}
-	r = httptest.NewRequest("POST", "/confirm", strings.NewReader("interaction=x&csrf=y&decision=approve&scope=openid&scope=email"))
+	r = httptest.NewRequest("POST", "/confirm", strings.NewReader("interaction=x&csrf=y&presentation=z&decision=approve&scope=openid&scope=email"))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	v, e := oauthConsentForm(r)
-	if e != nil || len(v["scope"]) != 2 {
+	if e != nil || len(v["scope"]) != 2 || v.Get("presentation") != "z" {
 		t.Fatal(e)
+	}
+	r = httptest.NewRequest("POST", "/confirm", strings.NewReader("interaction=x&csrf=y&presentation=a&presentation=b&decision=approve"))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if _, err := oauthConsentForm(r); err == nil {
+		t.Fatal("duplicate presentation accepted")
 	}
 }
 

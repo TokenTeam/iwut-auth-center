@@ -26,7 +26,7 @@ func TestApplicationUserStorageMongoCASAndUserClear(t *testing.T) {
 		d.Scope{Name: "storage.read", Label: "Read app data", Description: "Read application-specific user data", Kind: "RESOURCE", Audience: "iwut-auth-center", Enabled: true},
 		d.Scope{Name: "storage.write", Label: "Write app data", Description: "Write application-specific user data", Kind: "RESOURCE", Audience: "iwut-auth-center", Enabled: true},
 	)
-	if err := fixture.repo.SeedCatalog(ctx, fixture.seed); err != nil {
+	if err := updateOAuthFixtureCatalog(t, fixture.repo, fixture.seed); err != nil {
 		t.Fatal(err)
 	}
 	tokens := fixture.tokens(t, "openid", "storage.read", "storage.write")

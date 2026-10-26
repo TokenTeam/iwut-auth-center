@@ -26,6 +26,9 @@ func NewProfileStrictCodec(limits ...int) encoding.Codec {
 	return profileStrictCodec{encoding.GetCodec("proto"), n}
 }
 func (c profileStrictCodec) Unmarshal(data []byte, v any) error {
+	if !scopeManagementWire(data, v) {
+		return markScopeManagementWireRejected(v, len(data) > scopeManagementMessageLimit)
+	}
 	if !passwordWire(data, v) {
 		return markAuthenticationWireRejected(v, len(data) > 16384)
 	}

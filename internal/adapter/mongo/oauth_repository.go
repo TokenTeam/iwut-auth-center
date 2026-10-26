@@ -97,6 +97,9 @@ func oauthGet[T any](tx *oauthTx, kind string, query bson.M) (T, error) {
 		if kind == "interactions" && data.Lookup("authid").Type == bson.TypeString && data.Lookup("authid").StringValue() != "" {
 			required["accountrevision"] = bson.TypeInt64
 		}
+		if kind == "interactions" && !validOAuthPresentationBSON(data.Lookup("presentation")) {
+			return doc.Data, d.ErrUnavailable
+		}
 		if !identityFields(data, required) || bson.Unmarshal(raw, &doc) != nil {
 			return doc.Data, d.ErrUnavailable
 		}
@@ -208,7 +211,11 @@ func (tx *oauthTx) Profile(id string) (d.Profile, error) {
 	return out, nil
 }
 func (tx *oauthTx) Catalog() (d.Catalog, error) {
-	return oauthGet[d.Catalog](tx, "catalog", bson.M{"_id": "current"})
+	catalog, err := readManagedCatalog(tx.ctx, tx.r.db)
+	if err != nil {
+		return d.Catalog{}, d.ErrUnavailable
+	}
+	return catalog, nil
 }
 func (tx *oauthTx) FindGrant(auth, app, channel string) (d.Grant, error) {
 	return oauthGet[d.Grant](tx, "grants", bson.M{"authId": auth, "applicationId": app, "channel": channel})
@@ -259,6 +266,9 @@ func (tx *oauthTx) SaveSubject(v d.Subject) error {
 	return oauthSave(tx, "subjects", oauthDocument[d.Subject]{ID: v.AuthID + ":" + v.SectorID, Data: v})
 }
 func (tx *oauthTx) Audit(v d.Audit) error {
+	if !validOAuthConsentAudit(v) {
+		return d.ErrUnavailable
+	}
 	_, err := tx.r.db.Collection("auth_oauth_audit").InsertOne(tx.ctx, oauthDocument[d.Audit]{ID: v.ID, Data: v})
 	if err != nil {
 		return d.ErrUnavailable
@@ -289,7 +299,7 @@ func EnsureOAuthSchema(ctx context.Context, db *m.Database) error {
 			return err
 		}
 	}
-	return nil
+	return EnsureScopeManagementSchema(ctx, db)
 }
 func (tx *oauthTx) Interaction(id string) (d.Interaction, error) {
 	return oauthGet[d.Interaction](tx, "interactions", bson.M{"_id": id})

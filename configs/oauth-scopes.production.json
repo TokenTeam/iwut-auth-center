@@ -1,7 +1,7 @@
 [
   {"Name":"openid","Label":"登录应用","Description":"允许应用识别你的平台账号；向应用提供独立的用户标识。","Kind":"PROTOCOL","Audience":"","Enabled":true},
-  {"Name":"email","Label":"已验证邮箱","Description":"允许应用读取你当前绑定并验证的邮箱地址。","Kind":"PROTOCOL","Audience":"","Enabled":true},
-  {"Name":"campus.whut","Label":"校园成员认证","Description":"允许应用读取你的永久武理校园成员认证；不提供校园邮箱，也不证明在校学生身份。","Kind":"USERINFO_CAMPUS","Audience":"","Enabled":true},
+  {"Name":"email","Label":"已验证邮箱","Description":"允许应用读取你当前已验证的登录邮箱地址。","Kind":"PROTOCOL","Audience":"","Enabled":true},
+  {"Name":"campus.whut","Label":"校园成员认证","Description":"允许应用读取基于当前已绑定学校邮箱的武理校园成员认证；解绑最后一个学校邮箱后失去认证，不提供校园邮箱，也不证明在校学生身份。","Kind":"USERINFO_CAMPUS","Audience":"","Enabled":true},
   {"Name":"offline_access","Label":"后台访问","Description":"允许应用在你退出平台后续签访问凭据；你可以随时收回授权。","Kind":"PROTOCOL","Audience":"","Enabled":true},
   {"Name":"storage.read","Label":"读取应用专属数据","Description":"允许应用读取它为你保存的偏好和状态；这不包含你的用户资料。","Kind":"RESOURCE","Audience":"iwut-auth-center","Enabled":true},
   {"Name":"storage.write","Label":"写入应用专属数据","Description":"允许应用更新或删除它为你保存的偏好和状态；不允许读取其他值。","Kind":"RESOURCE","Audience":"iwut-auth-center","Enabled":true},

@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"iwut-auth-center/internal/adapter/catalog"
+	"iwut-auth-center/internal/adapter/deviceprotocol"
 	ma "iwut-auth-center/internal/adapter/mongo"
 	"iwut-auth-center/internal/adapter/oauthclient"
 	"iwut-auth-center/internal/adapter/oauthclock"
@@ -29,13 +30,15 @@ import (
 	"iwut-auth-center/internal/oauth/usecase"
 	profiledomain "iwut-auth-center/internal/profile/domain"
 	sp "iwut-auth-center/internal/scope/port"
+	scopemanagementusecase "iwut-auth-center/internal/scopemanagement/usecase"
 )
 
 type oauthRuntime struct {
-	Grant      *transport.OAuthGrantService
-	Delegation *transport.OAuthDelegationService
-	HTTP       *transport.OAuthHTTP
-	Catalog    sp.Catalog
+	Grant           *transport.OAuthGrantService
+	Delegation      *transport.OAuthDelegationService
+	HTTP            *transport.OAuthHTTP
+	Catalog         sp.Catalog
+	ScopeManagement *transport.ScopeManagementService
 }
 
 func provideOAuth(configuration config.Config, db *m.Database, endpoints *transport.UserEndpoints) (*oauthRuntime, func(), error) {
@@ -50,6 +53,9 @@ func newOAuthRuntime(configuration config.Config, db *m.Database, endpoints *tra
 	cleanup := func() {}
 	c := configuration.OAuth
 	if c == nil {
+		if configuration.ScopeManagementEnabled {
+			return nil, cleanup, fmt.Errorf("scope management requires persistent OAuth configuration")
+		}
 		cat, err := catalog.NewHardcodedCatalog()
 		return &oauthRuntime{Catalog: cat}, cleanup, err
 	}
@@ -183,18 +189,6 @@ func newOAuthRuntime(configuration config.Config, db *m.Database, endpoints *tra
 	if bindUserInfoProfileScopes(seed, profileDefinitions) != nil {
 		return fail()
 	}
-	if configuration.ApplicationUserStorage != nil && validateApplicationUserStorageScopes(seed) != nil {
-		return fail()
-	}
-	for index := range seed {
-		scope := &seed[index]
-		if scope.Kind == "RESOURCE" && scope.Enabled && !c.ResourceScopesReady {
-			return fail()
-		}
-	}
-	if repo.SeedCatalog(ctx, seed) != nil {
-		return fail()
-	}
 	app := oauthclient.New(conn, oauthcrypto.Key{ID: c.ServiceKeyID, Private: service})
 	uc, e := usecase.New(repo, app, crypto, usecase.Config{Issuer: c.Issuer, SectorSuffix: c.SectorSuffix, RefreshEnabled: c.RefreshEnabled, SigningHealthy: func() bool { return oauthclock.Healthy(c.ClockObservationFile) }})
 	if e != nil {
@@ -208,23 +202,59 @@ func newOAuthRuntime(configuration config.Config, db *m.Database, endpoints *tra
 	if e != nil {
 		return fail()
 	}
-	if len(delegationService.Routes) > 0 && (c.ClockObservationFile == "" || !c.ResourceScopesReady) {
+	validate := func(scopes []d.Scope) error {
+		return validateOAuthCatalogDeployment(scopes, c.ResourceScopesReady, c.ClockObservationFile != "", configuration.ApplicationUserStorage != nil, delegationService.Routes)
+	}
+	// Validate every provider and route before first provisioning. Later restarts
+	// must never copy manifest enablement or display text over the live catalog.
+	if ma.EnsureScopeManagementSchema(ctx, db) != nil || repo.SeedCatalogValidated(ctx, seed, validate) != nil {
 		return fail()
 	}
-	for _, route := range delegationService.Routes {
+	live, e := repo.ReadCatalog(ctx)
+	if e != nil || validate(live.Scopes) != nil {
+		return fail()
+	}
+	var management *transport.ScopeManagementService
+	if configuration.ScopeManagementEnabled {
+		managementRepository, err := ma.NewScopeManagementRepository(repository, seed, validate)
+		if err != nil {
+			return fail()
+		}
+		limiter, err := deviceprotocol.NewLimiter(deviceprotocol.RateLimits{BeginGlobal: 1000000, CompleteGlobal: 1000000, BeginSource: 60, CompleteLocator: 10, MaxBuckets: 4096})
+		if err != nil {
+			return fail()
+		}
+		management = transport.NewScopeManagementService(scopemanagementusecase.New(managementRepository, limiter))
+	}
+	return &oauthRuntime{HTTP: http, Catalog: ma.NewOAuthCatalog(repo), Grant: &transport.OAuthGrantService{Service: uc}, Delegation: delegationService, ScopeManagement: management}, cleanup, nil
+}
+
+func validateOAuthCatalogDeployment(scopes []d.Scope, resourcesReady, clockReady, storageEnabled bool, routes map[string]d.Route) error {
+	if storageEnabled && validateApplicationUserStorageScopes(scopes) != nil {
+		return d.ErrScope
+	}
+	for _, scope := range scopes {
+		if scope.Kind == "RESOURCE" && scope.Enabled && !resourcesReady {
+			return d.ErrScope
+		}
+	}
+	if len(routes) > 0 && (!clockReady || !resourcesReady) {
+		return d.ErrScope
+	}
+	for _, route := range routes {
 		for _, name := range route.Scopes {
 			found := false
-			for _, definition := range seed {
+			for _, definition := range scopes {
 				if definition.Name == name && definition.Kind == "RESOURCE" && definition.Audience == route.Audience && definition.Enabled {
 					found = true
 				}
 			}
 			if !found {
-				return fail()
+				return d.ErrScope
 			}
 		}
 	}
-	return &oauthRuntime{HTTP: http, Catalog: ma.NewOAuthCatalog(repo), Grant: &transport.OAuthGrantService{Service: uc}, Delegation: delegationService}, cleanup, nil
+	return nil
 }
 
 func validateApplicationUserStorageScopes(scopes []d.Scope) error {

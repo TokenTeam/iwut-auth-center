@@ -165,7 +165,7 @@ func (f *oauthFixture) begin(t *testing.T, scopes []string, client string, major
 func (f *oauthFixture) code(t *testing.T, scopes []string, client string) string {
 	t.Helper()
 	v := f.begin(t, scopes, client, 1)
-	target, e := f.service.Confirm(t.Context(), v.InteractionID, v.CSRF, f.session, scopes, true)
+	target, e := f.service.Confirm(t.Context(), v.InteractionID, v.CSRF, v.PresentationID, f.session, scopes, true)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -250,7 +250,7 @@ func TestOAuthMongoLifecycleAndRevocation(t *testing.T) {
 	if e != nil || revoked.RevocationEpoch != g.RevocationEpoch+1 {
 		t.Fatal(e)
 	}
-	if _, e = f.service.Confirm(ctx, v.InteractionID, v.CSRF, f.session, []string{"openid", "email"}, true); !errors.Is(e, d.ErrConflict) {
+	if _, e = f.service.Confirm(ctx, v.InteractionID, v.CSRF, v.PresentationID, f.session, []string{"openid", "email"}, true); !errors.Is(e, d.ErrConflict) {
 		t.Fatal("stale consent", e)
 	}
 	if _, e = f.service.UserInfo(ctx, second.AccessToken); !errors.Is(e, d.ErrToken) {
@@ -317,7 +317,7 @@ func TestOAuthMongoCatalogCeilingAndAtomicity(t *testing.T) {
 	ctx := t.Context()
 	tokens := f.tokens(t, "openid", "email", "offline_access")
 	f.seed[1].Enabled = false
-	if e := f.repo.SeedCatalog(ctx, f.seed); e != nil {
+	if e := updateOAuthFixtureCatalog(t, f.repo, f.seed); e != nil {
 		t.Fatal(e)
 	}
 	info, e := f.service.UserInfo(ctx, tokens.AccessToken)
@@ -329,7 +329,7 @@ func TestOAuthMongoCatalogCeilingAndAtomicity(t *testing.T) {
 		t.Fatal(e)
 	}
 	f.seed[1].Enabled = true
-	if e = f.repo.SeedCatalog(ctx, f.seed); e != nil {
+	if e = updateOAuthFixtureCatalog(t, f.repo, f.seed); e != nil {
 		t.Fatal(e)
 	}
 	if info, e = f.service.UserInfo(ctx, rotated.AccessToken); e != nil || info.Email != "" {
@@ -395,7 +395,7 @@ func TestOAuthMongoUserInfoProfileProjection(t *testing.T) {
 		{Name: "profile.education.current_grade", Label: "Grade", Description: "Read grade", Kind: "USERINFO_PROFILE", ProfileField: "education.current_grade", ProfileValueType: "ACADEMIC_GRADE", Enabled: true},
 	}
 	f.seed = append(f.seed, profileScopes...)
-	if err := f.repo.SeedCatalog(ctx, f.seed); err != nil {
+	if err := updateOAuthFixtureCatalog(t, f.repo, f.seed); err != nil {
 		t.Fatal(err)
 	}
 	f.app.mu.Lock()
@@ -445,7 +445,7 @@ func TestOAuthMongoUserInfoProfileProjection(t *testing.T) {
 			f.seed[index].Enabled = false
 		}
 	}
-	if err = f.repo.SeedCatalog(ctx, f.seed); err != nil {
+	if err = updateOAuthFixtureCatalog(t, f.repo, f.seed); err != nil {
 		t.Fatal(err)
 	}
 	duplicate := bson.A{bson.M{"key": "basic.name", "valueType": "STRING", "value": "a"}, bson.M{"key": "basic.name", "valueType": "STRING", "value": "b"}}
@@ -461,7 +461,7 @@ func TestOAuthMongoUserInfoProfileProjection(t *testing.T) {
 			f.seed[index].Enabled = true
 		}
 	}
-	if err = f.repo.SeedCatalog(ctx, f.seed); err != nil {
+	if err = updateOAuthFixtureCatalog(t, f.repo, f.seed); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = f.service.UserInfo(ctx, tokens.AccessToken); !errors.Is(err, d.ErrUnavailable) {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"iwut-auth-center/internal/adapter/catalog"
@@ -154,6 +155,9 @@ func TestProductionProfileAndScopeManifestsClose(t *testing.T) {
 		}
 		if scope.Kind == "USERINFO_CAMPUS" {
 			campusScopes++
+			if strings.Contains(scope.Description, "永久") || !strings.Contains(scope.Description, "解绑最后一个学校邮箱") {
+				t.Fatal("campus consent text must describe current email bindings, not permanent certification")
+			}
 			if scope.Name != "campus.whut" || !scope.Enabled || scope.Audience != "" || scope.ProfileField != "" || scope.ProfileValueType != "" {
 				t.Fatalf("production campus disclosure drifted: %#v", scope)
 			}

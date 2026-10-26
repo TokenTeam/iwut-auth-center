@@ -30,7 +30,7 @@ func oauthCampusFixture(t *testing.T) *oauthFixture {
 		t.Fatal(err)
 	}
 	f.seed = append(f.seed, d.Scope{Name: "campus.whut", Label: "Campus member", Description: "Read current verified campus membership, not student status", Kind: "USERINFO_CAMPUS", Enabled: true})
-	if err := f.repo.SeedCatalog(t.Context(), f.seed); err != nil {
+	if err := updateOAuthFixtureCatalog(t, f.repo, f.seed); err != nil {
 		t.Fatal(err)
 	}
 	f.app.runtime.Optional = append(f.app.runtime.Optional, "campus.whut")
@@ -73,7 +73,7 @@ func TestOAuthMongoCampusProjectionCatalogAndRefresh(t *testing.T) {
 			f.seed[index].Enabled = false
 		}
 	}
-	if err = f.repo.SeedCatalog(ctx, f.seed); err != nil {
+	if err = updateOAuthFixtureCatalog(t, f.repo, f.seed); err != nil {
 		t.Fatal(err)
 	}
 	info, err = f.service.UserInfo(ctx, tokens.AccessToken)
@@ -89,7 +89,7 @@ func TestOAuthMongoCampusProjectionCatalogAndRefresh(t *testing.T) {
 			f.seed[index].Enabled = true
 		}
 	}
-	if err = f.repo.SeedCatalog(ctx, f.seed); err != nil {
+	if err = updateOAuthFixtureCatalog(t, f.repo, f.seed); err != nil {
 		t.Fatal(err)
 	}
 	info, err = f.service.UserInfo(ctx, tokens.AccessToken)

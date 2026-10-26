@@ -157,6 +157,7 @@ type Interaction struct {
 	Runtime                                                   Runtime
 	GrantRevision                                             int64
 	AuthenticatedAt, ExpiresAt                                time.Time
+	Presentation                                              *ConsentPresentation
 }
 type Grant struct {
 	ID, AuthID, ApplicationID, Channel, Status, DisplayName string
@@ -205,9 +206,13 @@ type Audit struct {
 	Scopes                                []string
 	Revision, Epoch                       int64
 	At                                    time.Time
+	ConsentSource                         string
+	ReusedGrantRevision                   int64
+	Presentation                          *ConsentPresentation
 }
 type AuthorizationView struct {
 	InteractionID, CSRF, DisplayName, DeveloperHandle, Channel string
+	PresentationID                                             string
 	Requested, Required, PreviouslyGranted                     []string
 	Definitions                                                []Scope
 	Redirect                                                   string

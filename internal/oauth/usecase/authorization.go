@@ -151,7 +151,17 @@ func (s *Service) View(ctx context.Context, id, csrf, session string) (d.Authori
 		out.DeveloperHandle = owner.DeveloperHandle
 		out.Requested = i.Request.Scopes
 		out.Required = rt.Required
-		out.Definitions = catalog.Scopes
+		definitions, err := requestedDefinitions(catalog, i.Request.Scopes)
+		if err != nil {
+			return err
+		}
+		presentationID, err := s.crypto.Random()
+		if err != nil {
+			return d.ErrUnavailable
+		}
+		i.Presentation = &d.ConsentPresentation{ID: presentationID, Digest: d.RequestedDefinitionsDigest(definitions), Definitions: definitions, PreparedAt: s.now()}
+		out.PresentationID = presentationID
+		out.Definitions = definitions
 		if g.Status == "ACTIVE" {
 			out.PreviouslyGranted = g.Scopes
 		}
@@ -159,7 +169,7 @@ func (s *Service) View(ctx context.Context, id, csrf, session string) (d.Authori
 			return err
 		}
 		if i.Request.Prompt != "consent" && i.Request.Prompt != "login" && g.Status == "ACTIVE" && d.Subset(i.Request.Scopes, g.Scopes) {
-			out.Redirect, err = s.confirm(ctx, tx, i, ss, i.Request.Scopes, true)
+			out.Redirect, err = s.confirm(ctx, tx, i, ss, i.Request.Scopes, true, true)
 			return err
 		}
 		if i.Request.Prompt == "none" {
@@ -174,7 +184,7 @@ func (s *Service) View(ctx context.Context, id, csrf, session string) (d.Authori
 	}
 	return out, nil
 }
-func (s *Service) Confirm(ctx context.Context, id, csrf, session string, selected []string, approve bool) (string, error) {
+func (s *Service) Confirm(ctx context.Context, id, csrf, presentation, session string, selected []string, approve bool) (string, error) {
 	var redirect string
 	err := s.transaction(ctx, func(tx port.Tx) error {
 		redirect = ""
@@ -189,7 +199,10 @@ func (s *Service) Confirm(ctx context.Context, id, csrf, session string, selecte
 		if err != nil {
 			return err
 		}
-		redirect, err = s.confirm(ctx, tx, i, ss, selected, approve)
+		if i.Presentation == nil || !i.Presentation.Valid(i.Request.Scopes) || presentation == "" || subtle.ConstantTimeCompare([]byte(i.Presentation.ID), []byte(presentation)) != 1 {
+			return d.ErrConflict
+		}
+		redirect, err = s.confirm(ctx, tx, i, ss, selected, approve, false)
 		return err
 	})
 	if err != nil {
@@ -197,11 +210,21 @@ func (s *Service) Confirm(ctx context.Context, id, csrf, session string, selecte
 	}
 	return redirect, nil
 }
-func (s *Service) confirm(ctx context.Context, tx port.Tx, i d.Interaction, ss d.Session, selected []string, approve bool) (string, error) {
+func (s *Service) confirm(ctx context.Context, tx port.Tx, i d.Interaction, ss d.Session, selected []string, approve, reuse bool) (string, error) {
 	if err := applicationOpen(tx, i.Runtime.Client.ApplicationID); err != nil {
 		return "", err
 	}
 	if i.Status != "PENDING" || !i.ExpiresAt.After(s.now()) || i.AccountRevision != ss.AccountRevision || i.AuthID != ss.AuthID || i.SessionID != ss.ID {
+		return "", d.ErrConflict
+	}
+	// Compare only R's actual definitions, not the global catalog revision. Do
+	// this even for denial so an old tab cannot submit a newer server-side view.
+	catalog, err := s.catalog(tx)
+	if err != nil {
+		return "", err
+	}
+	definitions, err := requestedDefinitions(catalog, i.Request.Scopes)
+	if err != nil || i.Presentation == nil || !i.Presentation.Valid(i.Request.Scopes) || d.RequestedDefinitionsDigest(definitions) != i.Presentation.Digest {
 		return "", d.ErrConflict
 	}
 	if !approve {
@@ -234,6 +257,10 @@ func (s *Service) confirm(ctx context.Context, tx port.Tx, i d.Interaction, ss d
 	if g.Revision != i.GrantRevision {
 		return "", d.ErrConflict
 	}
+	priorGrantRevision := g.Revision
+	if reuse && (g.Status != "ACTIVE" || !d.Subset(selected, g.Scopes)) {
+		return "", d.ErrConflict
+	}
 	now := s.now()
 	if g.ID == "" {
 		g = d.Grant{ID: s.crypto.ID(), AuthID: ss.AuthID, ApplicationID: rt.Client.ApplicationID, Channel: rt.Client.Channel, RevocationEpoch: 1, CreatedAt: now}
@@ -260,13 +287,39 @@ func (s *Service) confirm(ctx context.Context, tx port.Tx, i d.Interaction, ss d
 	if err := tx.SaveInteraction(i); err != nil {
 		return "", err
 	}
-	if err := s.audit(tx, g, rt.Client.ID, "AUTHORIZE", selected); err != nil {
+	audit := d.Audit{ID: s.crypto.ID(), AuthID: g.AuthID, GrantID: g.ID, ClientID: rt.Client.ID, Action: "AUTHORIZE", Scopes: selected, Revision: g.Revision, Epoch: g.RevocationEpoch, At: now, ConsentSource: "EXPLICIT", Presentation: i.Presentation}
+	if reuse {
+		// This flow did not render a consent page: retain the source revision,
+		// but never claim current definitions were shown as historical consent.
+		audit.ConsentSource = "PRIOR_GRANT_REUSE"
+		audit.ReusedGrantRevision = priorGrantRevision
+		audit.Presentation = nil
+	}
+	if err := tx.Audit(audit); err != nil {
 		return "", err
 	}
 	if err := s.fresh(rt); err != nil {
 		return "", err
 	}
 	return callback(i.Request, raw, "", s.cfg.Issuer), nil
+}
+
+func requestedDefinitions(catalog d.Catalog, requested []string) ([]d.Scope, error) {
+	definitions := make([]d.Scope, 0, len(requested))
+	for _, name := range d.Union(requested) {
+		found := false
+		for _, definition := range catalog.Scopes {
+			if definition.Name == name {
+				definitions = append(definitions, definition)
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, d.ErrScope
+		}
+	}
+	return definitions, nil
 }
 func callback(q d.AuthorizationRequest, code, reason, issuer string) string {
 	u, _ := url.Parse(q.RedirectURI)

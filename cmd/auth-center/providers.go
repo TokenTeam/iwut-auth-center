@@ -76,6 +76,11 @@ func (state *readinessState) check(ctx context.Context) error {
 }
 
 func provideServerConfig(configuration config.Config, endpoints *transport.UserEndpoints, oauth *oauthRuntime, owner *ownerExitRuntime, closure *accountClosureRuntime, applicationClosure *applicationClosureRuntime) transport.ServerConfig {
+	if endpoints != nil {
+		copyEndpoints := *endpoints
+		copyEndpoints.ScopeManagement = oauth.ScopeManagement
+		endpoints = &copyEndpoints
+	}
 	return transport.ServerConfig{ApplicationClosure: applicationClosure.Closure, ApplicationCloseReauth: applicationClosure.Reauth, Background: applicationClosure.Worker, AccountClosure: closure.Service, OwnerExitDecision: owner.Decision, DeveloperWithdrawal: owner.Withdrawal, HTTPAddr: configuration.HTTPAddr, GRPCAddr: configuration.GRPCAddr, UserEndpoints: endpoints, OAuth: oauth.HTTP, OAuthGrant: oauth.Grant, OAuthDelegation: oauth.Delegation}
 }
 
