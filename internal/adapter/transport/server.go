@@ -41,12 +41,15 @@ import (
 	emailv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_binding"
 	emailloginv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_login"
 	identityv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/identity"
+	managedusersearchpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/managed_user_search"
 	dp "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/oauth_delegation"
 	gp "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/oauth_grant"
 	adminpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/platform_administrator"
 	reviewerpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/reviewer_permission"
 	scopecatalogv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/scope_catalog"
 	scopemanagementpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/scope_management"
+	scriptmaintainerpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/script_maintainer_permission"
+	scriptpermissionpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/script_permission"
 	sessionmanagementpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/session_management"
 	systemprincipalv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/system_principal"
 	profilev1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/user_profile"
@@ -87,6 +90,9 @@ type UserEndpoints struct {
 	PlatformAdministrator         *PlatformAdministratorService
 	AcademicYearPolicy            *AcademicYearPolicyService
 	ApplicationOperations         *ApplicationOperationsPermissionService
+	ScriptMaintainerPermission    *ScriptMaintainerPermissionService
+	ScriptPermission              *ScriptPermissionService
+	ManagedUserSearch             *ManagedUserSearchService
 	ApplicationUserStorage        *ApplicationUserStorageService
 	AccountManagement             *AccountManagementService
 	DeveloperApplication          *DeveloperApplicationService
@@ -248,6 +254,15 @@ func newGRPCServer(
 		if endpoints.ApplicationOperations != nil {
 			applicationoperationspb.RegisterApplicationOperationsPermissionServiceServer(server, endpoints.ApplicationOperations)
 		}
+		if endpoints.ScriptMaintainerPermission != nil {
+			scriptmaintainerpb.RegisterScriptMaintainerPermissionServiceServer(server, endpoints.ScriptMaintainerPermission)
+		}
+		if endpoints.ScriptPermission != nil {
+			scriptpermissionpb.RegisterScriptPermissionServiceServer(server, endpoints.ScriptPermission)
+		}
+		if endpoints.ManagedUserSearch != nil {
+			managedusersearchpb.RegisterManagedUserSearchServiceServer(server, endpoints.ManagedUserSearch)
+		}
 		if endpoints.ApplicationUserStorage != nil {
 			applicationuserstoragepb.RegisterApplicationUserStorageServiceServer(server, endpoints.ApplicationUserStorage)
 		}
@@ -376,6 +391,15 @@ func newHTTPServer(configuration ServerConfig, verifier *ServiceIdentityVerifier
 		if endpoints.ApplicationOperations != nil {
 			applicationoperationspb.RegisterApplicationOperationsPermissionServiceHTTPServer(server, endpoints.ApplicationOperations)
 		}
+		if endpoints.ScriptMaintainerPermission != nil {
+			scriptmaintainerpb.RegisterScriptMaintainerPermissionServiceHTTPServer(server, endpoints.ScriptMaintainerPermission)
+		}
+		if endpoints.ScriptPermission != nil {
+			scriptpermissionpb.RegisterScriptPermissionServiceHTTPServer(server, endpoints.ScriptPermission)
+		}
+		if endpoints.ManagedUserSearch != nil {
+			managedusersearchpb.RegisterManagedUserSearchServiceHTTPServer(server, endpoints.ManagedUserSearch)
+		}
 		if endpoints.ApplicationUserStorage != nil {
 			applicationuserstoragepb.RegisterApplicationUserStorageServiceHTTPServer(server, endpoints.ApplicationUserStorage)
 		}
@@ -399,6 +423,9 @@ func newHTTPServer(configuration ServerConfig, verifier *ServiceIdentityVerifier
 func authHTTPFilter(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
+		if r.URL.Path == "/v1/users/me/application-operation-capabilities" || scriptMaintainerPermissionHTTPPath(r.URL.Path) || scriptPermissionHTTPPath(r.URL.Path) || managedUserSearchHTTPPath(r.URL.Path) {
+			w.Header().Set("Cache-Control", "private, no-store")
+		}
 		if r.URL.RawQuery != "" || r.URL.ForceQuery {
 			authHTTPErrorEncoder(w, r, invalidHTTPInput(r))
 			return
@@ -442,6 +469,11 @@ func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 			limit = min(limit, 16*1024)
 		case *applicationoperationspb.ManageApplicationOperationsPermissionRequest, *applicationoperationspb.GetApplicationOperationsPermissionsRequest:
 			limit = min(limit, 16*1024)
+		case *managedusersearchpb.SearchUsersRequest:
+			limit = min(limit, 16*1024)
+		case *scriptmaintainerpb.ManageScriptMaintainerPermissionRequest, *scriptmaintainerpb.GetScriptMaintainerPermissionRequest,
+			*scriptpermissionpb.GetScriptPermissionsRequest, *scriptpermissionpb.ManageScriptPermissionRequest:
+			limit = min(limit, 16*1024)
 		case *accountpb.ManageUserAccountStatusRequest, *accountpb.GetUserAccountStatusRequest:
 			limit = 16 * 1024
 		}
@@ -472,6 +504,9 @@ func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 		}
 		if err := validateEmailAccountJSON(data, value); err != nil {
 			return err
+		}
+		if !managedUserSearchJSON(data, value) {
+			return invalidHTTPInput(r)
 		}
 		if !passwordJSON(data, value) {
 			return invalidHTTPInput(r)
@@ -526,7 +561,13 @@ func invalidHTTPInput(r *http.Request) error {
 		reason = "INVALID_ACADEMIC_YEAR_POLICY_REQUEST"
 	case strings.HasPrefix(r.URL.Path, "/v1/scope-catalog"):
 		reason = "INVALID_SCOPE_MANAGEMENT_REQUEST"
-	case strings.Contains(r.URL.Path, "/application-operation-permissions"):
+	case managedUserSearchHTTPPath(r.URL.Path):
+		reason = "INVALID_MANAGED_USER_SEARCH_REQUEST"
+	case scriptPermissionHTTPPath(r.URL.Path):
+		reason = "INVALID_SCRIPT_PERMISSION_REQUEST"
+	case scriptMaintainerPermissionHTTPPath(r.URL.Path):
+		reason = "INVALID_SCRIPT_MAINTAINER_PERMISSION_REQUEST"
+	case strings.Contains(r.URL.Path, "/application-operation-permissions"), r.URL.Path == "/v1/users/me/application-operation-capabilities":
 		reason = "INVALID_APPLICATION_OPERATIONS_PERMISSION_REQUEST"
 	case strings.HasPrefix(r.URL.Path, "/v1/users/me/application-grants"):
 		reason = "OAUTH_INVALID_REQUEST"
@@ -564,6 +605,9 @@ func oversizedHTTPInput(r *http.Request) error {
 		return invalidHTTPInput(r)
 	}
 	reason := "AUTHENTICATION_INPUT_TOO_LARGE"
+	if managedUserSearchHTTPPath(r.URL.Path) {
+		reason = "MANAGED_USER_SEARCH_REQUEST_TOO_LARGE"
+	}
 	if strings.HasPrefix(r.URL.Path, "/v1/scope-catalog") {
 		reason = "SCOPE_MANAGEMENT_REQUEST_TOO_LARGE"
 	}
@@ -594,6 +638,17 @@ func oversizedHTTPInput(r *http.Request) error {
 func authHTTPResponseEncoder(w http.ResponseWriter, r *http.Request, value any) error {
 	w.Header().Set("Cache-Control", "no-store")
 	switch value.(type) {
+	case *applicationoperationspb.OwnApplicationOperationsPermissions, *scriptmaintainerpb.ScriptMaintainerPermission, *scriptpermissionpb.ScriptPermissions, *managedusersearchpb.SearchUsersResponse:
+		w.Header().Set("Cache-Control", "private, no-store")
+		w.Header().Set("Content-Type", "application/json")
+		data, err := (protojson.MarshalOptions{EmitUnpopulated: true}).Marshal(value.(proto.Message))
+		if err != nil {
+			return err
+		}
+		_, err = w.Write(data)
+		return err
+	}
+	switch value.(type) {
 	case *authv1.UserRegistrationResult, *authv1.SessionEstablished, *emailloginv1.EmailLoginResult:
 		w.WriteHeader(http.StatusCreated)
 	}
@@ -602,11 +657,16 @@ func authHTTPResponseEncoder(w http.ResponseWriter, r *http.Request, value any) 
 
 func authHTTPErrorEncoder(w http.ResponseWriter, r *http.Request, err error) {
 	w.Header().Set("Cache-Control", "no-store")
+	if r.URL.Path == "/v1/users/me/application-operation-capabilities" || scriptMaintainerPermissionHTTPPath(r.URL.Path) || scriptPermissionHTTPPath(r.URL.Path) || managedUserSearchHTTPPath(r.URL.Path) {
+		w.Header().Set("Cache-Control", "private, no-store")
+	}
 	converted := kerrors.FromError(err)
 	// RESOURCE_EXHAUSTED covers both rate limiting (429) and payload limits
 	// (413); the UC's stable reason determines which HTTP status applies.
 	switch converted.Reason {
-	case "SCOPE_MANAGEMENT_REQUEST_TOO_LARGE", "PASSWORD_REQUEST_TOO_LARGE", "CREDENTIAL_MANAGEMENT_REQUEST_TOO_LARGE", "DEVELOPER_WITHDRAWAL_REQUEST_TOO_LARGE", "DEVELOPER_APPLICATION_REQUEST_TOO_LARGE", "EMAIL_LOGIN_REQUEST_TOO_LARGE", "EMAIL_REQUEST_TOO_LARGE", "REGISTRATION_INPUT_TOO_LARGE", "AUTHENTICATION_INPUT_TOO_LARGE", profiledomain.ErrLimit.Error():
+	case "SCRIPT_MAINTAINER_PERMISSION_GRANT_BLOCKED", "SCRIPT_PERMISSION_GRANT_BLOCKED":
+		converted.Code = http.StatusConflict
+	case "MANAGED_USER_SEARCH_REQUEST_TOO_LARGE", "SCOPE_MANAGEMENT_REQUEST_TOO_LARGE", "PASSWORD_REQUEST_TOO_LARGE", "CREDENTIAL_MANAGEMENT_REQUEST_TOO_LARGE", "DEVELOPER_WITHDRAWAL_REQUEST_TOO_LARGE", "DEVELOPER_APPLICATION_REQUEST_TOO_LARGE", "EMAIL_LOGIN_REQUEST_TOO_LARGE", "EMAIL_REQUEST_TOO_LARGE", "REGISTRATION_INPUT_TOO_LARGE", "AUTHENTICATION_INPUT_TOO_LARGE", profiledomain.ErrLimit.Error():
 		converted.Code = http.StatusRequestEntityTooLarge
 	case "SCOPE_CHANGE_BLOCKED", "SCOPE_CATALOG_REVISION_EXHAUSTED", "DEVELOPER_RESTORE_BLOCKED", "DEVELOPER_REVISION_EXHAUSTED", "ACCOUNT_REVISION_EXHAUSTED", "PLATFORM_ADMIN_GRANT_BLOCKED", "APPLICATION_OPERATIONS_PERMISSION_GRANT_BLOCKED", "LAST_PLATFORM_ADMIN_REQUIRED", "PERMISSION_REVISION_EXHAUSTED", "ACADEMIC_YEAR_ROLLOVER_NOT_FUTURE", "ACADEMIC_YEAR_POLICY_REVISION_EXHAUSTED", "ACADEMIC_YEAR_RANGE_EXHAUSTED":
 		converted.Code = http.StatusConflict

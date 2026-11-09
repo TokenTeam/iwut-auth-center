@@ -10,8 +10,9 @@ import (
 
 const Suspend = "app.application.suspend"
 const Restore = "app.application.restore"
+const Search = "app.application.search"
 
-func Permissions() []string { return []string{Restore, Suspend} }
+func Permissions() []string { return []string{Restore, Search, Suspend} }
 
 var (
 	ErrIdentity     = errors.New("INVALID_USER_IDENTITY")

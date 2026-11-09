@@ -3,7 +3,6 @@ package mongo
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -11,6 +10,7 @@ import (
 
 	admin "iwut-auth-center/internal/administrator/domain"
 	domain "iwut-auth-center/internal/applicationoperations/domain"
+	authport "iwut-auth-center/internal/authentication/port"
 )
 
 type ApplicationOperationsPermissionRepository struct {
@@ -121,6 +121,53 @@ func (r *ApplicationOperationsPermissionRepository) Get(ctx context.Context, act
 	return state, nil
 }
 
+// GetOwn never calls the administrator snapshot or reads email/recovery state.
+// ConfirmIdentityTx participates in the same fence as grants and account changes;
+// the returned set and shared revision come from one transaction observation.
+func (r *ApplicationOperationsPermissionRepository) GetOwn(ctx context.Context, actor string) (domain.OwnState, error) {
+	var state domain.OwnState
+	err := r.transaction(ctx, func(tx context.Context) error {
+		var raw bson.Raw
+		err := r.authentication.database.Collection(PrincipalCollection).FindOne(tx, bson.M{"authId": actor}).Decode(&raw)
+		if errors.Is(err, drivermongo.ErrNoDocuments) {
+			return domain.ErrIdentity
+		}
+		if err != nil || !identityFields(raw, map[string]bson.Type{"authId": bson.TypeString, "principalType": bson.TypeString}) || raw.Lookup("authId").StringValue() != actor {
+			return domain.ErrUnavailable
+		}
+		switch raw.Lookup("principalType").StringValue() {
+		case "SYSTEM":
+			return domain.ErrIdentity
+		case "USER":
+		default:
+			return domain.ErrUnavailable
+		}
+		status, ok := raw.Lookup("accountStatus").StringValueOK()
+		if !ok || (status != "ACTIVE" && status != "DISABLED" && status != "CLOSED") {
+			return domain.ErrUnavailable
+		}
+		if err = r.authentication.ConfirmIdentityTx(tx, actor); err != nil {
+			if errors.Is(err, authport.ErrAuthenticationFailed) {
+				return domain.ErrIdentity
+			}
+			return domain.ErrUnavailable
+		}
+		if !identityFields(raw, map[string]bson.Type{"permissions": bson.TypeArray, "permissionRevision": bson.TypeInt64}) {
+			return domain.ErrUnavailable
+		}
+		permissions, err := adminPermissions(raw.Lookup("permissions"))
+		if err != nil {
+			return domain.ErrUnavailable
+		}
+		state, err = domain.ProjectOwn(actor, raw.Lookup("permissionRevision").Int64(), permissions)
+		return err
+	})
+	if err != nil {
+		return domain.OwnState{}, err
+	}
+	return state, nil
+}
+
 func (r *ApplicationOperationsPermissionRepository) Manage(ctx context.Context, command domain.Command) (domain.State, error) {
 	var state domain.State
 	eventID := uuid.NewString()
@@ -149,23 +196,13 @@ func (r *ApplicationOperationsPermissionRepository) Manage(ctx context.Context, 
 }
 
 func (r *ApplicationOperationsPermissionRepository) write(ctx context.Context, before, after domain.Snapshot, command domain.Command, eventID string) error {
-	now := r.authentication.currentTime(time.Time{})
-	attribution := bson.M{"actorType": "USER", "actorAuthId": command.ActorAuthID}
-	result, err := r.authentication.database.Collection(PrincipalCollection).UpdateOne(ctx,
-		bson.M{"authId": before.AuthID, "principalType": "USER", "accountStatus": before.AccountStatus, "permissionRevision": before.Revision},
-		bson.M{"$set": bson.M{"permissions": after.Permissions, "permissionRevision": after.Revision, "permissionUpdatedBy": attribution, "permissionUpdatedAt": now}, "$inc": bson.M{"authenticationFence": int64(1)}},
-	)
-	if err != nil {
-		return err
-	}
-	if result.MatchedCount != 1 {
+	err := r.authentication.writeManagedPermissionTx(ctx, managedPermissionChange{
+		subject: before.AuthID, status: before.AccountStatus, actor: command.ActorAuthID, permission: command.Permission,
+		action: command.Action, reason: command.Reason, eventID: eventID,
+		beforeRevision: before.Revision, afterRevision: after.Revision, beforePermissions: before.Permissions, afterPermissions: after.Permissions,
+	})
+	if errors.Is(err, errManagedPermissionConflict) {
 		return domain.ErrConflict
 	}
-	_, err = r.authentication.database.Collection(PermissionAuditCollection).InsertOne(ctx, bson.M{
-		"eventId": eventID, "subjectAuthId": before.AuthID, "actorType": "USER", "actorAuthId": command.ActorAuthID,
-		"action": command.Action, "permission": command.Permission, "reason": command.Reason,
-		"beforeRevision": before.Revision, "afterRevision": after.Revision,
-		"beforePermissions": before.Permissions, "afterPermissions": after.Permissions, "occurredAt": now,
-	})
 	return err
 }

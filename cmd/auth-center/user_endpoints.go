@@ -18,7 +18,9 @@ import (
 	emaildomain "iwut-auth-center/internal/emailbinding/domain"
 	emailloginusecase "iwut-auth-center/internal/emaillogin/usecase"
 	identityusecase "iwut-auth-center/internal/identity/usecase"
+	managedusersearchusecase "iwut-auth-center/internal/managedusersearch/usecase"
 	reviewerusecase "iwut-auth-center/internal/reviewer/usecase"
+	scriptmaintainerusecase "iwut-auth-center/internal/scriptmaintainer/usecase"
 	sessionmanagementusecase "iwut-auth-center/internal/sessionmanagement/usecase"
 	"time"
 
@@ -242,6 +244,30 @@ func provideUserEndpoints(configuration config.Config, database *drivermongo.Dat
 		}
 		applicationOperations = transport.NewApplicationOperationsPermissionService(applicationoperationsusecase.New(repo, gate))
 	}
+	var managedUserSearch *transport.ManagedUserSearchService
+	if configuration.ManagedUserSearchEnabled {
+		limiter, err := deviceprotocol.NewLimiter(deviceprotocol.RateLimits{BeginGlobal: 1000000, CompleteGlobal: 1000000, BeginSource: 60, CompleteLocator: 60, MaxBuckets: 4096})
+		if err != nil {
+			return nil, err
+		}
+		managedUserSearch = transport.NewManagedUserSearchService(managedusersearchusecase.New(mongoadapter.NewManagedUserSearchRepository(repository), limiter))
+	}
+	var scriptMaintainer *transport.ScriptMaintainerPermissionService
+	var scriptPermission *transport.ScriptPermissionService
+	if sc := configuration.ScriptMaintainerPermission; sc != nil {
+		repo := mongoadapter.NewScriptMaintainerPermissionRepository(repository, sc.RecoveryReady && emailLoginService != nil)
+		gate, err := deviceprotocol.NewLimiter(deviceprotocol.RateLimits{BeginGlobal: 1000000, CompleteGlobal: 1000000, BeginSource: 60, CompleteLocator: 10, MaxBuckets: 4096})
+		if err != nil {
+			return nil, err
+		}
+		service := scriptmaintainerusecase.New(repo, gate)
+		if sc.LegacyEnabled {
+			scriptMaintainer = transport.NewScriptMaintainerPermissionService(service)
+		}
+		if sc.Enabled {
+			scriptPermission = transport.NewScriptPermissionService(service)
+		}
+	}
 	var accountManagement *transport.AccountManagementService
 	if ac := configuration.AccountManagement; ac != nil {
 		if err := mongoadapter.EnsureAccountManagementSchema(ctx, database); err != nil {
@@ -300,6 +326,9 @@ func provideUserEndpoints(configuration config.Config, database *drivermongo.Dat
 	}
 	return &transport.UserEndpoints{SessionManagement: sessionManagement, DeveloperManagement: developerManagement, AccountManagement: accountManagement, PlatformAdministrator: administrator, AcademicYearPolicy: academicYearPolicy,
 		ApplicationOperations:         applicationOperations,
+		ScriptMaintainerPermission:    scriptMaintainer,
+		ScriptPermission:              scriptPermission,
+		ManagedUserSearch:             managedUserSearch,
 		CredentialManagement:          credentialRuntime.Service,
 		PasswordManagement:            passwordManagement.Service,
 		PasswordLogin:                 passwordManagement.Login,

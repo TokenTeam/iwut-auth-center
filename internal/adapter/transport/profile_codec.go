@@ -47,6 +47,12 @@ func (c profileStrictCodec) Unmarshal(data []byte, v any) error {
 		message.ProtoReflect().SetUnknown(protowire.AppendVarint(protowire.AppendTag(nil, 127, protowire.VarintType), 1))
 		return nil
 	}
+	if !managedUserSearchWire(data, v) {
+		return markAuthenticationWireRejected(v, len(data) > 16*1024)
+	}
+	if !scriptPermissionWire(data, v) {
+		return markAuthenticationWireRejected(v, len(data) > 16*1024)
+	}
 	if err := applicationOperationsPermissionWire(data, v); err != nil {
 		message := v.(proto.Message)
 		proto.Reset(message)

@@ -26,7 +26,7 @@ func TestApplicationOperationsMongoIndependentCASAndDisabledRevoke(t *testing.T)
 	repository, subject := applicationOperationsFixture(t)
 	ctx := account.WithIdentity(t.Context(), "admin", 1)
 	start := make(chan struct{})
-	results := make(chan error, 2)
+	results := make(chan error, len(domain.Permissions()))
 	var wait sync.WaitGroup
 	for _, permission := range domain.Permissions() {
 		wait.Add(1)
@@ -52,20 +52,25 @@ func TestApplicationOperationsMongoIndependentCASAndDisabledRevoke(t *testing.T)
 		t.Fatal(successes)
 	}
 	state, err := repository.Get(ctx, "admin", subject)
-	if err != nil || state.Revision != 2 || state.Has(domain.Restore) == state.Has(domain.Suspend) {
+	if err != nil || state.Revision != 2 || len(state.Permissions) != 3 {
 		t.Fatal(state, err)
 	}
-	granted := domain.Restore
-	ungranted := domain.Suspend
-	if state.Has(domain.Suspend) {
-		granted = domain.Suspend
-		ungranted = domain.Restore
+	granted, ungranted := "", ""
+	for _, permission := range state.Permissions {
+		if permission.Granted {
+			granted = permission.Name
+		} else {
+			ungranted = permission.Name
+		}
+	}
+	if granted == "" || ungranted == "" {
+		t.Fatal(state)
 	}
 	if _, err = repository.authentication.database.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": subject}, bson.M{"$set": bson.M{"accountStatus": "DISABLED"}}); err != nil {
 		t.Fatal(err)
 	}
 	state, err = repository.Get(ctx, "admin", subject)
-	if err != nil || state.AccountStatus != "DISABLED" || state.Permissions[0].Effective || state.Permissions[1].Effective {
+	if err != nil || state.AccountStatus != "DISABLED" || state.Permissions[0].Effective || state.Permissions[1].Effective || state.Permissions[2].Effective {
 		t.Fatal(state, err)
 	}
 	if _, err = repository.Manage(ctx, domain.Command{ActorAuthID: "admin", SubjectAuthID: subject, Permission: ungranted, Action: "GRANT", ExpectedRevision: 2, Reason: "must remain blocked"}); !errors.Is(err, domain.ErrGrantBlocked) {

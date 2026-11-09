@@ -9,7 +9,7 @@ import (
 func TestIndependentApplicationOperationPermissions(t *testing.T) {
 	snapshot := Snapshot{AuthID: "user", AccountStatus: "ACTIVE", Permissions: []string{"app.profile.review", Suspend}, Revision: 4, EmailVerified: true, RecoveryReady: true}
 	state, err := snapshot.State()
-	if err != nil || !state.Has(Suspend) || state.Has(Restore) || !state.Permissions[1].Effective {
+	if err != nil || !state.Has(Suspend) || state.Has(Restore) || !state.Permissions[2].Effective {
 		t.Fatal(state, err)
 	}
 	grant, err := Change(snapshot, Command{Permission: Restore, Action: "GRANT", ExpectedRevision: 4})
@@ -25,7 +25,7 @@ func TestIndependentApplicationOperationPermissions(t *testing.T) {
 func TestApplicationOperationGrantBlockersAndDisabledRevoke(t *testing.T) {
 	snapshot := Snapshot{AuthID: "user", AccountStatus: "DISABLED", Permissions: []string{Suspend}, Revision: 1}
 	state, err := snapshot.State()
-	if err != nil || state.Permissions[1].Effective || !reflect.DeepEqual(state.GrantBlockers, []string{"ACCOUNT_DISABLED", "EMAIL_REQUIRED", "EMAIL_RECOVERY_UNAVAILABLE"}) {
+	if err != nil || state.Permissions[2].Effective || !reflect.DeepEqual(state.GrantBlockers, []string{"ACCOUNT_DISABLED", "EMAIL_REQUIRED", "EMAIL_RECOVERY_UNAVAILABLE"}) {
 		t.Fatal(state, err)
 	}
 	if _, err = Change(snapshot, Command{Permission: Restore, Action: "GRANT", ExpectedRevision: 1}); !errors.Is(err, ErrGrantBlocked) {

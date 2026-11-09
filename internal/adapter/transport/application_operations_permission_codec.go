@@ -9,6 +9,11 @@ import (
 func applicationOperationsPermissionWire(data []byte, message any) error {
 	maximumField := protowire.Number(0)
 	switch message.(type) {
+	case *pb.GetOwnApplicationOperationsPermissionsRequest:
+		if len(data) != 0 {
+			return applicationOperationsPermissionError(nil)
+		}
+		return nil
 	case *pb.ManageApplicationOperationsPermissionRequest:
 		maximumField = 5
 	case *pb.GetApplicationOperationsPermissionsRequest:

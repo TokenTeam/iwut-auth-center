@@ -55,3 +55,10 @@ func (s *Service) Get(ctx context.Context, actor, subject string) (domain.State,
 	}
 	return s.repository.Get(ctx, actor, subject)
 }
+
+func (s *Service) GetOwn(ctx context.Context, actor string) (domain.OwnState, error) {
+	if err := s.gate(actor, false); err != nil {
+		return domain.OwnState{}, err
+	}
+	return s.repository.GetOwn(ctx, actor)
+}

@@ -18,6 +18,9 @@ func (r *repositoryStub) Manage(_ context.Context, command domain.Command) (doma
 func (r *repositoryStub) Get(context.Context, string, string) (domain.State, error) {
 	return domain.State{}, nil
 }
+func (r *repositoryStub) GetOwn(context.Context, string) (domain.OwnState, error) {
+	return domain.OwnState{}, nil
+}
 
 type limiterStub struct{ allow bool }
 
@@ -48,6 +51,12 @@ func TestServiceValidatesAndTrimsBeforeRepository(t *testing.T) {
 func TestServiceRateLimitFailsClosed(t *testing.T) {
 	service := New(&repositoryStub{}, limiterStub{})
 	if _, err := service.Get(t.Context(), "admin", "user"); err != domain.ErrRate {
+		t.Fatal(err)
+	}
+	if _, err := service.GetOwn(t.Context(), "ordinary"); err != domain.ErrRate {
+		t.Fatal(err)
+	}
+	if _, err := New(nil, limiterStub{true}).GetOwn(t.Context(), "ordinary"); err != domain.ErrUnavailable {
 		t.Fatal(err)
 	}
 }

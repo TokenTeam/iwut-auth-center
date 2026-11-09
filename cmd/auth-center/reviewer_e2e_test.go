@@ -61,6 +61,11 @@ func runReviewerFlow(t *testing.T, env map[string]string, conn *grpc.ClientConn,
 		return metadata.NewOutgoingContext(t.Context(), metadata.Pairs("x-iwut-identity", token))
 	}
 	ordinary := issue(admin, "iwut-auth-center")
+	own := applicationoperationspb.NewApplicationOperationsPermissionServiceClient(conn)
+	beforeBootstrap, err := own.GetOwnApplicationOperationsPermissions(userctx(ordinary), &applicationoperationspb.GetOwnApplicationOperationsPermissionsRequest{})
+	if err != nil || beforeBootstrap.SubjectAuthId != admin.AuthId || beforeBootstrap.PermissionRevision != 1 || len(beforeBootstrap.EffectivePermissions) != 0 {
+		t.Fatal("ordinary own read required administrator initialization", beforeBootstrap, err)
+	}
 	if _, err := review.GetReviewerPermission(userctx(ordinary), &pb.GetReviewerPermissionRequest{SubjectAuthId: subject.AuthId}); status.Code(err) != codes.PermissionDenied {
 		t.Fatal(err)
 	}
@@ -156,6 +161,10 @@ func runApplicationOperationsPermissionFlow(t *testing.T, env map[string]string,
 		t.Fatal(err)
 	}
 	ordinaryContext := metadata.NewOutgoingContext(t.Context(), metadata.Pairs("x-iwut-identity", issue(subject, "iwut-auth-center")))
+	own, err := client.GetOwnApplicationOperationsPermissions(ordinaryContext, &applicationoperationspb.GetOwnApplicationOperationsPermissionsRequest{})
+	if err != nil || own.SubjectAuthId != subject.AuthId || own.PermissionRevision != 1 || len(own.EffectivePermissions) != 0 {
+		t.Fatal(own, err)
+	}
 	if _, err := client.GetApplicationOperationsPermissions(ordinaryContext, query); status.Code(err) != codes.PermissionDenied {
 		t.Fatal(err)
 	}
@@ -164,7 +173,7 @@ func runApplicationOperationsPermissionFlow(t *testing.T, env map[string]string,
 		t.Fatal(err)
 	}
 	initial, err := client.GetApplicationOperationsPermissions(adminctx, query)
-	if err != nil || initial.PermissionRevision != 1 || initial.AccountStatus != applicationoperationspb.ApplicationOperationsAccountStatus_APPLICATION_OPERATIONS_ACCOUNT_STATUS_ACTIVE || len(initial.Permissions) != 2 || len(initial.GrantBlockers) != 0 {
+	if err != nil || initial.PermissionRevision != 1 || initial.AccountStatus != applicationoperationspb.ApplicationOperationsAccountStatus_APPLICATION_OPERATIONS_ACCOUNT_STATUS_ACTIVE || len(initial.Permissions) != 3 || len(initial.GrantBlockers) != 0 {
 		t.Fatal(initial, err)
 	}
 	transport, err := khttp.NewClient(t.Context(), khttp.WithEndpoint("http://"+env[config.HTTPAddrEnv]), khttp.WithTimeout(5*time.Second))
@@ -181,8 +190,12 @@ func runApplicationOperationsPermissionFlow(t *testing.T, env map[string]string,
 		ExpectedPermissionRevision: proto.Int64(1),
 		Reason:                     "application suspension duty",
 	}, khttp.Header(&headers))
-	if err != nil || granted.PermissionRevision != 2 || !granted.Permissions[1].Granted || !granted.Permissions[1].Effective || granted.Permissions[0].Granted {
+	if err != nil || granted.PermissionRevision != 2 || !granted.Permissions[2].Granted || !granted.Permissions[2].Effective || granted.Permissions[0].Granted {
 		t.Fatal(granted, err)
+	}
+	own, err = client.GetOwnApplicationOperationsPermissions(ordinaryContext, &applicationoperationspb.GetOwnApplicationOperationsPermissionsRequest{})
+	if err != nil || own.PermissionRevision != 2 || !slices.Equal(own.EffectivePermissions, []string{applicationoperationspbPermissionSuspend}) {
+		t.Fatal("same identity did not observe current grant", own, err)
 	}
 	appIdentity := identityPayload(t, issue(subject, "iwut-app-center"))
 	if permissions := appIdentity["permissions"].([]any); len(permissions) != 1 || permissions[0] != applicationoperationspbPermissionSuspend {
@@ -196,8 +209,11 @@ func runApplicationOperationsPermissionFlow(t *testing.T, env map[string]string,
 	if err != nil || disabled.AccountRevision != 2 || disabled.AccountStatus != accountpb.AccountStatus_ACCOUNT_STATUS_DISABLED {
 		t.Fatal(disabled, err)
 	}
+	if _, err = client.GetOwnApplicationOperationsPermissions(ordinaryContext, &applicationoperationspb.GetOwnApplicationOperationsPermissionsRequest{}); status.Code(err) != codes.Unauthenticated {
+		t.Fatal("disabled own read became success or empty set", err)
+	}
 	blocked, err := client.GetApplicationOperationsPermissions(adminctx, query)
-	if err != nil || blocked.PermissionRevision != 2 || !blocked.Permissions[1].Granted || blocked.Permissions[1].Effective || !slices.Equal(blocked.GrantBlockers, []applicationoperationspb.ApplicationOperationsGrantBlocker{applicationoperationspb.ApplicationOperationsGrantBlocker_APPLICATION_OPERATIONS_GRANT_BLOCKER_ACCOUNT_DISABLED}) {
+	if err != nil || blocked.PermissionRevision != 2 || !blocked.Permissions[2].Granted || blocked.Permissions[2].Effective || !slices.Equal(blocked.GrantBlockers, []applicationoperationspb.ApplicationOperationsGrantBlocker{applicationoperationspb.ApplicationOperationsGrantBlocker_APPLICATION_OPERATIONS_GRANT_BLOCKER_ACCOUNT_DISABLED}) {
 		t.Fatal("disabled account was treated as missing email or retained effective operation authority", blocked, err)
 	}
 	if _, err = client.ManageApplicationOperationsPermission(adminctx, &applicationoperationspb.ManageApplicationOperationsPermissionRequest{SubjectAuthId: subject.AuthId, Permission: "app.application.restore", Action: applicationoperationspb.ApplicationOperationsPermissionAction_APPLICATION_OPERATIONS_PERMISSION_ACTION_GRANT, ExpectedPermissionRevision: proto.Int64(2), Reason: "blocked disabled grant"}); status.Code(err) != codes.FailedPrecondition {
@@ -210,7 +226,7 @@ func runApplicationOperationsPermissionFlow(t *testing.T, env map[string]string,
 		ExpectedPermissionRevision: proto.Int64(2),
 		Reason:                     "application suspension duty ended",
 	})
-	if err != nil || revoked.PermissionRevision != 3 || revoked.Permissions[1].Granted {
+	if err != nil || revoked.PermissionRevision != 3 || revoked.Permissions[2].Granted {
 		t.Fatal(revoked, err)
 	}
 	if _, err = accounts.ManageUserAccountStatus(adminctx, &accountpb.ManageUserAccountStatusRequest{SubjectAuthId: subject.AuthId, Action: accountpb.AccountStatusAction_ACCOUNT_STATUS_ACTION_RESTORE, ExpectedAccountRevision: proto.Int64(2), Reason: "operations eligibility check complete"}); err != nil {
@@ -243,7 +259,7 @@ func runApplicationOperationsPermissionFlow(t *testing.T, env map[string]string,
 		t.Fatal("recovery-disabled deployment granted operation authority", err)
 	}
 	unchanged, err := client.GetApplicationOperationsPermissions(adminctx, query)
-	if err != nil || unchanged.PermissionRevision != 3 || len(unchanged.GrantBlockers) != 0 || unchanged.Permissions[1].Granted {
+	if err != nil || unchanged.PermissionRevision != 3 || len(unchanged.GrantBlockers) != 0 || unchanged.Permissions[2].Granted {
 		t.Fatal("failed recovery grant changed original ready state", unchanged, err)
 	}
 }
@@ -413,5 +429,7 @@ func runApplicationReviewFlow(t *testing.T, env map[string]string, conn *grpc.Cl
 		t.Fatal(err)
 	}
 	check(false, false, 9)
+	runScriptPermissionFlow(t, env, conn, appURL, subject, adminctx, adminToken, issue)
+	runManagedUserSearchAndApplicationSearchFlow(t, env, conn, appURL, subject, adminctx, adminToken, issue)
 	t.Log("Actual Auth grants and signer -> actual App verifier and both review handlers: independent permissions, legacy compatibility, revocation")
 }

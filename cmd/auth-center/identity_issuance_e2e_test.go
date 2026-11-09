@@ -72,6 +72,9 @@ func TestE2E_IdentityIssuance_ProductionWire(t *testing.T) {
 		env[key] = value
 	}
 	enableEmailRegistrationFixture(t, env, capture)
+	env[config.ScriptMaintainerPermissionEnabledEnv] = "true"
+	env[config.ScriptPermissionEnabledEnv] = "true"
+	env[config.ManagedUserSearchEnabledEnv] = "true"
 	configuration, err := config.Load(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
 	if err != nil {
 		t.Fatal(err)

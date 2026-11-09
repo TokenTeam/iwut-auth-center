@@ -858,16 +858,30 @@ Enabling it requires user endpoints and user identity issuance. Native gRPC and
 strict HTTP/JSON expose:
 
 - `PUT /v1/users/{subject_auth_id}/application-operation-permissions/{permission}`
-  to grant or revoke exactly `app.application.suspend` or
-  `app.application.restore` with a positive expected permission revision and a
+  to grant or revoke exactly `app.application.search`,
+  `app.application.suspend` or `app.application.restore` with a positive expected permission revision and a
   trimmed 1–1024-byte reason;
 - `GET /v1/users/{subject_auth_id}/application-operation-permissions` to return
-  both permissions in lexical order, their granted/effective state, the account
-  status, shared revision and current grant blockers.
+  all three permissions in lexical order, their granted/effective state, the account
+  status, shared revision and current grant blockers;
+- `GET /v1/users/me/application-operation-capabilities`
+  (`GetOwnApplicationOperationsPermissions`) for any valid ACTIVE USER to read
+  only their `subjectAuthId`, positive shared `permissionRevision` and complete
+  `effectivePermissions` ID set within the three-permission public allowlist.
+  HTTP emits `effectivePermissions: []` when none is effective; errors,
+  malformed data and unavailable dependencies never become a successful empty set.
 
-Gateway uses SESSION policy and an Auth-audience USER identity. The signed identity
-must contain `auth.platform-admin.manage`; Auth then verifies the current complete
-platform administrator bundle in the same Mongo transaction as every read or write.
+Gateway uses SESSION policy and an Auth-audience USER identity. The old target
+Get/Manage methods require `auth.platform-admin.manage`; Auth then verifies the
+current complete platform administrator bundle in their Mongo transaction.
+The exact own-read method needs no permission claim, administrator bootstrap,
+email or recovery gate. It confirms current account/identity generation and reads
+the authoritative permission set/revision in the shared authentication transaction,
+without consulting the management snapshot or exposing unpublished permissions.
+Its request has no body, query, target or filter; unknown gRPC fields are rejected.
+Success/errors are private, no-store, and reads share the existing per-actor budget.
+BrowserSession and App write authorization do not change; discovery is an
+observation, not a credential or an immediate-revocation guarantee.
 The operation permissions never authorize their own management. They remain
 independent from Reviewer permissions and the fixed platform administrator bundle.
 
@@ -888,6 +902,35 @@ state transitions that consume these claims are a separate delivery.
 | `AUTH_APPLICATION_OPERATIONS_PERMISSION_READ_PER_MINUTE` | 60 | Reads per authenticated actor |
 | `AUTH_APPLICATION_OPERATIONS_PERMISSION_WRITE_PER_MINUTE` | 10 | Writes per authenticated actor |
 | `AUTH_APPLICATION_OPERATIONS_PERMISSION_MAX_BUCKETS` | 4096 | Bounded read/write limiter state |
+
+## Script permissions (UC-AUTH-038)
+
+`AUTH_SCRIPT_PERMISSION_ENDPOINTS_ENABLED` enables
+`POST /v1/script-permissions:get` and `POST /v1/script-permissions:manage` and
+their native gRPC methods. The query takes `subjectAuthId` and returns the five
+grant/effective states and one shared revision. Manage additionally selects
+exactly one permission using the Proto enum (maintain, review, publish, suspend
+or restore), one action, the expected revision and a reason.
+
+The independent legacy `AUTH_SCRIPT_MAINTAINER_PERMISSION_ENDPOINTS_ENABLED`
+switch and the new switch both default to false.
+When enabled, the exact HTTP `POST /v1/script-maintainer-permissions:get`
+and `POST /v1/script-maintainer-permissions:manage` and their native gRPC methods
+require a trusted Auth-audience USER identity and current full platform
+administrator authority. Query uses `subjectAuthId`. Manage also requires
+`action` (1 = GRANT, 2 = REVOKE in JSON), a positive `expectedPermissionRevision`, and a
+trimmed reason (1–1024 UTF-8 bytes). Only `app.script.maintain` can change.
+
+Both endpoint gates require configured user endpoints and identity issuance.
+They share one per-actor limiter and one target permission revision.
+GRANT additionally requires a verified target login email and operational
+email recovery readiness, using the same readiness inputs as UC027. Query and
+REVOKE do not read the target email directory and continue for DISABLED users.
+Permission CAS and audit commit together. Before rolling out the new signer,
+check for pre-existing script grants; the endpoint gate does not suppress their
+projection. Only App-audience USER JWS can contain script permissions, and old
+tokens retain the existing short revocation window. No default grant or schema
+migration is performed.
 
 ## User account disable and restore (UC022)
 
@@ -1090,3 +1133,24 @@ authenticated account, configured by `AUTH_SESSION_MANAGEMENT_GLOBAL_PER_MINUTE`
 `AUTH_SESSION_MANAGEMENT_ACCOUNT_PER_MINUTE`. Source and account entries share
 `AUTH_SESSION_MANAGEMENT_MAX_BUCKETS` (default 4096). All limits are positive
 integers at most 1,000,000. Forwarded headers do not establish source identity.
+
+## Managed user search (UC039)
+
+`AUTH_MANAGED_USER_SEARCH_ENDPOINTS_ENABLED=true` registers the exact native
+gRPC `ManagedUserSearchService/SearchUsers` and HTTP
+`POST /v1/managed-users:search`. It defaults off and requires the user endpoint
+and identity issuance configuration. A current full platform administrator uses
+an Auth-audience USER identity with `auth.account.manage`.
+
+The request selects exactly one `authId` or complete `email`. Email normalization
+and current verified binding ownership follow the existing v3 email directory.
+Results contain zero or one minimal USER summary with account and nullable
+Developer status, plus `asOf`. CLOSED, SYSTEM and unknown IDs return an empty set.
+The endpoint rejects query fields, duplicate/unknown fields, pagination and
+bodies over 16 KiB. All responses are private, no-store. Reads use the shared Auth
+transaction for final administrator verification and bounded per-actor admission.
+
+UC027 now manages the independent `app.application.search` permission alongside
+suspend/restore. The same three-item allowlist is used for target and own reads;
+only App-audience identities project the current explicit grants. Existing JWS
+keep their original expiry window after a permission is revoked.

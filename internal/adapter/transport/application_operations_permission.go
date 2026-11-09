@@ -15,7 +15,12 @@ import (
 
 func applicationOperationsPermissionMethod(operation string) bool {
 	return operation == pb.ApplicationOperationsPermissionService_ManageApplicationOperationsPermission_FullMethodName ||
-		operation == pb.ApplicationOperationsPermissionService_GetApplicationOperationsPermissions_FullMethodName
+		operation == pb.ApplicationOperationsPermissionService_GetApplicationOperationsPermissions_FullMethodName ||
+		ownApplicationOperationsPermissionMethod(operation)
+}
+
+func ownApplicationOperationsPermissionMethod(operation string) bool {
+	return operation == pb.ApplicationOperationsPermissionService_GetOwnApplicationOperationsPermissions_FullMethodName
 }
 
 type ApplicationOperationsPermissionService struct {
@@ -62,6 +67,21 @@ func (s *ApplicationOperationsPermissionService) GetApplicationOperationsPermiss
 		return nil, applicationOperationsPermissionError(err)
 	}
 	return applicationOperationsPermissionResponse(out), nil
+}
+
+func (s *ApplicationOperationsPermissionService) GetOwnApplicationOperationsPermissions(ctx context.Context, request *pb.GetOwnApplicationOperationsPermissionsRequest) (*pb.OwnApplicationOperationsPermissions, error) {
+	actor, err := profileAuthID(ctx)
+	if err != nil {
+		return nil, applicationOperationsPermissionError(domain.ErrIdentity)
+	}
+	if request == nil || len(request.ProtoReflect().GetUnknown()) != 0 {
+		return nil, applicationOperationsPermissionError(domain.ErrInvalid)
+	}
+	out, err := s.service.GetOwn(ctx, actor)
+	if err != nil {
+		return nil, applicationOperationsPermissionError(err)
+	}
+	return &pb.OwnApplicationOperationsPermissions{SubjectAuthId: out.AuthID, PermissionRevision: out.Revision, EffectivePermissions: out.EffectivePermissions}, nil
 }
 
 func applicationOperationsPermissionResponse(state domain.State) *pb.ApplicationOperationsPermissions {

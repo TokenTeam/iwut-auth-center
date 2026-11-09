@@ -16,6 +16,7 @@ import (
 	"iwut-auth-center/internal/reviewer/domain"
 	"iwut-auth-center/internal/reviewer/usecase"
 	scopemanagement "iwut-auth-center/internal/scopemanagement/domain"
+	scriptmaintainer "iwut-auth-center/internal/scriptmaintainer/domain"
 	"slices"
 )
 
@@ -33,10 +34,18 @@ func UserCapabilityIdentityMiddleware(v *UserIdentityVerifier) middleware.Middle
 			if !ok {
 				return nil, reviewerError(domain.ErrForbidden)
 			}
+			legacyScriptMethod := scriptMaintainerPermissionMethod(tr.Operation())
+			scriptMethod := legacyScriptMethod || scriptPermissionMethod(tr.Operation())
+			if ownApplicationOperationsPermissionMethod(tr.Operation()) || scriptMethod {
+				tr.ReplyHeader().Set("Cache-Control", "private, no-store")
+			}
+			if managedUserSearchMethod(tr.Operation()) {
+				return managedUserSearchIdentity(v)(next)(ctx, req)
+			}
 			if accountManagementMethod(tr.Operation()) {
 				return accountManagementIdentity(v)(next)(ctx, req)
 			}
-			if !isReviewerOperation(tr.Operation()) && !isPlatformAdministratorOperation(tr.Operation()) && !academicYearPolicyMethod(tr.Operation()) && !scopeManagementMethod(tr.Operation()) && !isDeveloperManagementOperation(tr.Operation()) && !applicationOperationsPermissionMethod(tr.Operation()) {
+			if !isReviewerOperation(tr.Operation()) && !isPlatformAdministratorOperation(tr.Operation()) && !academicYearPolicyMethod(tr.Operation()) && !scopeManagementMethod(tr.Operation()) && !isDeveloperManagementOperation(tr.Operation()) && !applicationOperationsPermissionMethod(tr.Operation()) && !scriptMethod {
 				return UserProfileIdentityMiddleware(v)(next)(ctx, req)
 			}
 			values := tr.RequestHeader().Values(UserIdentityHeader)
@@ -52,13 +61,18 @@ func UserCapabilityIdentityMiddleware(v *UserIdentityVerifier) middleware.Middle
 				return nil, transportStatus(codes.Unauthenticated, "INVALID_USER_IDENTITY", "invalid user identity")
 			}
 			required := domain.Manager
-			if isPlatformAdministratorOperation(tr.Operation()) || academicYearPolicyMethod(tr.Operation()) || scopeManagementMethod(tr.Operation()) || applicationOperationsPermissionMethod(tr.Operation()) {
+			if isPlatformAdministratorOperation(tr.Operation()) || academicYearPolicyMethod(tr.Operation()) || scopeManagementMethod(tr.Operation()) || applicationOperationsPermissionMethod(tr.Operation()) || scriptMethod {
 				required = admin.Manager
 			}
 			if isDeveloperManagementOperation(tr.Operation()) {
 				required = developer.DeveloperManager
 			}
-			if !slices.Contains(identity.Permissions, required) {
+			// Only this exact own-read operation is ordinary USER access. Never
+			// relax the target Get/Manage methods or the service as a whole.
+			if !ownApplicationOperationsPermissionMethod(tr.Operation()) && !slices.Contains(identity.Permissions, required) {
+				if scriptMethod {
+					return nil, scriptPermissionStatus(scriptmaintainer.ErrForbidden, legacyScriptMethod)
+				}
 				if scopeManagementMethod(tr.Operation()) {
 					return nil, scopeManagementError(scopemanagement.ErrForbidden)
 				}

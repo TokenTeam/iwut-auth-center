@@ -10,6 +10,7 @@ import (
 type Repository interface {
 	Manage(context.Context, domain.Command) (domain.State, error)
 	Get(context.Context, string, string) (domain.State, error)
+	GetOwn(context.Context, string) (domain.OwnState, error)
 }
 
 type Limiter interface {
