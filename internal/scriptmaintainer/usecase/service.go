@@ -38,3 +38,13 @@ func (s *Service) Manage(ctx context.Context, command domain.Command) (domain.St
 	}
 	return s.repository.Manage(ctx, command)
 }
+
+func (s *Service) GetOwn(ctx context.Context, actor string) (domain.State, error) {
+	if !domain.ValidID(actor) {
+		return domain.State{}, domain.ErrIdentity
+	}
+	if !s.limiter.AllowBegin(actor, time.Now()) {
+		return domain.State{}, domain.ErrRate
+	}
+	return s.repository.GetOwn(ctx, actor)
+}

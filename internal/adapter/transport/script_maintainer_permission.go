@@ -112,6 +112,8 @@ func scriptPermissionWire(data []byte, message any) bool {
 	var max protowire.Number
 	var enumMax [6]uint64
 	switch message.(type) {
+	case *scriptpb.GetOwnScriptPermissionsRequest:
+		return len(data) == 0
 	case *pb.GetScriptMaintainerPermissionRequest, *scriptpb.GetScriptPermissionsRequest:
 		max = 1
 	case *pb.ManageScriptMaintainerPermissionRequest:

@@ -67,9 +67,9 @@ func UserCapabilityIdentityMiddleware(v *UserIdentityVerifier) middleware.Middle
 			if isDeveloperManagementOperation(tr.Operation()) {
 				required = developer.DeveloperManager
 			}
-			// Only this exact own-read operation is ordinary USER access. Never
+			// Only the exact own-read operations are ordinary USER access. Never
 			// relax the target Get/Manage methods or the service as a whole.
-			if !ownApplicationOperationsPermissionMethod(tr.Operation()) && !slices.Contains(identity.Permissions, required) {
+			if !ownApplicationOperationsPermissionMethod(tr.Operation()) && !ownScriptPermissionMethod(tr.Operation()) && !slices.Contains(identity.Permissions, required) {
 				if scriptMethod {
 					return nil, scriptPermissionStatus(scriptmaintainer.ErrForbidden, legacyScriptMethod)
 				}

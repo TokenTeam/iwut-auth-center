@@ -8,6 +8,7 @@ import (
 )
 
 type Repository interface {
+	GetOwn(context.Context, string) (domain.State, error)
 	Get(context.Context, string, string) (domain.State, error)
 	Manage(context.Context, domain.Command) (domain.State, error)
 }

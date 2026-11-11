@@ -16,6 +16,7 @@ import (
 	emailpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/email_binding"
 	identitypb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/identity"
 	pb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/reviewer_permission"
+	scriptpermissionpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/script_permission"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
@@ -62,6 +63,15 @@ func runReviewerFlow(t *testing.T, env map[string]string, conn *grpc.ClientConn,
 	}
 	ordinary := issue(admin, "iwut-auth-center")
 	own := applicationoperationspb.NewApplicationOperationsPermissionServiceClient(conn)
+	beforeScriptBootstrap, err := scriptpermissionpb.NewScriptPermissionServiceClient(conn).GetOwnScriptPermissions(userctx(ordinary), &scriptpermissionpb.GetOwnScriptPermissionsRequest{})
+	if err != nil || len(beforeScriptBootstrap.GetPermissions()) != 5 {
+		t.Fatal("own script read depended on administrator initialization", beforeScriptBootstrap, err)
+	}
+	for _, item := range beforeScriptBootstrap.Permissions {
+		if item.Granted || item.Effective {
+			t.Fatal(beforeScriptBootstrap)
+		}
+	}
 	beforeBootstrap, err := own.GetOwnApplicationOperationsPermissions(userctx(ordinary), &applicationoperationspb.GetOwnApplicationOperationsPermissionsRequest{})
 	if err != nil || beforeBootstrap.SubjectAuthId != admin.AuthId || beforeBootstrap.PermissionRevision != 1 || len(beforeBootstrap.EffectivePermissions) != 0 {
 		t.Fatal("ordinary own read required administrator initialization", beforeBootstrap, err)

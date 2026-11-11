@@ -9,6 +9,7 @@ import (
 	drivermongo "go.mongodb.org/mongo-driver/v2/mongo"
 
 	admin "iwut-auth-center/internal/administrator/domain"
+	authport "iwut-auth-center/internal/authentication/port"
 	"iwut-auth-center/internal/scriptmaintainer/domain"
 )
 
@@ -22,19 +23,24 @@ func NewScriptMaintainerPermissionRepository(auth *AuthenticationRepository, rec
 }
 
 func (r *ScriptMaintainerPermissionRepository) transaction(ctx context.Context, actor string, run func(context.Context) error) error {
+	return r.withTransaction(ctx, func(tx context.Context) error {
+		switch err := r.auth.RequireAdministratorTx(tx, actor); {
+		case errors.Is(err, admin.ErrIdentity):
+			return domain.ErrIdentity
+		case errors.Is(err, admin.ErrForbidden):
+			return domain.ErrForbidden
+		case err != nil:
+			return err
+		default:
+			return run(tx)
+		}
+	})
+}
+
+func (r *ScriptMaintainerPermissionRepository) withTransaction(ctx context.Context, run func(context.Context) error) error {
 	var semantic error
 	err := r.auth.WithAuthTransaction(ctx, func(tx context.Context) error {
-		semantic = nil
-		switch e := r.auth.RequireAdministratorTx(tx, actor); {
-		case errors.Is(e, admin.ErrIdentity):
-			semantic = domain.ErrIdentity
-		case errors.Is(e, admin.ErrForbidden):
-			semantic = domain.ErrForbidden
-		case e != nil:
-			return e
-		default:
-			semantic = run(tx)
-		}
+		semantic = run(tx)
 		return semantic
 	})
 	if ctx.Err() != nil {
@@ -49,6 +55,59 @@ func (r *ScriptMaintainerPermissionRepository) transaction(ctx context.Context, 
 		}
 	}
 	return domain.ErrUnavailable
+}
+
+// GetOwn uses the verified current identity, not the administrator target reader.
+// Neither administrator initialization nor email/recovery participates in it.
+func (r *ScriptMaintainerPermissionRepository) GetOwn(ctx context.Context, actor string) (domain.State, error) {
+	var state domain.State
+	err := r.withTransaction(ctx, func(tx context.Context) error {
+		var raw bson.Raw
+		err := r.auth.database.Collection(PrincipalCollection).FindOne(tx, bson.M{"authId": actor}).Decode(&raw)
+		if errors.Is(err, drivermongo.ErrNoDocuments) {
+			return domain.ErrIdentity
+		}
+		if err != nil || !identityFields(raw, map[string]bson.Type{"authId": bson.TypeString, "principalType": bson.TypeString}) || raw.Lookup("authId").StringValue() != actor {
+			return domain.ErrUnavailable
+		}
+		switch raw.Lookup("principalType").StringValue() {
+		case "SYSTEM":
+			return domain.ErrIdentity
+		case "USER":
+		default:
+			return domain.ErrUnavailable
+		}
+		status, ok := raw.Lookup("accountStatus").StringValueOK()
+		if !ok || (status != "ACTIVE" && status != "DISABLED" && status != "CLOSED") {
+			return domain.ErrUnavailable
+		}
+		if status == "CLOSED" {
+			if !validClosedPrincipal(raw) {
+				return domain.ErrUnavailable
+			}
+			return domain.ErrIdentity
+		}
+		if err = r.auth.ConfirmIdentityTx(tx, actor); err != nil {
+			if errors.Is(err, authport.ErrAuthenticationFailed) {
+				return domain.ErrIdentity
+			}
+			return domain.ErrUnavailable
+		}
+		if !identityFields(raw, map[string]bson.Type{"permissions": bson.TypeArray, "permissionRevision": bson.TypeInt64}) {
+			return domain.ErrUnavailable
+		}
+		permissions, err := adminPermissions(raw.Lookup("permissions"))
+		if err != nil {
+			return domain.ErrUnavailable
+		}
+		snapshot := domain.Snapshot{AuthID: actor, AccountStatus: status, Permissions: permissions, Revision: raw.Lookup("permissionRevision").Int64()}
+		state, err = snapshot.State()
+		return err
+	})
+	if err != nil {
+		return domain.State{}, err
+	}
+	return state, nil
 }
 
 func (r *ScriptMaintainerPermissionRepository) snapshot(ctx context.Context, subject string) (domain.Snapshot, error) {

@@ -10,12 +10,16 @@ import (
 )
 
 func scriptPermissionMethod(operation string) bool {
-	return operation == pb.ScriptPermissionService_GetScriptPermissions_FullMethodName ||
+	return ownScriptPermissionMethod(operation) || operation == pb.ScriptPermissionService_GetScriptPermissions_FullMethodName ||
 		operation == pb.ScriptPermissionService_ManageScriptPermission_FullMethodName
 }
 
+func ownScriptPermissionMethod(operation string) bool {
+	return operation == pb.ScriptPermissionService_GetOwnScriptPermissions_FullMethodName
+}
+
 func scriptPermissionHTTPPath(path string) bool {
-	return path == "/v1/script-permissions:get" || path == "/v1/script-permissions:manage"
+	return path == "/v1/users/me/script-permissions" || path == "/v1/script-permissions:get" || path == "/v1/script-permissions:manage"
 }
 
 var scriptPermissionIDs = [...]string{
@@ -33,6 +37,18 @@ type ScriptPermissionService struct {
 
 func NewScriptPermissionService(service *usecase.Service) *ScriptPermissionService {
 	return &ScriptPermissionService{service: service}
+}
+
+func (s *ScriptPermissionService) GetOwnScriptPermissions(ctx context.Context, req *pb.GetOwnScriptPermissionsRequest) (*pb.ScriptPermissions, error) {
+	actor, err := profileAuthID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req == nil || len(req.ProtoReflect().GetUnknown()) != 0 {
+		return nil, scriptPermissionStatus(domain.ErrInvalid, false)
+	}
+	state, err := s.service.GetOwn(ctx, actor)
+	return scriptPermissionResponse(state, err)
 }
 
 func (s *ScriptPermissionService) GetScriptPermissions(ctx context.Context, req *pb.GetScriptPermissionsRequest) (*pb.ScriptPermissions, error) {

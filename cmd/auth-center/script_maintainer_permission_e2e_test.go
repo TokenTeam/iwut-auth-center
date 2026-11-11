@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -42,7 +43,8 @@ func runScriptPermissionFlow(t *testing.T, env map[string]string, conn *grpc.Cli
 		return khttp.Header(&header)
 	}
 
-	ordinary := metadata.NewOutgoingContext(t.Context(), metadata.Pairs("x-iwut-identity", issue(subject, "iwut-auth-center")))
+	ordinaryToken := issue(subject, "iwut-auth-center")
+	ordinary := metadata.NewOutgoingContext(t.Context(), metadata.Pairs("x-iwut-identity", ordinaryToken))
 	if _, err := client.GetScriptPermissions(ordinary, query); status.Code(err) != codes.PermissionDenied {
 		t.Fatal("ordinary user can query script grants", err)
 	}
@@ -100,6 +102,9 @@ func runScriptPermissionFlow(t *testing.T, env map[string]string, conn *grpc.Cli
 	check := func() {
 		t.Helper()
 		checkSnapshot(httpClient.GetScriptPermissions(t.Context(), query, authHeader()))
+		checkSnapshot(client.GetOwnScriptPermissions(ordinary, &pb.GetOwnScriptPermissionsRequest{}))
+		ownHeader := http.Header{"X-Iwut-Identity": []string{ordinaryToken}}
+		checkSnapshot(httpClient.GetOwnScriptPermissions(t.Context(), &pb.GetOwnScriptPermissionsRequest{}, khttp.Header(&ownHeader)))
 		maintain, err := legacyClient.GetScriptMaintainerPermission(adminctx, legacyQuery)
 		expected := granted[pb.ScriptPermission_SCRIPT_PERMISSION_MAINTAIN]
 		if err != nil || maintain.GetSubjectAuthId() != subject.AuthId || maintain.GetPermissionRevision() != revision || maintain.GetGranted() != expected || maintain.GetEffective() != expected {
@@ -133,6 +138,9 @@ func runScriptPermissionFlow(t *testing.T, env map[string]string, conn *grpc.Cli
 			if _, err := client.GetScriptPermissions(wrongAudience, query); status.Code(err) != codes.Unauthenticated {
 				t.Fatal("App audience accessed Auth permission query", err)
 			}
+			if _, err := client.GetOwnScriptPermissions(wrongAudience, &pb.GetOwnScriptPermissionsRequest{}); status.Code(err) != codes.Unauthenticated {
+				t.Fatal("App audience own-read", err)
+			}
 			scriptOperator := metadata.NewOutgoingContext(t.Context(), metadata.Pairs("x-iwut-identity", authToken))
 			req := &pb.ManageScriptPermissionRequest{SubjectAuthId: subject.AuthId, Permission: pb.ScriptPermission_SCRIPT_PERMISSION_REVIEW,
 				Action: pb.ScriptPermissionAction_SCRIPT_PERMISSION_ACTION_REVOKE, ExpectedPermissionRevision: proto.Int64(revision), Reason: "unauthorized"}
@@ -143,6 +151,49 @@ func runScriptPermissionFlow(t *testing.T, env map[string]string, conn *grpc.Cli
 	}
 
 	check()
+	unknownOwn := &pb.GetOwnScriptPermissionsRequest{}
+	unknownOwn.ProtoReflect().SetUnknown(protowire.AppendString(protowire.AppendTag(nil, 1, protowire.BytesType), "other"))
+	if _, err := client.GetOwnScriptPermissions(ordinary, unknownOwn); status.Code(err) != codes.InvalidArgument {
+		t.Fatal("own target injection", err)
+	}
+	if _, err := client.GetOwnScriptPermissions(t.Context(), &pb.GetOwnScriptPermissionsRequest{}); status.Code(err) != codes.Unauthenticated {
+		t.Fatal(err)
+	}
+	for _, input := range []struct {
+		suffix, body string
+		code         int
+	}{
+		{"", "", 200}, {"?subjectAuthId=other", "", 400}, {"", `{}`, 400}, {"", `{"subjectAuthId":"other"}`, 400},
+	} {
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+env[config.HTTPAddrEnv]+"/v1/users/me/script-permissions"+input.suffix, strings.NewReader(input.body))
+		req.Header.Set("X-Iwut-Identity", ordinaryToken)
+		response, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != input.code || response.Header.Get("Cache-Control") != "private, no-store" {
+			t.Fatal(response.StatusCode, string(body), response.Header)
+		}
+		if input.code == 200 {
+			var value struct {
+				Subject     string           `json:"subjectAuthId"`
+				Revision    string           `json:"permissionRevision"`
+				Permissions []map[string]any `json:"permissions"`
+			}
+			if json.Unmarshal(body, &value) != nil || value.Subject != subject.AuthId || value.Revision != "9" || len(value.Permissions) != 5 {
+				t.Fatal(string(body))
+			}
+			for _, item := range value.Permissions {
+				grant, ok1 := item["granted"].(bool)
+				effective, ok2 := item["effective"].(bool)
+				if !ok1 || !ok2 || grant || effective {
+					t.Fatal("zero permission flags omitted or invalid", string(body))
+				}
+			}
+		}
+	}
 	for _, malformed := range []struct {
 		selector pb.ScriptPermission
 		wire     uint64
@@ -188,5 +239,5 @@ func runScriptPermissionFlow(t *testing.T, env map[string]string, conn *grpc.Cli
 		}
 		check()
 	}
-	t.Log("UC038: five exact grants and revocations, shared legacy maintain state, fresh same-Session App JWS and real App verifier")
+	t.Log("UC038: five exact grants and revocations, ordinary USER own-read HTTP/gRPC matched every snapshot, shared legacy maintain state, fresh same-Session App JWS and real App verifier")
 }
