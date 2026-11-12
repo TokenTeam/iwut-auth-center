@@ -194,15 +194,30 @@ func TestOAuthE2E_ProductionWireActualAppProvider(t *testing.T) {
 	reviewID := submitted["review"].(map[string]any)["profileReviewId"].(string)
 	appCall("POST", prefix+"/profile-revisions/"+profileID+"/reviews/"+reviewID+"/decision", reviewToken, map[string]any{"expectedProfileRevisionRevision": "2", "expectedCurrentPublishedProfileRevisionId": nil, "expectedPolicyVersion": "app-profile-review-v1", "outcome": "APPROVE", "confirmedCheckIds": []string{"content-policy-reviewed", "icon-content-reviewed"}})
 	callback := "https://www.whut.edu.cn/oauth-callback"
-	version := appCall("POST", prefix+"/versions", ownerToken, map[string]any{"versionLabel": "1.0", "launchUrl": "https://www.whut.edu.cn/", "rpcApiMinVersion": 1, "rpcApiMaxVersionExclusive": 2, "requiredCapabilities": []string{}, "requiredScopes": []string{"openid"}, "optionalScopes": []string{"email", "campus.whut", "offline_access", "items.read", "profile.basic.name"}, "oauthRedirects": map[string]any{"pkceRedirectUris": []string{callback}, "confidentialRedirectUris": []string{callback + "-confidential"}}})
+	version := appCall("POST", prefix+"/versions", ownerToken, map[string]any{
+		"versionLabel":              "1.0",
+		"launchUrl":                 "https://www.whut.edu.cn/",
+		"rpcApiMinVersion":          1,
+		"rpcApiMaxVersionExclusive": 2,
+		"requiredCapabilities":      []string{},
+		"requiredScopes":            []string{"openid"},
+		"optionalScopes":            []string{"email", "campus.whut", "offline_access", "items.read", "profile.basic.name"},
+		"scriptReferences":          map[string]any{"items": []any{}},
+		"oauthRedirects": map[string]any{
+			"pkceRedirectUris":         []string{callback},
+			"confidentialRedirectUris": []string{callback + "-confidential"},
+		},
+	})
 	versionID := version["versionId"].(string)
 	vr := appCall("POST", prefix+"/versions/"+versionID+"/reviews", ownerToken, map[string]any{"expectedRevision": "1"})
 	vrID := vr["review"].(map[string]any)["reviewId"].(string)
-	// Read the real current policy instead of pinning an already-retired policy
-	// version in the fixture. New, unknown checks require updating this test.
+	// Read the policy bound to this review. The fixture confirms only known checks.
 	reviewPath := prefix + "/versions/" + versionID + "/reviews/" + vrID
 	detail := appCall("GET", reviewPath, reviewToken, nil)
-	policyContext := detail["currentPolicy"].(map[string]any)
+	policyContext, ok := detail["reviewPolicy"].(map[string]any)
+	if !ok {
+		t.Fatal("submitted review has no bound policy")
+	}
 	confirmedChecks := []string{"content-policy-reviewed", "launch-url-content-reviewed", "requested-access-reviewed", "oauth-redirects-reviewed"}
 	actualChecks := policyContext["requiredCheckIds"].([]any)
 	if len(actualChecks) != len(confirmedChecks) {
