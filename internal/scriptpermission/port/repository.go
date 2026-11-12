@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"iwut-auth-center/internal/scriptmaintainer/domain"
+	"iwut-auth-center/internal/scriptpermission/domain"
 )
 
 type Repository interface {

@@ -905,32 +905,26 @@ state transitions that consume these claims are a separate delivery.
 
 ## Script permissions (UC-AUTH-038)
 
-`AUTH_SCRIPT_PERMISSION_ENDPOINTS_ENABLED` enables
-`POST /v1/script-permissions:get` and `POST /v1/script-permissions:manage` and
-their native gRPC methods. The query takes `subjectAuthId` and returns the five
-grant/effective states and one shared revision. Manage additionally selects
-exactly one permission using the Proto enum (maintain, review, publish, suspend
-or restore), one action, the expected revision and a reason.
+`AUTH_SCRIPT_PERMISSION_ENDPOINTS_ENABLED=true` enables the exact HTTP routes
+`GET /v1/users/me/script-permissions`, `POST /v1/script-permissions:get`, and
+`POST /v1/script-permissions:manage` and their native gRPC methods. They require
+configured user endpoints and identity issuance. The empty own request requires
+an ACTIVE USER. Target requests require current full platform administrator
+authority. Both queries return review, publish, suspend, and restore in enum
+order (2–5), each with grant and effective state, and one shared revision.
+Manage selects one of these permissions, one action, a positive expected
+revision, and a trimmed reason of 1–1024 UTF-8 bytes.
 
-The independent legacy `AUTH_SCRIPT_MAINTAINER_PERMISSION_ENDPOINTS_ENABLED`
-switch and the new switch both default to false.
-When enabled, the exact HTTP `POST /v1/script-maintainer-permissions:get`
-and `POST /v1/script-maintainer-permissions:manage` and their native gRPC methods
-require a trusted Auth-audience USER identity and current full platform
-administrator authority. Query uses `subjectAuthId`. Manage also requires
-`action` (1 = GRANT, 2 = REVOKE in JSON), a positive `expectedPermissionRevision`, and a
-trimmed reason (1–1024 UTF-8 bytes). Only `app.script.maintain` can change.
+GRANT requires a verified target login email and operational recovery. Target
+query and REVOKE support DISABLED users without reading the target email
+directory. Permission CAS and audit commit together. The four permissions are
+projected to App-audience USER JWS only. Previously issued tokens retain the
+existing expiry window. App author eligibility uses the existing `developer_status`
+claim and App ownership rules.
 
-Both endpoint gates require configured user endpoints and identity issuance.
-They share one per-actor limiter and one target permission revision.
-GRANT additionally requires a verified target login email and operational
-email recovery readiness, using the same readiness inputs as UC027. Query and
-REVOKE do not read the target email directory and continue for DISABLED users.
-Permission CAS and audit commit together. Before rolling out the new signer,
-check for pre-existing script grants; the endpoint gate does not suppress their
-projection. Only App-audience USER JWS can contain script permissions, and old
-tokens retain the existing short revocation window. No default grant or schema
-migration is performed.
+The maintain-only service and `AUTH_SCRIPT_MAINTAINER_PERMISSION_ENDPOINTS_ENABLED`
+are retired. Enum number 1 is reserved. Historical `app.script.maintain` values
+are excluded from query states and new JWS projections.
 
 ## User account disable and restore (UC022)
 

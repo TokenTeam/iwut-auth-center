@@ -64,7 +64,7 @@ func runReviewerFlow(t *testing.T, env map[string]string, conn *grpc.ClientConn,
 	ordinary := issue(admin, "iwut-auth-center")
 	own := applicationoperationspb.NewApplicationOperationsPermissionServiceClient(conn)
 	beforeScriptBootstrap, err := scriptpermissionpb.NewScriptPermissionServiceClient(conn).GetOwnScriptPermissions(userctx(ordinary), &scriptpermissionpb.GetOwnScriptPermissionsRequest{})
-	if err != nil || len(beforeScriptBootstrap.GetPermissions()) != 5 {
+	if err != nil || len(beforeScriptBootstrap.GetPermissions()) != 4 {
 		t.Fatal("own script read depended on administrator initialization", beforeScriptBootstrap, err)
 	}
 	for _, item := range beforeScriptBootstrap.Permissions {

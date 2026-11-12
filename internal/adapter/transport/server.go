@@ -48,7 +48,6 @@ import (
 	reviewerpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/reviewer_permission"
 	scopecatalogv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/scope_catalog"
 	scopemanagementpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/scope_management"
-	scriptmaintainerpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/script_maintainer_permission"
 	scriptpermissionpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/script_permission"
 	sessionmanagementpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/session_management"
 	systemprincipalv1 "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/system_principal"
@@ -90,7 +89,6 @@ type UserEndpoints struct {
 	PlatformAdministrator         *PlatformAdministratorService
 	AcademicYearPolicy            *AcademicYearPolicyService
 	ApplicationOperations         *ApplicationOperationsPermissionService
-	ScriptMaintainerPermission    *ScriptMaintainerPermissionService
 	ScriptPermission              *ScriptPermissionService
 	ManagedUserSearch             *ManagedUserSearchService
 	ApplicationUserStorage        *ApplicationUserStorageService
@@ -254,9 +252,6 @@ func newGRPCServer(
 		if endpoints.ApplicationOperations != nil {
 			applicationoperationspb.RegisterApplicationOperationsPermissionServiceServer(server, endpoints.ApplicationOperations)
 		}
-		if endpoints.ScriptMaintainerPermission != nil {
-			scriptmaintainerpb.RegisterScriptMaintainerPermissionServiceServer(server, endpoints.ScriptMaintainerPermission)
-		}
 		if endpoints.ScriptPermission != nil {
 			scriptpermissionpb.RegisterScriptPermissionServiceServer(server, endpoints.ScriptPermission)
 		}
@@ -391,9 +386,6 @@ func newHTTPServer(configuration ServerConfig, verifier *ServiceIdentityVerifier
 		if endpoints.ApplicationOperations != nil {
 			applicationoperationspb.RegisterApplicationOperationsPermissionServiceHTTPServer(server, endpoints.ApplicationOperations)
 		}
-		if endpoints.ScriptMaintainerPermission != nil {
-			scriptmaintainerpb.RegisterScriptMaintainerPermissionServiceHTTPServer(server, endpoints.ScriptMaintainerPermission)
-		}
 		if endpoints.ScriptPermission != nil {
 			scriptpermissionpb.RegisterScriptPermissionServiceHTTPServer(server, endpoints.ScriptPermission)
 		}
@@ -423,7 +415,7 @@ func newHTTPServer(configuration ServerConfig, verifier *ServiceIdentityVerifier
 func authHTTPFilter(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		if r.URL.Path == "/v1/users/me/application-operation-capabilities" || scriptMaintainerPermissionHTTPPath(r.URL.Path) || scriptPermissionHTTPPath(r.URL.Path) || managedUserSearchHTTPPath(r.URL.Path) {
+		if r.URL.Path == "/v1/users/me/application-operation-capabilities" || scriptPermissionHTTPPath(r.URL.Path) || managedUserSearchHTTPPath(r.URL.Path) {
 			w.Header().Set("Cache-Control", "private, no-store")
 		}
 		if r.URL.RawQuery != "" || r.URL.ForceQuery {
@@ -471,8 +463,7 @@ func authHTTPDecoder(authenticationLimit int) khttp.DecodeRequestFunc {
 			limit = min(limit, 16*1024)
 		case *managedusersearchpb.SearchUsersRequest:
 			limit = min(limit, 16*1024)
-		case *scriptmaintainerpb.ManageScriptMaintainerPermissionRequest, *scriptmaintainerpb.GetScriptMaintainerPermissionRequest,
-			*scriptpermissionpb.GetScriptPermissionsRequest, *scriptpermissionpb.ManageScriptPermissionRequest:
+		case *scriptpermissionpb.GetScriptPermissionsRequest, *scriptpermissionpb.ManageScriptPermissionRequest:
 			limit = min(limit, 16*1024)
 		case *accountpb.ManageUserAccountStatusRequest, *accountpb.GetUserAccountStatusRequest:
 			limit = 16 * 1024
@@ -565,8 +556,6 @@ func invalidHTTPInput(r *http.Request) error {
 		reason = "INVALID_MANAGED_USER_SEARCH_REQUEST"
 	case scriptPermissionHTTPPath(r.URL.Path):
 		reason = "INVALID_SCRIPT_PERMISSION_REQUEST"
-	case scriptMaintainerPermissionHTTPPath(r.URL.Path):
-		reason = "INVALID_SCRIPT_MAINTAINER_PERMISSION_REQUEST"
 	case strings.Contains(r.URL.Path, "/application-operation-permissions"), r.URL.Path == "/v1/users/me/application-operation-capabilities":
 		reason = "INVALID_APPLICATION_OPERATIONS_PERMISSION_REQUEST"
 	case strings.HasPrefix(r.URL.Path, "/v1/users/me/application-grants"):
@@ -638,7 +627,7 @@ func oversizedHTTPInput(r *http.Request) error {
 func authHTTPResponseEncoder(w http.ResponseWriter, r *http.Request, value any) error {
 	w.Header().Set("Cache-Control", "no-store")
 	switch value.(type) {
-	case *applicationoperationspb.OwnApplicationOperationsPermissions, *scriptmaintainerpb.ScriptMaintainerPermission, *scriptpermissionpb.ScriptPermissions, *managedusersearchpb.SearchUsersResponse:
+	case *applicationoperationspb.OwnApplicationOperationsPermissions, *scriptpermissionpb.ScriptPermissions, *managedusersearchpb.SearchUsersResponse:
 		w.Header().Set("Cache-Control", "private, no-store")
 		w.Header().Set("Content-Type", "application/json")
 		data, err := (protojson.MarshalOptions{EmitUnpopulated: true}).Marshal(value.(proto.Message))
@@ -657,14 +646,14 @@ func authHTTPResponseEncoder(w http.ResponseWriter, r *http.Request, value any) 
 
 func authHTTPErrorEncoder(w http.ResponseWriter, r *http.Request, err error) {
 	w.Header().Set("Cache-Control", "no-store")
-	if r.URL.Path == "/v1/users/me/application-operation-capabilities" || scriptMaintainerPermissionHTTPPath(r.URL.Path) || scriptPermissionHTTPPath(r.URL.Path) || managedUserSearchHTTPPath(r.URL.Path) {
+	if r.URL.Path == "/v1/users/me/application-operation-capabilities" || scriptPermissionHTTPPath(r.URL.Path) || managedUserSearchHTTPPath(r.URL.Path) {
 		w.Header().Set("Cache-Control", "private, no-store")
 	}
 	converted := kerrors.FromError(err)
 	// RESOURCE_EXHAUSTED covers both rate limiting (429) and payload limits
 	// (413); the UC's stable reason determines which HTTP status applies.
 	switch converted.Reason {
-	case "SCRIPT_MAINTAINER_PERMISSION_GRANT_BLOCKED", "SCRIPT_PERMISSION_GRANT_BLOCKED":
+	case "SCRIPT_PERMISSION_GRANT_BLOCKED":
 		converted.Code = http.StatusConflict
 	case "MANAGED_USER_SEARCH_REQUEST_TOO_LARGE", "SCOPE_MANAGEMENT_REQUEST_TOO_LARGE", "PASSWORD_REQUEST_TOO_LARGE", "CREDENTIAL_MANAGEMENT_REQUEST_TOO_LARGE", "DEVELOPER_WITHDRAWAL_REQUEST_TOO_LARGE", "DEVELOPER_APPLICATION_REQUEST_TOO_LARGE", "EMAIL_LOGIN_REQUEST_TOO_LARGE", "EMAIL_REQUEST_TOO_LARGE", "REGISTRATION_INPUT_TOO_LARGE", "AUTHENTICATION_INPUT_TOO_LARGE", profiledomain.ErrLimit.Error():
 		converted.Code = http.StatusRequestEntityTooLarge

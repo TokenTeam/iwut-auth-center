@@ -38,8 +38,8 @@ func TestApplicationOperationsPermissionsProjectOnlyToAppAudience(t *testing.T) 
 func TestScriptPermissionProjectionIsExplicitAndAppOnly(t *testing.T) {
 	now := time.Now()
 	original := []string{"app.application.restore", "app.application.suspend", "app.profile.review", "app.version.review"}
-	for _, grant := range []string{"", "app.script.maintain", "app.script.review", "app.script.publish", "app.script.suspend", "app.script.restore"} {
-		permissions := append(slices.Clone(original), "app.script.*", "app.script.unknown", "auth.platform-admin.manage")
+	for _, grant := range []string{"", "app.script.review", "app.script.publish", "app.script.suspend", "app.script.restore"} {
+		permissions := append(slices.Clone(original), "app.script.*", "app.script.unknown", "app.script.maintain", "auth.platform-admin.manage")
 		want := slices.Clone(original)
 		if grant != "" {
 			permissions = append(permissions, grant)

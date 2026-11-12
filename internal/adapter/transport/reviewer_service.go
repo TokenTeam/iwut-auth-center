@@ -16,7 +16,7 @@ import (
 	"iwut-auth-center/internal/reviewer/domain"
 	"iwut-auth-center/internal/reviewer/usecase"
 	scopemanagement "iwut-auth-center/internal/scopemanagement/domain"
-	scriptmaintainer "iwut-auth-center/internal/scriptmaintainer/domain"
+	scriptpermission "iwut-auth-center/internal/scriptpermission/domain"
 	"slices"
 )
 
@@ -34,8 +34,7 @@ func UserCapabilityIdentityMiddleware(v *UserIdentityVerifier) middleware.Middle
 			if !ok {
 				return nil, reviewerError(domain.ErrForbidden)
 			}
-			legacyScriptMethod := scriptMaintainerPermissionMethod(tr.Operation())
-			scriptMethod := legacyScriptMethod || scriptPermissionMethod(tr.Operation())
+			scriptMethod := scriptPermissionMethod(tr.Operation())
 			if ownApplicationOperationsPermissionMethod(tr.Operation()) || scriptMethod {
 				tr.ReplyHeader().Set("Cache-Control", "private, no-store")
 			}
@@ -71,7 +70,7 @@ func UserCapabilityIdentityMiddleware(v *UserIdentityVerifier) middleware.Middle
 			// relax the target Get/Manage methods or the service as a whole.
 			if !ownApplicationOperationsPermissionMethod(tr.Operation()) && !ownScriptPermissionMethod(tr.Operation()) && !slices.Contains(identity.Permissions, required) {
 				if scriptMethod {
-					return nil, scriptPermissionStatus(scriptmaintainer.ErrForbidden, legacyScriptMethod)
+					return nil, scriptPermissionStatus(scriptpermission.ErrForbidden)
 				}
 				if scopeManagementMethod(tr.Operation()) {
 					return nil, scopeManagementError(scopemanagement.ErrForbidden)

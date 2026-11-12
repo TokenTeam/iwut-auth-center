@@ -49,7 +49,7 @@ type Config struct {
 	CredentialManagement            *CredentialManagement
 	Password                        *Password
 	ApplicationOperationsPermission *ApplicationOperationsPermission
-	ScriptMaintainerPermission      *ScriptMaintainerPermission
+	ScriptPermission                *ScriptPermission
 	ApplicationClosure              *ApplicationClosure
 	ApplicationCloseReauth          *ApplicationCloseReauth
 	SessionManagement               *SessionManagement
@@ -247,7 +247,7 @@ func Load(lookup LookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	scriptMaintainerPermission, err := loadScriptMaintainerPermission(lookup, userEndpoints, issuance)
+	scriptPermission, err := loadScriptPermission(lookup, userEndpoints, issuance)
 	if err != nil {
 		return Config{}, err
 	}
@@ -321,7 +321,7 @@ func Load(lookup LookupEnv) (Config, error) {
 		ScopeManagementEnabled:          scopeManagementEnabled,
 		CredentialManagement:            credentialManagement,
 		ApplicationOperationsPermission: applicationOperationsPermission,
-		ScriptMaintainerPermission:      scriptMaintainerPermission,
+		ScriptPermission:                scriptPermission,
 		ManagedUserSearchEnabled:        managedUserSearchEnabled,
 		ApplicationClosure:              applicationClosure,
 		ApplicationCloseReauth:          applicationCloseReauth,

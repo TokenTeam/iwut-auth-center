@@ -20,7 +20,7 @@ import (
 	identityusecase "iwut-auth-center/internal/identity/usecase"
 	managedusersearchusecase "iwut-auth-center/internal/managedusersearch/usecase"
 	reviewerusecase "iwut-auth-center/internal/reviewer/usecase"
-	scriptmaintainerusecase "iwut-auth-center/internal/scriptmaintainer/usecase"
+	scriptpermissionusecase "iwut-auth-center/internal/scriptpermission/usecase"
 	sessionmanagementusecase "iwut-auth-center/internal/sessionmanagement/usecase"
 	"time"
 
@@ -252,21 +252,14 @@ func provideUserEndpoints(configuration config.Config, database *drivermongo.Dat
 		}
 		managedUserSearch = transport.NewManagedUserSearchService(managedusersearchusecase.New(mongoadapter.NewManagedUserSearchRepository(repository), limiter))
 	}
-	var scriptMaintainer *transport.ScriptMaintainerPermissionService
 	var scriptPermission *transport.ScriptPermissionService
-	if sc := configuration.ScriptMaintainerPermission; sc != nil {
-		repo := mongoadapter.NewScriptMaintainerPermissionRepository(repository, sc.RecoveryReady && emailLoginService != nil)
+	if sc := configuration.ScriptPermission; sc != nil {
+		repo := mongoadapter.NewScriptPermissionRepository(repository, sc.RecoveryReady && emailLoginService != nil)
 		gate, err := deviceprotocol.NewLimiter(deviceprotocol.RateLimits{BeginGlobal: 1000000, CompleteGlobal: 1000000, BeginSource: 60, CompleteLocator: 10, MaxBuckets: 4096})
 		if err != nil {
 			return nil, err
 		}
-		service := scriptmaintainerusecase.New(repo, gate)
-		if sc.LegacyEnabled {
-			scriptMaintainer = transport.NewScriptMaintainerPermissionService(service)
-		}
-		if sc.Enabled {
-			scriptPermission = transport.NewScriptPermissionService(service)
-		}
+		scriptPermission = transport.NewScriptPermissionService(scriptpermissionusecase.New(repo, gate))
 	}
 	var accountManagement *transport.AccountManagementService
 	if ac := configuration.AccountManagement; ac != nil {
@@ -326,7 +319,6 @@ func provideUserEndpoints(configuration config.Config, database *drivermongo.Dat
 	}
 	return &transport.UserEndpoints{SessionManagement: sessionManagement, DeveloperManagement: developerManagement, AccountManagement: accountManagement, PlatformAdministrator: administrator, AcademicYearPolicy: academicYearPolicy,
 		ApplicationOperations:         applicationOperations,
-		ScriptMaintainerPermission:    scriptMaintainer,
 		ScriptPermission:              scriptPermission,
 		ManagedUserSearch:             managedUserSearch,
 		CredentialManagement:          credentialRuntime.Service,

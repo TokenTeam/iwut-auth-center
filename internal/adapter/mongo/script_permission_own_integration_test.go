@@ -10,19 +10,22 @@ import (
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	account "iwut-auth-center/internal/account/domain"
-	d "iwut-auth-center/internal/scriptmaintainer/domain"
+	d "iwut-auth-center/internal/scriptpermission/domain"
 )
 
 func TestScriptOwnMongoBeforeBootstrapWithoutRecoveryAndFailure(t *testing.T) {
 	fixture, db, subject := reviewerFixture(t, true)
-	repo := NewScriptMaintainerPermissionRepository(fixture.authentication, false)
+	repo := NewScriptPermissionRepository(fixture.authentication, false)
 	self := account.WithIdentity(t.Context(), subject, 1)
 	// Remove the email directory completely. Own discovery must not read it.
 	if _, err := db.Collection(EmailDirectoryCollection).DeleteOne(t.Context(), bson.M{"authId": subject}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": subject}, bson.M{"$set": bson.M{"permissions": bson.A{"app.script.maintain"}}}); err != nil {
+		t.Fatal(err)
+	}
 	state, err := repo.GetOwn(self, subject)
-	if err != nil || state.AuthID != subject || state.Revision != 1 || len(state.Permissions) != 5 {
+	if err != nil || state.AuthID != subject || state.Revision != 1 || len(state.Permissions) != 4 {
 		t.Fatal(state, err)
 	}
 	for _, item := range state.Permissions {
@@ -90,7 +93,7 @@ func TestScriptOwnMongoBeforeBootstrapWithoutRecoveryAndFailure(t *testing.T) {
 func TestScriptOwnMongoConcurrentGrantAndSnapshot(t *testing.T) {
 	fixture, db, subject := reviewerFixture(t)
 	adminVerifiedEmail(t, db, subject)
-	repo := NewScriptMaintainerPermissionRepository(fixture.authentication, true)
+	repo := NewScriptPermissionRepository(fixture.authentication, true)
 	self := account.WithIdentity(t.Context(), subject, 1)
 	actor := account.WithIdentity(t.Context(), "admin", 1)
 	start := make(chan struct{})

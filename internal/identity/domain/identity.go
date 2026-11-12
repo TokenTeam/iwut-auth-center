@@ -79,7 +79,7 @@ func Project(s Snapshot, audience, jti string, now time.Time, ttl time.Duration)
 	if audience == AppAudience {
 		allowed = []string{
 			"app.application.restore", "app.application.search", "app.application.suspend", "app.profile.review",
-			"app.script.maintain", "app.script.publish", "app.script.restore", "app.script.review", "app.script.suspend",
+			"app.script.publish", "app.script.restore", "app.script.review", "app.script.suspend",
 			"app.version.review",
 		}
 		c.DeveloperStatus = s.DeveloperStatus

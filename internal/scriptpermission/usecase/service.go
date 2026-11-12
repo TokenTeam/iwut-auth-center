@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"iwut-auth-center/internal/scriptmaintainer/domain"
-	"iwut-auth-center/internal/scriptmaintainer/port"
+	"iwut-auth-center/internal/scriptpermission/domain"
+	"iwut-auth-center/internal/scriptpermission/port"
 )
 
 type Service struct {

@@ -12,7 +12,6 @@ import (
 	"time"
 
 	authpb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/authentication"
-	legacy "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/script_maintainer_permission"
 	pb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/script_permission"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"github.com/google/uuid"
@@ -22,6 +21,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"iwut-auth-center/internal/config"
 )
@@ -29,9 +29,7 @@ import (
 func runScriptPermissionFlow(t *testing.T, env map[string]string, conn *grpc.ClientConn, appURL string, subject *authpb.UserRegistrationResult, adminctx context.Context, adminToken string, issue func(*authpb.UserRegistrationResult, string) string) {
 	t.Helper()
 	client := pb.NewScriptPermissionServiceClient(conn)
-	legacyClient := legacy.NewScriptMaintainerPermissionServiceClient(conn)
 	query := &pb.GetScriptPermissionsRequest{SubjectAuthId: subject.AuthId}
-	legacyQuery := &legacy.GetScriptMaintainerPermissionRequest{SubjectAuthId: subject.AuthId}
 	httpTransport, err := khttp.NewClient(t.Context(), khttp.WithEndpoint("http://"+env[config.HTTPAddrEnv]), khttp.WithTimeout(5*time.Second))
 	if err != nil {
 		t.Fatal(err)
@@ -78,7 +76,6 @@ func runScriptPermissionFlow(t *testing.T, env map[string]string, conn *grpc.Cli
 		id   string
 		code pb.ScriptPermission
 	}{
-		{"app.script.maintain", pb.ScriptPermission_SCRIPT_PERMISSION_MAINTAIN},
 		{"app.script.review", pb.ScriptPermission_SCRIPT_PERMISSION_REVIEW},
 		{"app.script.publish", pb.ScriptPermission_SCRIPT_PERMISSION_PUBLISH},
 		{"app.script.suspend", pb.ScriptPermission_SCRIPT_PERMISSION_SUSPEND},
@@ -90,7 +87,7 @@ func runScriptPermissionFlow(t *testing.T, env map[string]string, conn *grpc.Cli
 	checkSnapshot := func(state *pb.ScriptPermissions, err error) {
 		t.Helper()
 		if err != nil || state.GetSubjectAuthId() != subject.AuthId || state.GetPermissionRevision() != revision || len(state.GetPermissions()) != len(permissions) {
-			t.Fatalf("expected five states at revision %d: %v, %v", revision, state, err)
+			t.Fatalf("expected four states at revision %d: %v, %v", revision, state, err)
 		}
 		for i, permission := range permissions {
 			item := state.Permissions[i]
@@ -105,12 +102,6 @@ func runScriptPermissionFlow(t *testing.T, env map[string]string, conn *grpc.Cli
 		checkSnapshot(client.GetOwnScriptPermissions(ordinary, &pb.GetOwnScriptPermissionsRequest{}))
 		ownHeader := http.Header{"X-Iwut-Identity": []string{ordinaryToken}}
 		checkSnapshot(httpClient.GetOwnScriptPermissions(t.Context(), &pb.GetOwnScriptPermissionsRequest{}, khttp.Header(&ownHeader)))
-		maintain, err := legacyClient.GetScriptMaintainerPermission(adminctx, legacyQuery)
-		expected := granted[pb.ScriptPermission_SCRIPT_PERMISSION_MAINTAIN]
-		if err != nil || maintain.GetSubjectAuthId() != subject.AuthId || maintain.GetPermissionRevision() != revision || maintain.GetGranted() != expected || maintain.GetEffective() != expected {
-			t.Fatal("legacy query diverged", maintain, err)
-		}
-
 		token := issue(subject, "iwut-app-center")
 		payload := identityPayload(t, token)
 		jti, ok := payload["jti"].(string)
@@ -150,6 +141,36 @@ func runScriptPermissionFlow(t *testing.T, env map[string]string, conn *grpc.Cli
 		}
 	}
 
+	postRaw := func(path, body string, want int) {
+		t.Helper()
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://"+env[config.HTTPAddrEnv]+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Iwut-Identity", adminToken)
+		response, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		if response.StatusCode != want {
+			t.Fatalf("%s: got HTTP %d, want %d", path, response.StatusCode, want)
+		}
+	}
+	for _, method := range []string{"GetScriptMaintainerPermission", "ManageScriptMaintainerPermission"} {
+		const legacyService = "/auth_center.v1.script_maintainer_permission.ScriptMaintainerPermissionService/"
+		if err := conn.Invoke(adminctx, legacyService+method, &emptypb.Empty{}, &emptypb.Empty{}); status.Code(err) != codes.Unimplemented {
+			t.Fatal("retired RPC", method, err)
+		}
+	}
+	for _, action := range []string{"get", "manage"} {
+		postRaw("/v1/script-maintainer-permissions:"+action, `{}`, http.StatusNotFound)
+	}
+	for _, selector := range []string{`1`, `"SCRIPT_PERMISSION_MAINTAIN"`} {
+		body := fmt.Sprintf(`{"subjectAuthId":%q,"permission":%s,"action":1,"expectedPermissionRevision":"%d","reason":"retired enum"}`, subject.AuthId, selector, revision)
+		postRaw("/v1/script-permissions:manage", body, http.StatusBadRequest)
+	}
 	check()
 	unknownOwn := &pb.GetOwnScriptPermissionsRequest{}
 	unknownOwn.ProtoReflect().SetUnknown(protowire.AppendString(protowire.AppendTag(nil, 1, protowire.BytesType), "other"))
@@ -182,7 +203,7 @@ func runScriptPermissionFlow(t *testing.T, env map[string]string, conn *grpc.Cli
 				Revision    string           `json:"permissionRevision"`
 				Permissions []map[string]any `json:"permissions"`
 			}
-			if json.Unmarshal(body, &value) != nil || value.Subject != subject.AuthId || value.Revision != "9" || len(value.Permissions) != 5 {
+			if json.Unmarshal(body, &value) != nil || value.Subject != subject.AuthId || value.Revision != "9" || len(value.Permissions) != 4 {
 				t.Fatal(string(body))
 			}
 			for _, item := range value.Permissions {
@@ -198,7 +219,8 @@ func runScriptPermissionFlow(t *testing.T, env map[string]string, conn *grpc.Cli
 		selector pb.ScriptPermission
 		wire     uint64
 	}{
-		{pb.ScriptPermission_SCRIPT_PERMISSION_MAINTAIN, 2},
+		{pb.ScriptPermission_SCRIPT_PERMISSION_REVIEW, 3},
+		{pb.ScriptPermission_SCRIPT_PERMISSION_UNSPECIFIED, 1},
 		{pb.ScriptPermission_SCRIPT_PERMISSION_UNSPECIFIED, 1<<32 | 1},
 		{pb.ScriptPermission_SCRIPT_PERMISSION_UNSPECIFIED, 0},
 	} {
@@ -206,7 +228,7 @@ func runScriptPermissionFlow(t *testing.T, env map[string]string, conn *grpc.Cli
 			Action: pb.ScriptPermissionAction_SCRIPT_PERMISSION_ACTION_GRANT, ExpectedPermissionRevision: proto.Int64(revision), Reason: "invalid selector"}
 		req.ProtoReflect().SetUnknown(protowire.AppendVarint(protowire.AppendTag(nil, 2, protowire.VarintType), malformed.wire))
 		if _, err := client.ManageScriptPermission(adminctx, req); status.Code(err) != codes.InvalidArgument {
-			t.Fatal("duplicate/overflowing/unspecified wire enum accepted", malformed, err)
+			t.Fatal("duplicate/overflowing/retired/unspecified wire enum accepted", malformed, err)
 		}
 	}
 	for _, permission := range permissions {
@@ -222,22 +244,12 @@ func runScriptPermissionFlow(t *testing.T, env map[string]string, conn *grpc.Cli
 		expected := revision
 		revision++
 		delete(granted, permission.code)
-		if permission.code == pb.ScriptPermission_SCRIPT_PERMISSION_MAINTAIN {
-			state, err := legacyClient.ManageScriptMaintainerPermission(adminctx, &legacy.ManageScriptMaintainerPermissionRequest{
-				SubjectAuthId: subject.AuthId, Action: legacy.ScriptMaintainerPermissionAction_SCRIPT_MAINTAINER_PERMISSION_ACTION_REVOKE,
-				ExpectedPermissionRevision: proto.Int64(expected), Reason: "legacy revoke",
-			})
-			if err != nil || state.GetGranted() || state.GetEffective() || state.GetPermissionRevision() != revision {
-				t.Fatal("legacy revoke did not update shared state", state, err)
-			}
-		} else {
-			state, err := client.ManageScriptPermission(adminctx, &pb.ManageScriptPermissionRequest{
-				SubjectAuthId: subject.AuthId, Permission: permission.code, Action: pb.ScriptPermissionAction_SCRIPT_PERMISSION_ACTION_REVOKE,
-				ExpectedPermissionRevision: proto.Int64(expected), Reason: "end of script duty",
-			})
-			checkSnapshot(state, err)
-		}
+		state, err := client.ManageScriptPermission(adminctx, &pb.ManageScriptPermissionRequest{
+			SubjectAuthId: subject.AuthId, Permission: permission.code, Action: pb.ScriptPermissionAction_SCRIPT_PERMISSION_ACTION_REVOKE,
+			ExpectedPermissionRevision: proto.Int64(expected), Reason: "end of script duty",
+		})
+		checkSnapshot(state, err)
 		check()
 	}
-	t.Log("UC038: five exact grants and revocations, ordinary USER own-read HTTP/gRPC matched every snapshot, shared legacy maintain state, fresh same-Session App JWS and real App verifier")
+	t.Log("UC038: four exact grants and revocations, ordinary USER own-read HTTP/gRPC matched every snapshot, retired maintain RPC/HTTP/enum rejected, fresh same-Session App JWS and real App verifier")
 }

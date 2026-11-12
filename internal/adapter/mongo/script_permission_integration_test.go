@@ -13,16 +13,16 @@ import (
 	account "iwut-auth-center/internal/account/domain"
 	appops "iwut-auth-center/internal/applicationoperations/domain"
 	identity "iwut-auth-center/internal/identity/domain"
-	"iwut-auth-center/internal/scriptmaintainer/domain"
+	"iwut-auth-center/internal/scriptpermission/domain"
 )
 
-func TestScriptMaintainerMongoSharedCASAndRevokeWithoutEmail(t *testing.T) {
+func TestScriptPermissionMongoSharedCASAndRevokeWithoutEmail(t *testing.T) {
 	reviewer, db, subject := reviewerFixture(t)
 	adminVerifiedEmail(t, db, subject)
 	ctx := account.WithIdentity(t.Context(), "admin", 1)
-	repo := NewScriptMaintainerPermissionRepository(reviewer.authentication, true)
-	recoveryOff := NewScriptMaintainerPermissionRepository(reviewer.authentication, false)
-	grant := domain.Command{ActorAuthID: "admin", SubjectAuthID: subject, Permission: domain.MaintainPermission, Action: "GRANT", ExpectedRevision: 1, Reason: "script maintenance duty"}
+	repo := NewScriptPermissionRepository(reviewer.authentication, true)
+	recoveryOff := NewScriptPermissionRepository(reviewer.authentication, false)
+	grant := domain.Command{ActorAuthID: "admin", SubjectAuthID: subject, Permission: domain.PublishPermission, Action: "GRANT", ExpectedRevision: 1, Reason: "script publication duty"}
 	if _, err := recoveryOff.Manage(ctx, grant); !errors.Is(err, domain.ErrGrantBlocked) {
 		t.Fatal("grant without recovery", err)
 	}
@@ -37,7 +37,7 @@ func TestScriptMaintainerMongoSharedCASAndRevokeWithoutEmail(t *testing.T) {
 	}
 	results := make(chan result, 2)
 	var wait sync.WaitGroup
-	for _, permission := range []string{domain.MaintainPermission, domain.ReviewPermission} {
+	for _, permission := range []string{domain.PublishPermission, domain.ReviewPermission} {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
@@ -110,11 +110,11 @@ func TestScriptMaintainerMongoSharedCASAndRevokeWithoutEmail(t *testing.T) {
 	}
 }
 
-func TestScriptMaintainerMongoAuditFailureRollsBack(t *testing.T) {
+func TestScriptPermissionMongoAuditFailureRollsBack(t *testing.T) {
 	reviewer, db, subject := reviewerFixture(t)
 	adminVerifiedEmail(t, db, subject)
 	ctx := account.WithIdentity(t.Context(), "admin", 1)
-	repo := NewScriptMaintainerPermissionRepository(reviewer.authentication, true)
+	repo := NewScriptPermissionRepository(reviewer.authentication, true)
 	if err := db.RunCommand(t.Context(), bson.D{{Key: "collMod", Value: PermissionAuditCollection}, {Key: "validator", Value: bson.M{"permission": bson.M{"$ne": domain.PublishPermission}}}}).Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestScriptMaintainerMongoAuditFailureRollsBack(t *testing.T) {
 	}
 }
 
-func TestScriptMaintainerMongoIssuanceAndRevokeCommitOrder(t *testing.T) {
+func TestScriptPermissionMongoIssuanceAndRevokeCommitOrder(t *testing.T) {
 	issuer, db, session, _, _, _ := identityFixture(t)
 	if err := EnsureReviewerSchema(t.Context(), db); err != nil {
 		t.Fatal(err)
@@ -136,11 +136,14 @@ func TestScriptMaintainerMongoIssuanceAndRevokeCommitOrder(t *testing.T) {
 	adminCandidate(t, db, "admin")
 	seedAdministrator(t, issuer.authentication, "admin")
 	adminVerifiedEmail(t, db, session.AuthID)
+	if _, err := db.Collection(PrincipalCollection).UpdateOne(t.Context(), bson.M{"authId": session.AuthID}, bson.M{"$addToSet": bson.M{"permissions": "app.script.maintain"}}); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 	actor := account.WithIdentity(ctx, "admin", 1)
-	repo := NewScriptMaintainerPermissionRepository(issuer.authentication, true)
-	command := domain.Command{ActorAuthID: "admin", SubjectAuthID: session.AuthID, Permission: domain.MaintainPermission, Action: "GRANT", ExpectedRevision: 1, Reason: "issuance ordering"}
+	repo := NewScriptPermissionRepository(issuer.authentication, true)
+	command := domain.Command{ActorAuthID: "admin", SubjectAuthID: session.AuthID, Permission: domain.PublishPermission, Action: "GRANT", ExpectedRevision: 1, Reason: "issuance ordering"}
 	if _, err := repo.Manage(actor, command); err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +153,7 @@ func TestScriptMaintainerMongoIssuanceAndRevokeCommitOrder(t *testing.T) {
 	go func() {
 		issueResult <- issuer.WithSession(ctx, session.TokenDigest, func(snapshot identity.Snapshot, now time.Time) error {
 			claims, err := identity.Project(snapshot, identity.AppAudience, "first", now, time.Minute)
-			if err != nil || !slices.Equal(claims.Permissions, []string{domain.MaintainPermission, "app.version.review"}) {
+			if err != nil || !slices.Equal(claims.Permissions, []string{domain.PublishPermission, "app.version.review"}) {
 				return errors.New("in-flight issue did not see the committed grant")
 			}
 			once.Do(func() { close(started) })

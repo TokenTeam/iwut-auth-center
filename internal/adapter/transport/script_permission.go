@@ -5,8 +5,8 @@ import (
 
 	pb "github.com/TokenTeam/iwut-api-proto/gen/go/auth_center/v1/script_permission"
 
-	"iwut-auth-center/internal/scriptmaintainer/domain"
-	"iwut-auth-center/internal/scriptmaintainer/usecase"
+	"iwut-auth-center/internal/scriptpermission/domain"
+	"iwut-auth-center/internal/scriptpermission/usecase"
 )
 
 func scriptPermissionMethod(operation string) bool {
@@ -23,11 +23,10 @@ func scriptPermissionHTTPPath(path string) bool {
 }
 
 var scriptPermissionIDs = [...]string{
-	pb.ScriptPermission_SCRIPT_PERMISSION_MAINTAIN: domain.MaintainPermission,
-	pb.ScriptPermission_SCRIPT_PERMISSION_REVIEW:   domain.ReviewPermission,
-	pb.ScriptPermission_SCRIPT_PERMISSION_PUBLISH:  domain.PublishPermission,
-	pb.ScriptPermission_SCRIPT_PERMISSION_SUSPEND:  domain.SuspendPermission,
-	pb.ScriptPermission_SCRIPT_PERMISSION_RESTORE:  domain.RestorePermission,
+	pb.ScriptPermission_SCRIPT_PERMISSION_REVIEW:  domain.ReviewPermission,
+	pb.ScriptPermission_SCRIPT_PERMISSION_PUBLISH: domain.PublishPermission,
+	pb.ScriptPermission_SCRIPT_PERMISSION_SUSPEND: domain.SuspendPermission,
+	pb.ScriptPermission_SCRIPT_PERMISSION_RESTORE: domain.RestorePermission,
 }
 
 type ScriptPermissionService struct {
@@ -45,7 +44,7 @@ func (s *ScriptPermissionService) GetOwnScriptPermissions(ctx context.Context, r
 		return nil, err
 	}
 	if req == nil || len(req.ProtoReflect().GetUnknown()) != 0 {
-		return nil, scriptPermissionStatus(domain.ErrInvalid, false)
+		return nil, scriptPermissionStatus(domain.ErrInvalid)
 	}
 	state, err := s.service.GetOwn(ctx, actor)
 	return scriptPermissionResponse(state, err)
@@ -57,7 +56,7 @@ func (s *ScriptPermissionService) GetScriptPermissions(ctx context.Context, req 
 		return nil, err
 	}
 	if req == nil || len(req.ProtoReflect().GetUnknown()) != 0 {
-		return nil, scriptPermissionStatus(domain.ErrInvalid, false)
+		return nil, scriptPermissionStatus(domain.ErrInvalid)
 	}
 	state, err := s.service.Get(ctx, actor, req.SubjectAuthId)
 	return scriptPermissionResponse(state, err)
@@ -69,8 +68,8 @@ func (s *ScriptPermissionService) ManageScriptPermission(ctx context.Context, re
 		return nil, err
 	}
 	if req == nil || req.ExpectedPermissionRevision == nil || len(req.ProtoReflect().GetUnknown()) != 0 ||
-		req.Permission <= 0 || int(req.Permission) >= len(scriptPermissionIDs) {
-		return nil, scriptPermissionStatus(domain.ErrInvalid, false)
+		req.Permission <= 0 || int(req.Permission) >= len(scriptPermissionIDs) || scriptPermissionIDs[req.Permission] == "" {
+		return nil, scriptPermissionStatus(domain.ErrInvalid)
 	}
 	var action string
 	switch req.Action {
@@ -79,7 +78,7 @@ func (s *ScriptPermissionService) ManageScriptPermission(ctx context.Context, re
 	case pb.ScriptPermissionAction_SCRIPT_PERMISSION_ACTION_REVOKE:
 		action = "REVOKE"
 	default:
-		return nil, scriptPermissionStatus(domain.ErrInvalid, false)
+		return nil, scriptPermissionStatus(domain.ErrInvalid)
 	}
 	state, err := s.service.Manage(ctx, domain.Command{
 		ActorAuthID: actor, SubjectAuthID: req.SubjectAuthId, Permission: scriptPermissionIDs[req.Permission],
@@ -90,13 +89,16 @@ func (s *ScriptPermissionService) ManageScriptPermission(ctx context.Context, re
 
 func scriptPermissionResponse(state domain.State, err error) (*pb.ScriptPermissions, error) {
 	if err != nil {
-		return nil, scriptPermissionStatus(err, false)
+		return nil, scriptPermissionStatus(err)
 	}
 	result := &pb.ScriptPermissions{SubjectAuthId: state.AuthID, PermissionRevision: state.Revision}
-	for i, id := range scriptPermissionIDs[1:] {
+	for code, id := range scriptPermissionIDs {
+		if id == "" {
+			continue
+		}
 		permission := state.For(id)
 		result.Permissions = append(result.Permissions, &pb.ScriptPermissionState{
-			Permission: pb.ScriptPermission(i + 1), Granted: permission.Granted, Effective: permission.Effective,
+			Permission: pb.ScriptPermission(code), Granted: permission.Granted, Effective: permission.Effective,
 		})
 	}
 	return result, nil

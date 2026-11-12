@@ -10,19 +10,19 @@ import (
 
 	admin "iwut-auth-center/internal/administrator/domain"
 	authport "iwut-auth-center/internal/authentication/port"
-	"iwut-auth-center/internal/scriptmaintainer/domain"
+	"iwut-auth-center/internal/scriptpermission/domain"
 )
 
-type ScriptMaintainerPermissionRepository struct {
+type ScriptPermissionRepository struct {
 	auth          *AuthenticationRepository
 	recoveryReady bool
 }
 
-func NewScriptMaintainerPermissionRepository(auth *AuthenticationRepository, recoveryReady bool) *ScriptMaintainerPermissionRepository {
-	return &ScriptMaintainerPermissionRepository{auth: auth, recoveryReady: recoveryReady}
+func NewScriptPermissionRepository(auth *AuthenticationRepository, recoveryReady bool) *ScriptPermissionRepository {
+	return &ScriptPermissionRepository{auth: auth, recoveryReady: recoveryReady}
 }
 
-func (r *ScriptMaintainerPermissionRepository) transaction(ctx context.Context, actor string, run func(context.Context) error) error {
+func (r *ScriptPermissionRepository) transaction(ctx context.Context, actor string, run func(context.Context) error) error {
 	return r.withTransaction(ctx, func(tx context.Context) error {
 		switch err := r.auth.RequireAdministratorTx(tx, actor); {
 		case errors.Is(err, admin.ErrIdentity):
@@ -37,7 +37,7 @@ func (r *ScriptMaintainerPermissionRepository) transaction(ctx context.Context, 
 	})
 }
 
-func (r *ScriptMaintainerPermissionRepository) withTransaction(ctx context.Context, run func(context.Context) error) error {
+func (r *ScriptPermissionRepository) withTransaction(ctx context.Context, run func(context.Context) error) error {
 	var semantic error
 	err := r.auth.WithAuthTransaction(ctx, func(tx context.Context) error {
 		semantic = run(tx)
@@ -59,7 +59,7 @@ func (r *ScriptMaintainerPermissionRepository) withTransaction(ctx context.Conte
 
 // GetOwn uses the verified current identity, not the administrator target reader.
 // Neither administrator initialization nor email/recovery participates in it.
-func (r *ScriptMaintainerPermissionRepository) GetOwn(ctx context.Context, actor string) (domain.State, error) {
+func (r *ScriptPermissionRepository) GetOwn(ctx context.Context, actor string) (domain.State, error) {
 	var state domain.State
 	err := r.withTransaction(ctx, func(tx context.Context) error {
 		var raw bson.Raw
@@ -110,7 +110,7 @@ func (r *ScriptMaintainerPermissionRepository) GetOwn(ctx context.Context, actor
 	return state, nil
 }
 
-func (r *ScriptMaintainerPermissionRepository) snapshot(ctx context.Context, subject string) (domain.Snapshot, error) {
+func (r *ScriptPermissionRepository) snapshot(ctx context.Context, subject string) (domain.Snapshot, error) {
 	var raw bson.Raw
 	err := r.auth.database.Collection(PrincipalCollection).FindOne(ctx, bson.M{"authId": subject}).Decode(&raw)
 	if errors.Is(err, drivermongo.ErrNoDocuments) {
@@ -148,7 +148,7 @@ func (r *ScriptMaintainerPermissionRepository) snapshot(ctx context.Context, sub
 	return snapshot, err
 }
 
-func (r *ScriptMaintainerPermissionRepository) Get(ctx context.Context, actor, subject string) (domain.State, error) {
+func (r *ScriptPermissionRepository) Get(ctx context.Context, actor, subject string) (domain.State, error) {
 	var state domain.State
 	err := r.transaction(ctx, actor, func(tx context.Context) error {
 		snapshot, err := r.snapshot(tx, subject)
@@ -164,7 +164,7 @@ func (r *ScriptMaintainerPermissionRepository) Get(ctx context.Context, actor, s
 	return state, nil
 }
 
-func (r *ScriptMaintainerPermissionRepository) Manage(ctx context.Context, command domain.Command) (domain.State, error) {
+func (r *ScriptPermissionRepository) Manage(ctx context.Context, command domain.Command) (domain.State, error) {
 	var state domain.State
 	eventID := uuid.NewString()
 	err := r.transaction(ctx, command.ActorAuthID, func(tx context.Context) error {

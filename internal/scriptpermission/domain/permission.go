@@ -9,27 +9,26 @@ import (
 )
 
 const (
-	MaintainPermission = "app.script.maintain"
-	ReviewPermission   = "app.script.review"
-	PublishPermission  = "app.script.publish"
-	SuspendPermission  = "app.script.suspend"
-	RestorePermission  = "app.script.restore"
+	ReviewPermission  = "app.script.review"
+	PublishPermission = "app.script.publish"
+	SuspendPermission = "app.script.suspend"
+	RestorePermission = "app.script.restore"
 )
 
-var permissions = [...]string{MaintainPermission, ReviewPermission, PublishPermission, SuspendPermission, RestorePermission}
+var permissions = [...]string{ReviewPermission, PublishPermission, SuspendPermission, RestorePermission}
 
 func KnownPermission(id string) bool { return slices.Contains(permissions[:], id) }
 
 var (
 	ErrIdentity     = errors.New("INVALID_USER_IDENTITY")
-	ErrInvalid      = errors.New("INVALID_SCRIPT_MAINTAINER_PERMISSION_REQUEST")
-	ErrForbidden    = errors.New("SCRIPT_MAINTAINER_PERMISSION_FORBIDDEN")
-	ErrSubject      = errors.New("SCRIPT_MAINTAINER_PERMISSION_SUBJECT_UNAVAILABLE")
-	ErrConflict     = errors.New("SCRIPT_MAINTAINER_PERMISSION_CONFLICT")
-	ErrGrantBlocked = errors.New("SCRIPT_MAINTAINER_PERMISSION_GRANT_BLOCKED")
+	ErrInvalid      = errors.New("INVALID_SCRIPT_PERMISSION_REQUEST")
+	ErrForbidden    = errors.New("SCRIPT_PERMISSION_FORBIDDEN")
+	ErrSubject      = errors.New("SCRIPT_PERMISSION_SUBJECT_UNAVAILABLE")
+	ErrConflict     = errors.New("SCRIPT_PERMISSION_CONFLICT")
+	ErrGrantBlocked = errors.New("SCRIPT_PERMISSION_GRANT_BLOCKED")
 	ErrExhausted    = errors.New("PERMISSION_REVISION_EXHAUSTED")
-	ErrRate         = errors.New("SCRIPT_MAINTAINER_PERMISSION_RATE_LIMITED")
-	ErrUnavailable  = errors.New("SCRIPT_MAINTAINER_PERMISSION_UNAVAILABLE")
+	ErrRate         = errors.New("SCRIPT_PERMISSION_RATE_LIMITED")
+	ErrUnavailable  = errors.New("SCRIPT_PERMISSION_UNAVAILABLE")
 )
 
 type PermissionState struct {
